@@ -131,17 +131,18 @@ export default function CommunityPage() {
     }
   }
 
-  const filteredUsers = users.filter(user =>
-    user.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    user.firstName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    user.lastName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    user.interests.some(interest => 
-      interest.toLowerCase().includes(searchQuery.toLowerCase())
-    ) ||
-    user.skills.some(skill => 
-      skill.toLowerCase().includes(searchQuery.toLowerCase())
-    )
-  )
+  const filteredUsers = users.filter(user => {
+  const query = searchQuery.toLowerCase()
+
+  const usernameMatch = user.username?.toLowerCase().includes(query) ?? false
+  const firstNameMatch = user.firstName?.toLowerCase().includes(query) ?? false
+  const lastNameMatch = user.lastName?.toLowerCase().includes(query) ?? false
+  const interestsMatch = user.interests?.some(interest => interest?.toLowerCase().includes(query)) ?? false
+  const skillsMatch = user.skills?.some(skill => skill?.toLowerCase().includes(query)) ?? false
+
+  return usernameMatch || firstNameMatch || lastNameMatch || interestsMatch || skillsMatch
+})
+
 
   const featuredDesigners = users
     .filter(user => user.role === 'designer')
