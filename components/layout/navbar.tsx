@@ -294,12 +294,8 @@ export function Navbar() {
     return mainNav
   }
 
-  const getCreateHref = (role: string) => {
-    if (role === 'designer' || role === 'admin') {
-      return '/designer/create'
-    }
-    return '/create/post'
-  }
+  const getCreateHref = () => '/dashboard/posts/create'
+
 
   const currentRole = userData?.role || 'user'
   const allNavigationItems = getNavigationForRole(currentRole)
@@ -438,16 +434,17 @@ export function Navbar() {
                 <NotificationBell />
 
                 {/* Create Button */}
-                <Link href={getCreateHref(currentRole)}>
-                  <Button 
-                    variant="default" 
-                    size="sm"
-                    className="rounded-xl hidden sm:flex items-center space-x-1 bg-rose-600 hover:bg-rose-700 text-white transition-all duration-200 shrink-0"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span className="hidden lg:inline">Create</span>
-                  </Button>
-                </Link>
+                <Link href={getCreateHref()}>
+  <Button 
+    variant="default" 
+    size="sm"
+    className="rounded-xl hidden sm:flex items-center space-x-1 bg-rose-600 hover:bg-rose-700 text-white transition-all duration-200 shrink-0"
+  >
+    <Plus className="w-4 h-4" />
+    <span className="hidden lg:inline">Create</span>
+  </Button>
+</Link>
+
 
                 {/* User Button with Role */}
                 <div className="flex items-center space-x-2">
