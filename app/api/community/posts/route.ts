@@ -7,9 +7,14 @@ export async function GET(request: NextRequest) {
     await connectToDatabase()
 
     const posts = await Post.find({ isPublic: true })
-      .populate('author', 'firstName lastName username avatar')
-      .sort({ createdAt: -1 })
-      .limit(50)
+  .populate({
+    path: 'author',
+    select: 'firstName lastName username avatar',
+    strictPopulate: false    // prevents crashes
+  })
+  .sort({ createdAt: -1 })
+  .limit(50)
+
 
     return NextResponse.json({ posts })
   } catch (error: any) {
