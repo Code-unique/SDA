@@ -576,7 +576,12 @@ export function Navbar() {
                   </div>
                   
                   <div className="mt-2 grid grid-cols-2 gap-2">
-                    <Link href={getCreateHref(currentRole)} className="block" onClick={() => setMobileMenuOpen(false)}>
+                    <Link 
+  href={getCreateHref()}  // no argument
+  className="block"
+  onClick={() => setMobileMenuOpen(false)}
+>
+
                       <Button className="w-full rounded-xl bg-rose-600 hover:bg-rose-700 text-white transition-all duration-200">
                         <Plus className="w-4 h-4 mr-2" />
                         Create
