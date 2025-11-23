@@ -22,11 +22,11 @@ import { cn } from '@/lib/utils'
 const dashboardLinks = [
   { name: 'Overview', href: '/dashboard', icon: LayoutDashboard },
   { name: 'My Posts', href: '/dashboard/posts', icon: Image },
-  { name: 'My Courses', href: '/dashboard/courses', icon: BookOpen },
-  { name: 'Community', href: '/dashboard/community', icon: Users },
-  { name: 'Messages', href: '/dashboard/messages', icon: MessageSquare },
-  { name: 'AI Coach', href: '/dashboard/ai-coach', icon: Sparkles },
-  { name: 'Settings', href: '/dashboard/settings', icon: Settings },
+  { name: 'My Courses', href: '/courses', icon: BookOpen },
+  { name: 'Community', href: '/community', icon: Users },
+  { name: 'Messages', href: '/messages', icon: MessageSquare },
+  { name: 'AI Coach', href: '/ai-coach', icon: Sparkles },
+  { name: 'Settings', href: '/settings', icon: Settings },
 ]
 
 export function DashboardNav() {
