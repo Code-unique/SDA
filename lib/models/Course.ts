@@ -1,15 +1,15 @@
-//lib/models/Course.ts
+// lib/models/Course.ts
 import mongoose, { Document, Schema, Model } from 'mongoose'
 
-export interface ICloudinaryAsset {
-  public_id: string
-  secure_url: string
-  format: string
-  resource_type: 'image' | 'video'
+// S3 Asset Interface (updated)
+export interface IS3Asset {
+  key: string
+  url: string
+  size: number
+  type: 'image' | 'video'
+  duration?: number
   width?: number
   height?: number
-  duration?: number
-  bytes: number
 }
 
 export interface ILessonResource {
@@ -23,7 +23,7 @@ export interface ILesson {
   title: string
   description: string
   content: string
-  video: ICloudinaryAsset
+  video: IS3Asset
   duration: number
   isPreview: boolean
   resources: ILessonResource[]
@@ -66,8 +66,8 @@ export interface ICourse extends Document {
   level: 'beginner' | 'intermediate' | 'advanced'
   category: string
   tags: string[]
-  thumbnail: ICloudinaryAsset
-  previewVideo?: ICloudinaryAsset
+  thumbnail: IS3Asset
+  previewVideo?: IS3Asset
   modules: IModule[]
   ratings: IRating[]
   students: IStudentProgress[]
@@ -83,15 +83,15 @@ export interface ICourse extends Document {
   updatedAt: Date
 }
 
-const CloudinaryAssetSchema = new Schema<ICloudinaryAsset>({
-  public_id: { type: String, required: true },
-  secure_url: { type: String, required: true },
-  format: { type: String, required: true },
-  resource_type: { type: String, enum: ['image', 'video'], required: true },
-  width: Number,
-  height: Number,
+// UPDATED: S3 Asset Schema (replaces CloudinaryAssetSchema)
+const S3AssetSchema = new Schema<IS3Asset>({
+  key: { type: String, required: true },
+  url: { type: String, required: true },
+  size: { type: Number, required: true },
+  type: { type: String, enum: ['image', 'video'], required: true },
   duration: Number,
-  bytes: { type: Number, required: true }
+  width: Number,
+  height: Number
 })
 
 const LessonResourceSchema = new Schema<ILessonResource>({
@@ -104,7 +104,7 @@ const LessonSchema = new Schema<ILesson>({
   title: { type: String, required: true },
   description: { type: String, required: true },
   content: { type: String, required: true },
-  video: { type: CloudinaryAssetSchema, required: true },
+  video: { type: S3AssetSchema, required: true },
   duration: { type: Number, default: 0, min: 0 },
   isPreview: { type: Boolean, default: false },
   resources: [LessonResourceSchema],
@@ -183,10 +183,10 @@ const CourseSchema = new Schema<ICourse>(
       type: String 
     }],
     thumbnail: { 
-      type: CloudinaryAssetSchema, 
+      type: S3AssetSchema, 
       required: true 
     },
-    previewVideo: CloudinaryAssetSchema,
+    previewVideo: S3AssetSchema,
     modules: [ModuleSchema],
     ratings: [RatingSchema],
     students: [StudentProgressSchema],
@@ -267,7 +267,6 @@ CourseSchema.pre('save', function(next) {
 })
 
 // Indexes for better query performance
-
 CourseSchema.index({ instructor: 1 })
 CourseSchema.index({ isPublished: 1, isFeatured: 1 })
 CourseSchema.index({ category: 1 })

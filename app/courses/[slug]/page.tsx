@@ -36,15 +36,14 @@ import {
   Check
 } from 'lucide-react'
 
-interface CloudinaryAsset {
-  public_id: string
-  secure_url: string
-  format: string
-  resource_type: 'image' | 'video'
+interface S3Asset {
+  key: string
+  url: string
+  size: number
+  type: 'image' | 'video'
+  duration?: number
   width?: number
   height?: number
-  duration?: number
-  bytes: number
 }
 
 interface Lesson {
@@ -54,7 +53,7 @@ interface Lesson {
   duration: number
   isPreview: boolean
   order: number
-  video?: CloudinaryAsset
+  video?: S3Asset
   resources: Array<{
     title: string
     url: string
@@ -91,8 +90,8 @@ interface Course {
   level: 'beginner' | 'intermediate' | 'advanced'
   category: string
   tags: string[]
-  thumbnail: CloudinaryAsset
-  previewVideo?: CloudinaryAsset
+  thumbnail: S3Asset
+  previewVideo?: S3Asset
   totalStudents: number
   averageRating: number
   totalReviews: number
@@ -188,39 +187,35 @@ export default function CourseDetailPage() {
       const processedCourse: Course = {
         ...data,
         thumbnail: data.thumbnail ? {
-          public_id: data.thumbnail.public_id,
-          secure_url: data.thumbnail.secure_url,
-          format: data.thumbnail.format,
-          resource_type: 'image',
-          bytes: data.thumbnail.bytes,
+          key: data.thumbnail.key || data.thumbnail.public_id,
+          url: data.thumbnail.url || data.thumbnail.secure_url,
+          size: data.thumbnail.size || data.thumbnail.bytes,
+          type: data.thumbnail.type || 'image',
           width: data.thumbnail.width,
           height: data.thumbnail.height
         } : {
-          public_id: 'default',
-          secure_url: '/default-thumbnail.jpg',
-          format: 'jpg',
-          resource_type: 'image',
-          bytes: 0
+          key: 'default',
+          url: '/default-thumbnail.jpg',
+          size: 0,
+          type: 'image'
         },
         previewVideo: data.previewVideo ? {
-          public_id: data.previewVideo.public_id,
-          secure_url: data.previewVideo.secure_url,
-          format: data.previewVideo.format,
-          resource_type: 'video',
-          duration: data.previewVideo.duration,
-          bytes: data.previewVideo.bytes
+          key: data.previewVideo.key || data.previewVideo.public_id,
+          url: data.previewVideo.url || data.previewVideo.secure_url,
+          size: data.previewVideo.size || data.previewVideo.bytes,
+          type: data.previewVideo.type || 'video',
+          duration: data.previewVideo.duration
         } : undefined,
         modules: data.modules?.map((module: any) => ({
           ...module,
           lessons: module.lessons?.map((lesson: any) => ({
             ...lesson,
             video: lesson.video ? {
-              public_id: lesson.video.public_id,
-              secure_url: lesson.video.secure_url,
-              format: lesson.video.format,
-              resource_type: 'video',
-              duration: lesson.video.duration,
-              bytes: lesson.video.bytes
+              key: lesson.video.key || lesson.video.public_id,
+              url: lesson.video.url || lesson.video.secure_url,
+              size: lesson.video.size || lesson.video.bytes,
+              type: lesson.video.type || 'video',
+              duration: lesson.video.duration
             } : undefined
           })) || []
         })) || []
@@ -550,7 +545,7 @@ export default function CourseDetailPage() {
 
   const handlePreviewLesson = (lesson: Lesson) => {
     if (lesson.video && lesson.isPreview) {
-      window.open(lesson.video.secure_url, '_blank')
+      window.open(lesson.video.url, '_blank')
     }
   }
 
@@ -792,7 +787,7 @@ export default function CourseDetailPage() {
                   {activeLesson.video ? (
                     <div className="w-full h-[400px] lg:h-[500px] bg-black flex items-center justify-center">
                       <video
-                        src={activeLesson.video.secure_url}
+                        src={activeLesson.video.url}
                         controls
                         className="w-full h-full"
                       />
@@ -1007,6 +1002,10 @@ export default function CourseDetailPage() {
                   src={course.instructor.avatar || '/default-avatar.png'}
                   alt={course.instructor.username}
                   className="w-12 h-12 rounded-full"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement
+                    target.src = '/default-avatar.png'
+                  }}
                 />
                 <div>
                   <p className="font-semibold">
@@ -1026,7 +1025,7 @@ export default function CourseDetailPage() {
                   {/* Course Thumbnail */}
                   <div className="mb-4 rounded-xl overflow-hidden">
                     <img
-                      src={course.thumbnail.secure_url}
+                      src={course.thumbnail.url}
                       alt={course.title}
                       className="w-full h-48 object-cover"
                       onError={(e) => {
@@ -1067,7 +1066,7 @@ export default function CourseDetailPage() {
                       <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700">
                         <div className="h-32 bg-black flex items-center justify-center">
                           <video
-                            src={course.previewVideo.secure_url}
+                            src={course.previewVideo.url}
                             controls
                             className="w-full h-full"
                           />
@@ -1557,7 +1556,7 @@ export default function CourseDetailPage() {
                       onClick={() => router.push(`/courses/${similarCourse.slug}`)}
                     >
                       <img
-                        src={similarCourse.thumbnail.secure_url}
+                        src={similarCourse.thumbnail.url}
                         alt={similarCourse.title}
                         className="w-12 h-12 rounded-lg object-cover"
                         onError={(e) => {

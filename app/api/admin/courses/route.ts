@@ -1,8 +1,9 @@
+// app/api/admin/courses/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { currentUser } from '@clerk/nextjs/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import User from '@/lib/models/User'
-import Course, { ICloudinaryAsset } from '@/lib/models/Course'
+import Course, { IS3Asset } from '@/lib/models/Course'
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,6 +20,8 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
+    
+    console.log('📝 Received course data:', JSON.stringify(body, null, 2))
     
     const {
       title,
@@ -77,7 +80,7 @@ export async function POST(request: NextRequest) {
         title: lesson.title,
         description: lesson.description,
         content: lesson.content || '',
-        video: lesson.video, // Should be ICloudinaryAsset
+        video: lesson.video as IS3Asset,
         duration: lesson.duration || 0,
         isPreview: lesson.isPreview || false,
         resources: lesson.resources || [],
@@ -96,23 +99,22 @@ export async function POST(request: NextRequest) {
       level,
       category,
       tags: tags || [],
-      thumbnail: thumbnail as ICloudinaryAsset,
-      previewVideo: previewVideo as ICloudinaryAsset | undefined,
+      thumbnail: thumbnail as IS3Asset,
+      previewVideo: previewVideo as IS3Asset | undefined,
       modules: transformedModules,
       instructor: adminUser._id,
       requirements: requirements || [],
       learningOutcomes: learningOutcomes || [],
       isPublished: false,
       isFeatured: !!isFeatured,
-      // These will be auto-calculated by the schema pre-save hook
-      totalStudents: 0,
-      averageRating: 0,
-      totalDuration: 0,
-      totalLessons: 0
     }
+
+    console.log('🎯 Creating course with data:', JSON.stringify(courseData, null, 2))
 
     const course = await Course.create(courseData)
     await course.populate('instructor', 'username firstName lastName avatar')
+
+    console.log('✅ Course created successfully:', course._id)
 
     return NextResponse.json({
       _id: course._id,
@@ -141,7 +143,9 @@ export async function POST(request: NextRequest) {
       updatedAt: course.updatedAt
     })
   } catch (error: any) {
-    console.error('Error creating course:', error)
+    console.error('❌ Error creating course:', error)
+    console.error('❌ Error details:', error.message)
+    console.error('❌ Error stack:', error.stack)
     
     if (error.code === 11000) {
       return NextResponse.json(
