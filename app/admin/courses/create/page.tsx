@@ -1,7 +1,7 @@
 // app/admin/courses/create/page.tsx
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, forwardRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@clerk/nextjs'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -73,204 +73,229 @@ interface Module {
   order: number
 }
 
+// Upload Optimization Tips Component
+const UploadOptimizationTips = ({ fileSize }: { fileSize: number }) => {
+  const sizeInMB = fileSize / (1024 * 1024)
+  
+  return (
+    <Card className="rounded-2xl border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20">
+      <CardContent className="p-4">
+        <div className="flex items-start space-x-3">
+          <AlertCircle className="w-5 h-5 text-yellow-600 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-yellow-800 dark:text-yellow-300 mb-2">
+              Large File Upload in Progress ({sizeInMB.toFixed(2)}MB)
+            </p>
+            <ul className="text-xs text-yellow-700 dark:text-yellow-400 space-y-1">
+              <li>• Keep this page open during upload</li>
+              <li>• Use a stable internet connection</li>
+              <li>• Avoid uploading multiple large files simultaneously</li>
+              <li>• Upload time depends on your internet speed</li>
+            </ul>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 // Custom hook for S3 file uploads with Clerk auth
 const useS3Upload = () => {
   const [uploadProgress, setUploadProgress] = useState<UploadProgress>({})
   const { getToken, userId } = useAuth()
 
-  // Enhanced uploadFile function in useS3Upload hook
-
   const uploadFile = async (
-  file: File,
-  type: 'thumbnail' | 'previewVideo' | 'lessonVideo',
-  identifier: string
-) => {
-  const maxSize = type === 'thumbnail' ? 5 * 1024 * 1024 : 5 * 1024 * 1024 * 1024
-  if (file.size > maxSize) {
-    throw new Error(
-      `File too large. Maximum size: ${type === 'thumbnail' ? '5MB' : '5GB'}`
+    file: File,
+    type: 'thumbnail' | 'previewVideo' | 'lessonVideo',
+    identifier: string
+  ) => {
+    const maxSize = type === 'thumbnail' ? 5 * 1024 * 1024 : 5 * 1024 * 1024 * 1024
+    if (file.size > maxSize) {
+      throw new Error(
+        `File too large. Maximum size: ${type === 'thumbnail' ? '5MB' : '5GB'}`
+      )
+    }
+
+    // Calculate dynamic timeout (1 minute per 100MB + 10 minutes buffer)
+    const timeoutDuration = Math.max(
+      10 * 60 * 1000, // Minimum 10 minutes
+      Math.ceil(file.size / (100 * 1024 * 1024)) * 60 * 1000 + 10 * 60 * 1000
     )
-  }
 
-  // Calculate dynamic timeout (1 minute per 100MB + 10 minutes buffer)
-  const timeoutDuration = Math.max(
-    10 * 60 * 1000, // Minimum 10 minutes
-    Math.ceil(file.size / (100 * 1024 * 1024)) * 60 * 1000 + 10 * 60 * 1000
-  )
-
-  try {
-    setUploadProgress(prev => ({
-      ...prev,
-      [identifier]: { 
-        progress: 0, 
-        fileName: file.name, 
-        type,
-        status: 'generating-url'
-      }
-    }))
-
-    console.log('🔐 Getting Clerk token...')
-    const token = await getToken()
-    
-    if (!token || !userId) {
-      throw new Error('Authentication failed. Please sign in again.')
-    }
-
-    console.log('✅ Token obtained, making upload request...')
-
-    // Get presigned URL
-    const presignedResponse = await fetch('/api/admin/upload', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        fileName: file.name,
-        fileType: file.type,
-        fileSize: file.size,
-        folder: `${type}s`
-      }),
-    })
-
-    console.log('📡 Upload API response status:', presignedResponse.status)
-
-    if (!presignedResponse.ok) {
-      const errorText = await presignedResponse.text()
-      let errorData
-      try {
-        errorData = JSON.parse(errorText)
-      } catch {
-        errorData = { error: 'Failed to get upload URL' }
-      }
-      throw new Error(errorData.error || `Upload failed with status: ${presignedResponse.status}`)
-    }
-
-    const { presignedUrl, fileUrl, fileKey } = await presignedResponse.json()
-
-    console.log('✅ Presigned URL received, starting upload...')
-    console.log(`⏰ Using timeout: ${timeoutDuration / 1000 / 60} minutes for ${(file.size / (1024 * 1024)).toFixed(2)}MB file`)
-
-    setUploadProgress(prev => ({
-      ...prev,
-      [identifier]: { 
-        ...prev[identifier], 
-        status: 'uploading',
-        progress: 5
-      }
-    }))
-
-    // Enhanced upload with better progress tracking
-    const uploadResult = await new Promise<S3Asset>((resolve, reject) => {
-      const xhr = new XMLHttpRequest()
-      const uploadStartTime = Date.now()
-      let lastProgressUpdate = Date.now()
-      let lastLoaded = 0
-
-      xhr.upload.addEventListener('progress', (event) => {
-        if (event.lengthComputable) {
-          const currentTime = Date.now()
-          const progress = 5 + (event.loaded / event.total) * 90 // 5% to 95%
-          
-          // Calculate speed (only update every 500ms to reduce noise)
-          if (currentTime - lastProgressUpdate > 500) {
-            const timeDiff = (currentTime - lastProgressUpdate) / 1000
-            const loadedDiff = event.loaded - lastLoaded
-            const uploadSpeed = loadedDiff / timeDiff // bytes per second
-            
-            console.log(`📊 Upload progress: ${Math.round(progress)}% - Speed: ${(uploadSpeed / (1024 * 1024)).toFixed(2)} MB/s`)
-            
-            lastProgressUpdate = currentTime
-            lastLoaded = event.loaded
-          }
-
-          setUploadProgress(prev => ({
-            ...prev,
-            [identifier]: { 
-              ...prev[identifier], 
-              progress: Math.round(progress)
-            }
-          }))
+    try {
+      setUploadProgress(prev => ({
+        ...prev,
+        [identifier]: { 
+          progress: 0, 
+          fileName: file.name, 
+          type,
+          status: 'generating-url'
         }
-      })
+      }))
 
-      xhr.addEventListener('load', () => {
-        const uploadTime = (Date.now() - uploadStartTime) / 1000
-        console.log(`✅ Upload completed in ${uploadTime} seconds`)
-        
-        if (xhr.status === 200) {
-          setUploadProgress(prev => ({
-            ...prev,
-            [identifier]: { 
-              ...prev[identifier], 
-              progress: 100,
-              status: 'completed'
-            }
-          }))
-
-          resolve({
-            key: fileKey,
-            url: fileUrl,
-            size: file.size,
-            type: type === 'thumbnail' ? 'image' : 'video',
-            duration: type !== 'thumbnail' ? 0 : undefined
-          })
-        } else {
-          console.error('❌ Upload failed with status:', xhr.status)
-          reject(new Error(`Upload failed with status: ${xhr.status}`))
-        }
-      })
-
-      xhr.addEventListener('error', (e) => {
-        console.error('❌ Network error during upload:', e)
-        reject(new Error('Network error during upload. Please check your connection.'))
-      })
-
-      xhr.addEventListener('abort', () => {
-        console.error('❌ Upload was cancelled')
-        reject(new Error('Upload was cancelled'))
-      })
-
-      // Set timeout and handle timeout gracefully
-      xhr.timeout = timeoutDuration
-      xhr.ontimeout = () => {
-        const elapsed = (Date.now() - uploadStartTime) / 1000
-        const uploadedMB = (lastLoaded / (1024 * 1024)).toFixed(2)
-        console.error(`❌ Upload timeout after ${elapsed} seconds, uploaded: ${uploadedMB}MB`)
-        reject(new Error(`Upload timeout after ${Math.round(elapsed / 60)} minutes. Uploaded ${uploadedMB}MB of ${(file.size / (1024 * 1024)).toFixed(2)}MB.`))
-      }
-
-      console.log('📤 Starting direct upload to S3...')
-      xhr.open('PUT', presignedUrl)
-      xhr.setRequestHeader('Content-Type', file.type)
-      // Remove unsafe headers - browser will set Content-Length automatically
+      console.log('🔐 Getting Clerk token...')
+      const token = await getToken()
       
-      xhr.send(file)
-    })
-
-    // Clear progress after success
-    setTimeout(() => {
-      setUploadProgress(prev => {
-        const newProgress = { ...prev }
-        delete newProgress[identifier]
-        return newProgress
-      })
-    }, 3000)
-
-    return uploadResult
-
-  } catch (error) {
-    console.error('❌ Upload error:', error)
-    setUploadProgress(prev => ({
-      ...prev,
-      [identifier]: { 
-        ...prev[identifier], 
-        status: 'error',
-        error: error instanceof Error ? error.message : 'Upload failed'
+      if (!token || !userId) {
+        throw new Error('Authentication failed. Please sign in again.')
       }
-    }))
-    throw error
+
+      console.log('✅ Token obtained, making upload request...')
+
+      // Get presigned URL
+      const presignedResponse = await fetch('/api/admin/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          fileName: file.name,
+          fileType: file.type,
+          fileSize: file.size,
+          folder: `${type}s`
+        }),
+      })
+
+      console.log('📡 Upload API response status:', presignedResponse.status)
+
+      if (!presignedResponse.ok) {
+        const errorText = await presignedResponse.text()
+        let errorData
+        try {
+          errorData = JSON.parse(errorText)
+        } catch {
+          errorData = { error: 'Failed to get upload URL' }
+        }
+        throw new Error(errorData.error || `Upload failed with status: ${presignedResponse.status}`)
+      }
+
+      const { presignedUrl, fileUrl, fileKey } = await presignedResponse.json()
+
+      console.log('✅ Presigned URL received, starting upload...')
+      console.log(`⏰ Using timeout: ${timeoutDuration / 1000 / 60} minutes for ${(file.size / (1024 * 1024)).toFixed(2)}MB file`)
+
+      setUploadProgress(prev => ({
+        ...prev,
+        [identifier]: { 
+          ...prev[identifier], 
+          status: 'uploading',
+          progress: 5
+        }
+      }))
+
+      // Enhanced upload with better progress tracking
+      const uploadResult = await new Promise<S3Asset>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        const uploadStartTime = Date.now()
+        let lastProgressUpdate = Date.now()
+        let lastLoaded = 0
+
+        xhr.upload.addEventListener('progress', (event) => {
+          if (event.lengthComputable) {
+            const currentTime = Date.now()
+            const progress = 5 + (event.loaded / event.total) * 90 // 5% to 95%
+            
+            // Calculate speed (only update every 500ms to reduce noise)
+            if (currentTime - lastProgressUpdate > 500) {
+              const timeDiff = (currentTime - lastProgressUpdate) / 1000
+              const loadedDiff = event.loaded - lastLoaded
+              const uploadSpeed = loadedDiff / timeDiff // bytes per second
+              
+              console.log(`📊 Upload progress: ${Math.round(progress)}% - Speed: ${(uploadSpeed / (1024 * 1024)).toFixed(2)} MB/s`)
+              
+              lastProgressUpdate = currentTime
+              lastLoaded = event.loaded
+            }
+
+            setUploadProgress(prev => ({
+              ...prev,
+              [identifier]: { 
+                ...prev[identifier], 
+                progress: Math.round(progress)
+              }
+            }))
+          }
+        })
+
+        xhr.addEventListener('load', () => {
+          const uploadTime = (Date.now() - uploadStartTime) / 1000
+          console.log(`✅ Upload completed in ${uploadTime} seconds`)
+          
+          if (xhr.status === 200) {
+            setUploadProgress(prev => ({
+              ...prev,
+              [identifier]: { 
+                ...prev[identifier], 
+                progress: 100,
+                status: 'completed'
+              }
+            }))
+
+            resolve({
+              key: fileKey,
+              url: fileUrl,
+              size: file.size,
+              type: type === 'thumbnail' ? 'image' : 'video',
+              duration: type !== 'thumbnail' ? 0 : undefined
+            })
+          } else {
+            console.error('❌ Upload failed with status:', xhr.status)
+            reject(new Error(`Upload failed with status: ${xhr.status}`))
+          }
+        })
+
+        xhr.addEventListener('error', (e) => {
+          console.error('❌ Network error during upload:', e)
+          reject(new Error('Network error during upload. Please check your connection.'))
+        })
+
+        xhr.addEventListener('abort', () => {
+          console.error('❌ Upload was cancelled')
+          reject(new Error('Upload was cancelled'))
+        })
+
+        // Set timeout and handle timeout gracefully
+        xhr.timeout = timeoutDuration
+        xhr.ontimeout = () => {
+          const elapsed = (Date.now() - uploadStartTime) / 1000
+          const uploadedMB = (lastLoaded / (1024 * 1024)).toFixed(2)
+          console.error(`❌ Upload timeout after ${elapsed} seconds, uploaded: ${uploadedMB}MB`)
+          reject(new Error(`Upload timeout after ${Math.round(elapsed / 60)} minutes. Uploaded ${uploadedMB}MB of ${(file.size / (1024 * 1024)).toFixed(2)}MB.`))
+        }
+
+        console.log('📤 Starting direct upload to S3...')
+        xhr.open('PUT', presignedUrl)
+        xhr.setRequestHeader('Content-Type', file.type)
+        // Remove unsafe headers - browser will set Content-Length automatically
+        
+        xhr.send(file)
+      })
+
+      // Clear progress after success
+      setTimeout(() => {
+        setUploadProgress(prev => {
+          const newProgress = { ...prev }
+          delete newProgress[identifier]
+          return newProgress
+        })
+      }, 3000)
+
+      return uploadResult
+
+    } catch (error) {
+      console.error('❌ Upload error:', error)
+      setUploadProgress(prev => ({
+        ...prev,
+        [identifier]: { 
+          ...prev[identifier], 
+          status: 'error',
+          error: error instanceof Error ? error.message : 'Upload failed'
+        }
+      }))
+      throw error
+    }
   }
-}
+
   const cancelUpload = (identifier: string) => {
     console.log('🚫 Cancelling upload:', identifier)
     setUploadProgress(prev => {
@@ -283,6 +308,183 @@ const useS3Upload = () => {
   return { uploadProgress, uploadFile, cancelUpload }
 }
 
+// File Upload Area Component
+const FileUploadArea = ({
+  type,
+  label,
+  acceptedFiles,
+  maxSize,
+  currentFile,
+  onFileChange,
+  moduleIndex,
+  lessonIndex,
+  uploadProgress,
+  onCancelUpload
+}: {
+  type: 'thumbnail' | 'previewVideo' | 'lessonVideo'
+  label: string
+  acceptedFiles: string
+  maxSize: string
+  currentFile: S3Asset | null
+  onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void
+  moduleIndex?: number
+  lessonIndex?: number
+  uploadProgress?: UploadProgress
+  onCancelUpload?: (identifier: string) => void
+}) => {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const uploadId = type === 'lessonVideo' ? `lesson-${moduleIndex}-${lessonIndex}` : type
+  const upload = uploadProgress?.[uploadId]
+  const isUploading = upload?.status === 'generating-url' || upload?.status === 'uploading'
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes'
+    const k = 1024
+    const sizes = ['Bytes', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+  }
+
+  const getStatusColor = () => {
+    switch (upload?.status) {
+      case 'generating-url': return 'bg-blue-500'
+      case 'uploading': return 'bg-blue-500'
+      case 'processing': return 'bg-yellow-500'
+      case 'completed': return 'bg-green-500'
+      case 'error': return 'bg-red-500'
+      default: return 'bg-gray-500'
+    }
+  }
+
+  const getStatusIcon = () => {
+    switch (upload?.status) {
+      case 'generating-url': return <CloudUpload className="w-4 h-4" />
+      case 'uploading': return <CloudUpload className="w-4 h-4" />
+      case 'processing': return <AlertCircle className="w-4 h-4" />
+      case 'completed': return <CheckCircle className="w-4 h-4" />
+      case 'error': return <AlertCircle className="w-4 h-4" />
+      default: return <CloudUpload className="w-4 h-4" />
+    }
+  }
+
+  const getStatusText = () => {
+    switch (upload?.status) {
+      case 'generating-url': return 'Preparing upload...'
+      case 'uploading': return `Uploading... ${upload.progress}%`
+      case 'processing': return 'Processing...'
+      case 'completed': return 'Upload completed'
+      case 'error': return 'Upload failed'
+      default: return 'Uploading...'
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <label className="text-sm font-medium flex items-center space-x-2">
+        {type === 'thumbnail' ? <Image className="w-4 h-4" /> : <Video className="w-4 h-4" />}
+        <span>{label}</span>
+      </label>
+      
+      <input
+        ref={inputRef}
+        type="file"
+        accept={acceptedFiles}
+        onChange={onFileChange}
+        className="hidden"
+        disabled={isUploading}
+      />
+      
+      <div 
+        className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-colors ${
+          isUploading 
+            ? 'border-blue-300 bg-blue-50 dark:border-blue-700 dark:bg-blue-900/20 cursor-not-allowed' 
+            : 'border-slate-300 dark:border-slate-600 hover:border-rose-400'
+        }`}
+        onClick={() => !isUploading && inputRef.current?.click()}
+      >
+        {currentFile ? (
+          <div className="space-y-2">
+            {type === 'thumbnail' ? (
+              <img
+                src={currentFile.url}
+                alt="Preview"
+                className="w-32 h-32 object-cover rounded-xl mx-auto"
+              />
+            ) : (
+              <div className="relative">
+                <video className="w-32 h-32 object-cover rounded-xl mx-auto">
+                  <source src={currentFile.url} type="video/mp4" />
+                </video>
+                <Play className="w-6 h-6 text-white absolute inset-0 m-auto" />
+              </div>
+            )}
+            <p className="text-sm text-slate-600">Click to change</p>
+            <p className="text-xs text-slate-500">
+              {formatFileSize(currentFile.size)}
+              {currentFile.duration && type !== 'thumbnail' && ` • ${currentFile.duration}s`}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {type === 'thumbnail' ? (
+              <Image className="w-8 h-8 text-slate-400 mx-auto" />
+            ) : (
+              <Video className="w-8 h-8 text-slate-400 mx-auto" />
+            )}
+            <p className="text-sm font-medium">
+              {isUploading ? 'Uploading...' : `Upload ${type === 'thumbnail' ? 'Thumbnail' : 'Video'}`}
+            </p>
+            <p className="text-xs text-slate-500">
+              {acceptedFiles.split(',').join(', ')} up to {maxSize}
+            </p>
+            {type !== 'thumbnail' && (
+              <p className="text-xs text-blue-500 mt-1">
+                Large files supported (up to 5GB)
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+      
+      {/* Upload Progress */}
+      {upload && (
+        <div className="flex items-center space-x-3 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl">
+          <div className={`p-1 rounded-full ${getStatusColor()} text-white`}>
+            {getStatusIcon()}
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-medium truncate max-w-[200px]">
+                {upload.fileName}
+              </span>
+              <span className="text-slate-500">
+                {getStatusText()}
+              </span>
+            </div>
+            {(upload.status === 'generating-url' || upload.status === 'uploading') && (
+              <Progress value={upload.progress} className="h-2 mt-1" />
+            )}
+            {upload.status === 'error' && upload.error && (
+              <p className="text-xs text-red-500 mt-1">{upload.error}</p>
+            )}
+          </div>
+          {(upload.status === 'generating-url' || upload.status === 'uploading') && onCancelUpload && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => onCancelUpload(uploadId)}
+              className="text-red-500 hover:text-red-600"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function CreateCoursePage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
@@ -291,10 +493,6 @@ export default function CreateCoursePage() {
   const [checkingAuth, setCheckingAuth] = useState(true)
   const { uploadProgress, uploadFile, cancelUpload } = useS3Upload()
   const { isSignedIn, isLoaded, userId } = useAuth()
-
-  const thumbnailInputRef = useRef<HTMLInputElement>(null)
-  const videoInputRef = useRef<HTMLInputElement>(null)
-  const lessonVideoInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({})
 
   const [formData, setFormData] = useState({
     title: '',
@@ -317,104 +515,73 @@ export default function CreateCoursePage() {
   const [newRequirement, setNewRequirement] = useState('')
   const [newOutcome, setNewOutcome] = useState('')
 
+  // Helper functions
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes'
+    const k = 1024
+    const sizes = ['Bytes', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+  }
+
+  const formatDuration = (minutes: number) => {
+    const hours = Math.floor(minutes / 60)
+    const mins = minutes % 60
+    return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`
+  }
+
   // Set client-side flag
   useEffect(() => {
     setIsClient(true)
   }, [])
 
   // Check user role from MongoDB using the /api/users/me endpoint
-  // In your CreateCoursePage component, update the useEffect:
-
-useEffect(() => {
-  const checkUserRole = async () => {
-    if (isLoaded && isClient && isSignedIn && userId) {
-      try {
-        setCheckingAuth(true)
-        console.log('🔍 Checking user role via /api/users/me...')
-        
-        const response = await fetch('/api/users/me')
-        
-        if (response.ok) {
-          const data = await response.json()
-          console.log('✅ User data from API:', data)
+  useEffect(() => {
+    const checkUserRole = async () => {
+      if (isLoaded && isClient && isSignedIn && userId) {
+        try {
+          setCheckingAuth(true)
+          console.log('🔍 Checking user role via /api/users/me...')
           
-          // Check the actual response structure
-          const userData = data.user || data
-          console.log('👤 Extracted user data:', userData)
+          const response = await fetch('/api/users/me')
           
-          // Check if user has admin role in MongoDB
-          if (userData.role === 'admin') {
-            setUserRole('admin')
-            console.log('🎉 User is admin, allowing access')
+          if (response.ok) {
+            const data = await response.json()
+            console.log('✅ User data from API:', data)
+            
+            // Check the actual response structure
+            const userData = data.user || data
+            console.log('👤 Extracted user data:', userData)
+            
+            // Check if user has admin role in MongoDB
+            if (userData.role === 'admin') {
+              setUserRole('admin')
+              console.log('🎉 User is admin, allowing access')
+            } else {
+              setUserRole(userData.role || 'user')
+              console.log('❌ User is not admin, denying access. Role:', userData.role)
+            }
           } else {
-            setUserRole(userData.role || 'user')
-            console.log('❌ User is not admin, denying access. Role:', userData.role)
+            console.error('❌ Failed to fetch user data:', response.status)
+            setUserRole(null)
           }
-        } else {
-          console.error('❌ Failed to fetch user data:', response.status)
+        } catch (error) {
+          console.error('❌ Error checking user role:', error)
           setUserRole(null)
+        } finally {
+          setCheckingAuth(false)
         }
-      } catch (error) {
-        console.error('❌ Error checking user role:', error)
-        setUserRole(null)
-      } finally {
+      } else if (isLoaded && !isSignedIn) {
+        // Redirect if not signed in
+        console.log('🔐 User not signed in, redirecting to sign-in')
+        router.push('/sign-in')
+      } else {
         setCheckingAuth(false)
       }
-    } else if (isLoaded && !isSignedIn) {
-      // Redirect if not signed in
-      console.log('🔐 User not signed in, redirecting to sign-in')
-      router.push('/sign-in')
-    } else {
-      setCheckingAuth(false)
     }
-  }
 
-  checkUserRole()
-}, [isLoaded, isSignedIn, isClient, userId, router])
-
-  // Show loading state while checking auth and role
-  if (!isLoaded || !isClient || checkingAuth) {
-    return (
-      <div className="p-6 max-w-7xl mx-auto flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="w-8 h-8 border-2 border-rose-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-slate-600">Checking permissions...</p>
-          <p className="text-sm text-slate-500 mt-2">Verifying admin access</p>
-        </div>
-      </div>
-    )
-  }
-
-  // Show nothing if not signed in (will redirect)
-  if (!isSignedIn) {
-    return null
-  }
-
-  // Check if user is admin from MongoDB role
-  if (userRole !== 'admin') {
-    return (
-      <div className="p-6 max-w-7xl mx-auto flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-slate-900 mb-2">Access Denied</h2>
-          <p className="text-slate-600 mb-4">
-            {userRole === 'user' 
-              ? 'Admin privileges required to access this page.' 
-              : 'Unable to verify user permissions. Please try again.'
-            }
-          </p>
-          <div className="space-y-2">
-            <Button onClick={() => router.push('/')} className="w-full">
-              Return to Home
-            </Button>
-            <Button variant="outline" onClick={() => window.location.reload()} className="w-full">
-              Retry
-            </Button>
-          </div>
-        </div>
-      </div>
-    )
-  }
+    checkUserRole()
+  }, [isLoaded, isSignedIn, isClient, userId, router])
 
   // Enhanced File Upload Handler
   const handleFileUpload = async (
@@ -593,64 +760,64 @@ useEffect(() => {
   ).length
 
   const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault()
-  
-  // Check if any uploads are in progress
-  const hasActiveUploads = Object.values(uploadProgress).some(
-    upload => upload.status === 'generating-url' || upload.status === 'uploading'
-  )
-  
-  if (hasActiveUploads) {
-    alert('Please wait for all uploads to complete before submitting')
-    return
-  }
-
-  setLoading(true)
-
-  try {
-    // Validate required fields
-    if (!formData.thumbnail) {
-      alert('Please upload a course thumbnail')
-      return
-    }
-
-    // Validate all lessons have videos
-    const missingVideos = formData.modules.some(module => 
-      module.lessons.some(lesson => !lesson.video)
-    )
-
-    if (missingVideos) {
-      alert('All lessons must have a video uploaded')
-      return
-    }
-
-    console.log('📤 Sending course data to API:', JSON.stringify(formData, null, 2))
-
-    const response = await fetch('/api/admin/courses', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(formData),
-    })
-
-    const responseData = await response.json()
+    e.preventDefault()
     
-    if (response.ok) {
-      console.log('✅ Course created successfully:', responseData)
-      router.push('/admin/courses')
-      router.refresh()
-    } else {
-      console.error('❌ API Error response:', responseData)
-      alert(responseData.error || responseData.details || 'Failed to create course')
+    // Check if any uploads are in progress
+    const hasActiveUploads = Object.values(uploadProgress).some(
+      upload => upload.status === 'generating-url' || upload.status === 'uploading'
+    )
+    
+    if (hasActiveUploads) {
+      alert('Please wait for all uploads to complete before submitting')
+      return
     }
-  } catch (error) {
-    console.error('❌ Error creating course:', error)
-    alert('Failed to create course. Please try again.')
-  } finally {
-    setLoading(false)
+
+    setLoading(true)
+
+    try {
+      // Validate required fields
+      if (!formData.thumbnail) {
+        alert('Please upload a course thumbnail')
+        return
+      }
+
+      // Validate all lessons have videos
+      const missingVideos = formData.modules.some(module => 
+        module.lessons.some(lesson => !lesson.video)
+      )
+
+      if (missingVideos) {
+        alert('All lessons must have a video uploaded')
+        return
+      }
+
+      console.log('📤 Sending course data to API:', JSON.stringify(formData, null, 2))
+
+      const response = await fetch('/api/admin/courses', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData),
+      })
+
+      const responseData = await response.json()
+      
+      if (response.ok) {
+        console.log('✅ Course created successfully:', responseData)
+        router.push('/admin/courses')
+        router.refresh()
+      } else {
+        console.error('❌ API Error response:', responseData)
+        alert(responseData.error || responseData.details || 'Failed to create course')
+      }
+    } catch (error) {
+      console.error('❌ Error creating course:', error)
+      alert('Failed to create course. Please try again.')
+    } finally {
+      setLoading(false)
+    }
   }
-}
 
   // Calculate totals
   const totalDuration = formData.modules.reduce((total, module) => {
@@ -659,192 +826,46 @@ useEffect(() => {
 
   const totalLessons = formData.modules.reduce((total, module) => total + module.lessons.length, 0)
 
-  const formatDuration = (minutes: number) => {
-    const hours = Math.floor(minutes / 60)
-    const mins = minutes % 60
-    return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`
-  }
-
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes'
-    const k = 1024
-    const sizes = ['Bytes', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-  }
-
-  // Enhanced upload status component
-  const UploadStatus = ({ uploadId }: { uploadId: string }) => {
-    const upload = uploadProgress[uploadId]
-    if (!upload) return null
-
-    const getStatusColor = () => {
-      switch (upload.status) {
-        case 'generating-url': return 'bg-blue-500'
-        case 'uploading': return 'bg-blue-500'
-        case 'processing': return 'bg-yellow-500'
-        case 'completed': return 'bg-green-500'
-        case 'error': return 'bg-red-500'
-        default: return 'bg-gray-500'
-      }
-    }
-
-    const getStatusIcon = () => {
-      switch (upload.status) {
-        case 'generating-url': return <CloudUpload className="w-4 h-4" />
-        case 'uploading': return <CloudUpload className="w-4 h-4" />
-        case 'processing': return <AlertCircle className="w-4 h-4" />
-        case 'completed': return <CheckCircle className="w-4 h-4" />
-        case 'error': return <AlertCircle className="w-4 h-4" />
-        default: return <CloudUpload className="w-4 h-4" />
-      }
-    }
-
-    const getStatusText = () => {
-      switch (upload.status) {
-        case 'generating-url': return 'Preparing upload...'
-        case 'uploading': return `Uploading... ${upload.progress}%`
-        case 'processing': return 'Processing...'
-        case 'completed': return 'Upload completed'
-        case 'error': return 'Upload failed'
-        default: return 'Uploading...'
-      }
-    }
-
+  // Show loading state while checking auth and role
+  if (!isLoaded || !isClient || checkingAuth) {
     return (
-      <div className="flex items-center space-x-3 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl">
-        <div className={`p-1 rounded-full ${getStatusColor()} text-white`}>
-          {getStatusIcon()}
+      <div className="p-6 max-w-7xl mx-auto flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-rose-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-slate-600">Checking permissions...</p>
+          <p className="text-sm text-slate-500 mt-2">Verifying admin access</p>
         </div>
-        <div className="flex-1">
-          <div className="flex items-center justify-between text-sm">
-            <span className="font-medium truncate max-w-[200px]">
-              {upload.fileName}
-            </span>
-            <span className="text-slate-500">
-              {getStatusText()}
-            </span>
-          </div>
-          {(upload.status === 'generating-url' || upload.status === 'uploading') && (
-            <Progress value={upload.progress} className="h-2 mt-1" />
-          )}
-          {upload.status === 'error' && upload.error && (
-            <p className="text-xs text-red-500 mt-1">{upload.error}</p>
-          )}
-        </div>
-        {(upload.status === 'generating-url' || upload.status === 'uploading') && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => cancelUpload(uploadId)}
-            className="text-red-500 hover:text-red-600"
-          >
-            <X className="w-4 h-4" />
-          </Button>
-        )}
       </div>
     )
   }
 
-  // Enhanced file upload area component
-  const FileUploadArea = ({
-    type,
-    label,
-    acceptedFiles,
-    maxSize,
-    currentFile,
-    onFileChange,
-    moduleIndex,
-    lessonIndex
-  }: {
-    type: 'thumbnail' | 'previewVideo' | 'lessonVideo'
-    label: string
-    acceptedFiles: string
-    maxSize: string
-    currentFile: S3Asset | null
-    onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void
-    moduleIndex?: number
-    lessonIndex?: number
-  }) => {
-    const uploadId = type === 'lessonVideo' ? `lesson-${moduleIndex}-${lessonIndex}` : type
-    const isUploading = uploadProgress[uploadId]?.status === 'generating-url' || uploadProgress[uploadId]?.status === 'uploading'
+  // Show nothing if not signed in (will redirect)
+  if (!isSignedIn) {
+    return null
+  }
 
+  // Check if user is admin from MongoDB role
+  if (userRole !== 'admin') {
     return (
-      <div className="space-y-4">
-        <label className="text-sm font-medium flex items-center space-x-2">
-          {type === 'thumbnail' ? <Image className="w-4 h-4" /> : <Video className="w-4 h-4" />}
-          <span>{label}</span>
-        </label>
-        
-        <input
-          ref={type === 'thumbnail' ? thumbnailInputRef : 
-               type === 'previewVideo' ? videoInputRef : 
-               lessonVideoInputRefs.current[uploadId] || null}
-          type="file"
-          accept={acceptedFiles}
-          onChange={onFileChange}
-          className="hidden"
-          disabled={isUploading}
-        />
-        
-        <div 
-          className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-colors ${
-            isUploading 
-              ? 'border-blue-300 bg-blue-50 dark:border-blue-700 dark:bg-blue-900/20 cursor-not-allowed' 
-              : 'border-slate-300 dark:border-slate-600 hover:border-rose-400'
-          }`}
-          onClick={() => !isUploading && (
-            type === 'thumbnail' ? thumbnailInputRef.current?.click() :
-            type === 'previewVideo' ? videoInputRef.current?.click() :
-            lessonVideoInputRefs.current[uploadId]?.click()
-          )}
-        >
-          {currentFile ? (
-            <div className="space-y-2">
-              {type === 'thumbnail' ? (
-                <img
-                  src={currentFile.url}
-                  alt="Preview"
-                  className="w-32 h-32 object-cover rounded-xl mx-auto"
-                />
-              ) : (
-                <div className="relative">
-                  <video className="w-32 h-32 object-cover rounded-xl mx-auto">
-                    <source src={currentFile.url} type="video/mp4" />
-                  </video>
-                  <Play className="w-6 h-6 text-white absolute inset-0 m-auto" />
-                </div>
-              )}
-              <p className="text-sm text-slate-600">Click to change</p>
-              <p className="text-xs text-slate-500">
-                {formatFileSize(currentFile.size)}
-                {currentFile.duration && type !== 'thumbnail' && ` • ${currentFile.duration}s`}
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {type === 'thumbnail' ? (
-                <Image className="w-8 h-8 text-slate-400 mx-auto" />
-              ) : (
-                <Video className="w-8 h-8 text-slate-400 mx-auto" />
-              )}
-              <p className="text-sm font-medium">
-                {isUploading ? 'Uploading...' : `Upload ${type === 'thumbnail' ? 'Thumbnail' : 'Video'}`}
-              </p>
-              <p className="text-xs text-slate-500">
-                {acceptedFiles.split(',').join(', ')} up to {maxSize}
-              </p>
-              {type !== 'thumbnail' && (
-                <p className="text-xs text-blue-500 mt-1">
-                  Large files supported (up to 5GB)
-                </p>
-              )}
-            </div>
-          )}
+      <div className="p-6 max-w-7xl mx-auto flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+          <h2 className="text-2xl font-bold text-slate-900 mb-2">Access Denied</h2>
+          <p className="text-slate-600 mb-4">
+            {userRole === 'user' 
+              ? 'Admin privileges required to access this page.' 
+              : 'Unable to verify user permissions. Please try again.'
+            }
+          </p>
+          <div className="space-y-2">
+            <Button onClick={() => router.push('/')} className="w-full">
+              Return to Home
+            </Button>
+            <Button variant="outline" onClick={() => window.location.reload()} className="w-full">
+              Retry
+            </Button>
+          </div>
         </div>
-        
-        {uploadProgress[uploadId] && <UploadStatus uploadId={uploadId} />}
       </div>
     )
   }
@@ -868,33 +889,33 @@ useEffect(() => {
         </Button>
       </div>
 
-      // Enhanced upload status banner
-{activeUploads > 0 && (
-  <div className="space-y-3">
-    <Card className="rounded-2xl border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20">
-      <CardContent className="p-4">
-        <div className="flex items-center space-x-3">
-          <CloudUpload className="w-5 h-5 text-blue-600" />
-          <div className="flex-1">
-            <p className="text-sm font-medium text-blue-800 dark:text-blue-300">
-              Uploading {activeUploads} file{activeUploads > 1 ? 's' : ''} to AWS S3...
-            </p>
-            <p className="text-xs text-blue-600 dark:text-blue-400">
-              Large video support enabled • Do not close this page during upload
-            </p>
-          </div>
+      {/* Enhanced upload status banner */}
+      {activeUploads > 0 && (
+        <div className="space-y-3">
+          <Card className="rounded-2xl border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20">
+            <CardContent className="p-4">
+              <div className="flex items-center space-x-3">
+                <CloudUpload className="w-5 h-5 text-blue-600" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-blue-800 dark:text-blue-300">
+                    Uploading {activeUploads} file{activeUploads > 1 ? 's' : ''} to AWS S3...
+                  </p>
+                  <p className="text-xs text-blue-600 dark:text-blue-400">
+                    Large video support enabled • Do not close this page during upload
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          
+          {/* Show optimization tips for large files */}
+          {Object.values(uploadProgress).map(upload => 
+            upload.status === 'uploading' && uploadProgress[upload.fileName]?.progress < 100
+          ).filter(Boolean).length > 0 && (
+            <UploadOptimizationTips fileSize={1680.41 * 1024 * 1024} />
+          )}
         </div>
-      </CardContent>
-    </Card>
-    
-    {/* Show optimization tips for large files */}
-    {Object.values(uploadProgress).map(upload => 
-      upload.status === 'uploading' && uploadProgress[upload.fileName]?.progress < 100
-    ).filter(Boolean).length > 0 && (
-      <UploadOptimizationTips fileSize={1680.41 * 1024 * 1024} />
-    )}
-  </div>
-)}
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -1012,6 +1033,8 @@ useEffect(() => {
                     maxSize="5MB"
                     currentFile={formData.thumbnail}
                     onFileChange={handleThumbnailChange}
+                    uploadProgress={uploadProgress}
+                    onCancelUpload={cancelUpload}
                   />
 
                   {/* Preview Video Upload */}
@@ -1022,6 +1045,8 @@ useEffect(() => {
                     maxSize="5GB"
                     currentFile={formData.previewVideo}
                     onFileChange={handlePreviewVideoChange}
+                    uploadProgress={uploadProgress}
+                    onCancelUpload={cancelUpload}
                   />
                 </div>
               </CardContent>
@@ -1213,10 +1238,12 @@ useEffect(() => {
                               label="Lesson Video *"
                               acceptedFiles="video/mp4,video/webm,video/ogg,video/quicktime,video/x-msvideo,video/avi,video/mkv,video/mov"
                               maxSize="5GB"
-                              currentFile={lesson.video}
+                              currentFile={lesson.video || null}
                               onFileChange={(e) => handleLessonVideoChange(e, moduleIndex, lessonIndex)}
                               moduleIndex={moduleIndex}
                               lessonIndex={lessonIndex}
+                              uploadProgress={uploadProgress}
+                              onCancelUpload={cancelUpload}
                             />
                           </div>
 

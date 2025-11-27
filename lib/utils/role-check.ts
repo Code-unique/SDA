@@ -5,15 +5,15 @@ import User from '@/lib/models/User'
 
 export async function isUserAdmin() {
   try {
-    const { userId } = auth()
+    const authObj = await auth()
     
-    if (!userId) {
+    if (!authObj.userId) {
       return false
     }
 
     await connectToDatabase()
     
-    const user = await User.findOne({ clerkId: userId })
+    const user = await User.findOne({ clerkId: authObj.userId })
     
     if (!user) {
       return false
@@ -28,15 +28,15 @@ export async function isUserAdmin() {
 
 export async function getCurrentUser() {
   try {
-    const { userId } = auth()
+    const authObj = await auth()
     
-    if (!userId) {
+    if (!authObj.userId) {
       return null
     }
 
     await connectToDatabase()
     
-    const user = await User.findOne({ clerkId: userId })
+    const user = await User.findOne({ clerkId: authObj.userId })
     
     return user
   } catch (error) {
