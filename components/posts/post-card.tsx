@@ -47,7 +47,100 @@ import {
   Music
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Post, Comment, User as UserType, ApiResponse } from '@/types/post'
+
+interface User {
+  _id: string
+  username: string
+  firstName: string
+  lastName: string
+  avatar?: string
+  banner?: string
+  bio: string
+  location: string
+  website: string
+  role: 'user' | 'admin' | 'designer'
+  interests: string[]
+  skills: string[]
+  isVerified: boolean
+  followers: string[]
+  following: string[]
+  createdAt: string
+  isPro?: boolean
+  badges?: string[]
+}
+
+interface PostMedia {
+  _id?: string
+  type: 'image' | 'video'
+  url: string
+  thumbnail?: string
+  alt?: string
+  publicId?: string
+}
+
+interface Comment {
+  _id: string
+  user: User
+  text: string
+  likes: string[] | User[]
+  createdAt: string
+  isEdited?: boolean
+}
+
+interface Post {
+  _id: string
+  author: User
+  media: PostMedia[]
+  caption: string
+  hashtags: string[]
+  likes: string[] | User[]
+  comments: Comment[]
+  saves: string[] | User[]
+  createdAt: string
+  isSponsored?: boolean
+  isFeatured?: boolean
+  isEdited?: boolean
+  location?: string
+  category?: string
+  shares?: number
+  aiGenerated?: boolean
+  collaboration?: boolean
+  availableForSale?: boolean
+  price?: number
+  currency?: string
+  music?: {
+    title: string
+    artist: string
+  }
+  engagement?: number
+}
+
+interface ApiResponse {
+  success: boolean
+  data?: any
+  error?: string
+}
+
+interface PostCardProps {
+  post: Post
+  onLike?: (postId: string) => Promise<ApiResponse | void>
+  onSave?: (postId: string) => Promise<ApiResponse | void>
+  onShare?: (postId: string) => Promise<void>
+  onComment?: (postId: string, text: string) => Promise<ApiResponse | void>
+  onFollow?: (userId: string) => Promise<ApiResponse | void>
+  onReport?: (postId: string, reason: string) => void
+  onEdit?: (postId: string) => void
+  onDelete?: (postId: string) => void
+  onPurchase?: (postId: string) => void
+  onMention?: (username: string) => void
+  onHashtagClick?: (hashtag: string) => void
+  currentUserId?: string
+  showEngagement?: boolean
+  compact?: boolean
+  featured?: boolean
+  viewMode?: 'grid' | 'list' | 'feed' | 'detailed'
+  className?: string
+}
 
 // Utility functions
 const formatNumber = (num: number | undefined): string => {
@@ -72,27 +165,6 @@ const getTimeAgo = (date: string | undefined): string => {
   } catch {
     return 'Recently'
   }
-}
-
-interface PostCardProps {
-  post: Post
-  onLike?: (postId: string) => Promise<ApiResponse | void>
-  onSave?: (postId: string) => Promise<ApiResponse | void>
-  onShare?: (postId: string) => Promise<void>
-  onComment?: (postId: string, text: string) => Promise<ApiResponse | void>
-  onFollow?: (userId: string) => Promise<ApiResponse | void>
-  onReport?: (postId: string, reason: string) => void
-  onEdit?: (postId: string) => void
-  onDelete?: (postId: string) => void
-  onPurchase?: (postId: string) => void
-  onMention?: (username: string) => void
-  onHashtagClick?: (hashtag: string) => void
-  currentUserId?: string
-  showEngagement?: boolean
-  compact?: boolean
-  featured?: boolean
-  viewMode?: 'grid' | 'list' | 'feed' | 'detailed'
-  className?: string
 }
 
 // Main PostCard Component
@@ -163,17 +235,17 @@ export function PostCard({
     if (userId) {
       const liked = post.likes?.some(like => 
         typeof like === 'string' ? like === userId : 
-        (like as UserType)._id === userId || (like as UserType).clerkId === userId
+        (like as User)._id === userId
       )
 
       const saved = post.saves?.some(save =>
         typeof save === 'string' ? save === userId :
-        (save as UserType)._id === userId || (save as UserType).clerkId === userId
+        (save as User)._id === userId
       )
 
       const following = post.author.followers?.some(follower =>
         typeof follower === 'string' ? follower === userId :
-        (follower as UserType)._id === userId || (follower as UserType).clerkId === userId
+        (follower as User)._id === userId
       )
 
       setState(prev => ({
@@ -454,7 +526,7 @@ export function PostCard({
   const isCommentLiked = useCallback((comment: Comment) => {
     return comment.likes?.some(like =>
       typeof like === 'string' ? like === userId :
-      (like as UserType)._id === userId || (like as UserType).clerkId === userId
+      (like as User)._id === userId
     ) || false
   }, [userId])
 
@@ -577,7 +649,7 @@ export function PostCard({
                 <Avatar className="w-12 h-12 border-2 border-white cursor-pointer" onClick={() => router.push(`/profile/${post.author.username}`)}>
                   <AvatarImage src={post.author.avatar} />
                   <AvatarFallback className="bg-gradient-to-r from-rose-500 to-pink-500">
-                    {post.author.firstName[0]}{post.author.lastName[0]}
+                    {post.author.firstName?.[0]}{post.author.lastName?.[0]}
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex-1">
@@ -661,7 +733,7 @@ export function PostCard({
                 >
                   <AvatarImage src={post.author.avatar} />
                   <AvatarFallback className="bg-gradient-to-r from-rose-500 to-pink-500 text-white font-semibold">
-                    {post.author.firstName[0]}{post.author.lastName[0]}
+                    {post.author.firstName?.[0]}{post.author.lastName?.[0]}
                   </AvatarFallback>
                 </Avatar>
                 <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 w-6 h-6 bg-rose-500 rounded-full flex items-center justify-center cursor-pointer hover:bg-rose-600 transition-colors">
@@ -851,7 +923,7 @@ export function PostCard({
     )
   }
 
-  // Default detailed view (original rich functionality)
+  // Default detailed view
   if (viewMode === 'detailed') {
     return (
       <motion.div
@@ -877,7 +949,7 @@ export function PostCard({
                     <Avatar className="w-10 h-10 border-2 border-white dark:border-slate-800 shadow-lg hover:scale-105 transition-transform duration-300">
                       <AvatarImage src={post.author.avatar} alt={post.author.username} />
                       <AvatarFallback className="bg-gradient-to-br from-rose-500 to-pink-500 text-white">
-                        {post.author.firstName[0]}{post.author.lastName[0]}
+                        {post.author.firstName?.[0]}{post.author.lastName?.[0]}
                       </AvatarFallback>
                     </Avatar>
                     {post.author.isVerified && (
@@ -1353,7 +1425,7 @@ export function PostCard({
                     <Avatar className="w-6 h-6">
                       <AvatarImage src={post.author.avatar} />
                       <AvatarFallback className="text-xs">
-                        {post.author.firstName[0]}
+                        {post.author.firstName?.[0]}
                       </AvatarFallback>
                     </Avatar>
                     <span className="text-sm font-semibold">@{post.author.username}</span>
@@ -1433,36 +1505,6 @@ export function PostCard({
 }
 
 // Sub-components
-function VerifiedBadge() {
-  return (
-    <div className="w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center">
-      <Check className="w-2.5 h-2.5 text-white" />
-    </div>
-  )
-}
-
-function ProBadge() {
-  return (
-    <div className="w-4 h-4 bg-gradient-to-r from-amber-500 to-orange-500 rounded-full flex items-center justify-center">
-      <Crown className="w-2.5 h-2.5 text-white" />
-    </div>
-  )
-}
-
-function PlusIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      {...props}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <path d="M12 5v14M5 12h14" />
-    </svg>
-  )
-}
-
 function CommentsSheet({ 
   post, 
   onClose, 
@@ -1512,13 +1554,13 @@ function CommentsSheet({
         </div>
 
         {/* Comments List */}
-        <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto space-y-4 pr-2">
           {post.comments?.map((comment) => (
             <div key={comment._id} className="flex space-x-3 group">
               <Avatar className="w-10 h-10 flex-shrink-0">
                 <AvatarImage src={comment.user.avatar} />
                 <AvatarFallback>
-                  {comment.user.firstName[0]}{comment.user.lastName[0]}
+                  {comment.user.firstName?.[0]}{comment.user.lastName?.[0]}
                 </AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0">
@@ -1564,8 +1606,7 @@ function CommentsSheet({
         {/* Add Comment */}
         <div className="flex space-x-3 pt-4 border-t border-slate-200 dark:border-slate-700">
           <Avatar className="w-10 h-10 flex-shrink-0">
-<AvatarImage src={currentUserId ? '/placeholder-avatar.png' : ''} />
-
+            <AvatarImage src={currentUserId ? '/placeholder-avatar.png' : ''} />
             <AvatarFallback>
               {currentUserId ? 'CU' : '?'}
             </AvatarFallback>
@@ -1632,13 +1673,13 @@ function CommentsSection({
       exit={{ opacity: 0, height: 0 }}
       className="overflow-hidden"
     >
-      <div className="space-y-3 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
+      <div className="space-y-3 max-h-48 overflow-y-auto pr-2">
         {post.comments?.slice(0, 5).map((comment) => (
           <div key={comment._id} className="flex items-start space-x-3 group/comment">
             <Avatar className="w-6 h-6 flex-shrink-0">
               <AvatarImage src={comment.user.avatar} />
               <AvatarFallback className="text-xs">
-                {comment.user.firstName[0]}{comment.user.lastName[0]}
+                {comment.user.firstName?.[0]}{comment.user.lastName?.[0]}
               </AvatarFallback>
             </Avatar>
 
@@ -1683,8 +1724,7 @@ function CommentsSection({
       {/* Add Comment */}
       <div className="flex items-center space-x-2 mt-3">
         <Avatar className="w-8 h-8 flex-shrink-0">
-<AvatarImage src={currentUserId ? '/placeholder-avatar.png' : ''} />
-
+          <AvatarImage src={currentUserId ? '/placeholder-avatar.png' : ''} />
           <AvatarFallback className="text-xs">
             {currentUserId ? 'CU' : '?'}
           </AvatarFallback>
