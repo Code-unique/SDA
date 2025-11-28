@@ -141,7 +141,6 @@ export default function ExplorePage() {
     { id: 'pro', name: 'Pro Designers', icon: Crown, description: 'From verified professionals', color: 'text-amber-500' },
   ]
 
-  // Load posts
   const loadPosts = async (pageNum: number = 1, append: boolean = false) => {
   if (loadingMore) return
 
@@ -161,37 +160,49 @@ export default function ExplorePage() {
       ...(selectedFilters.length > 0 && { filters: selectedFilters.join(',') })
     })
 
+    console.log('🔄 Loading posts with params:', Object.fromEntries(params))
     const response = await fetch(`/api/posts?${params}`)
+    
+    console.log('📡 Response status:', response.status, response.statusText)
     
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`)
     }
 
-    const data: ApiResponse<PaginatedResponse<Post>> = await response.json()
+    const data = await response.json()
+    console.log('📦 API Response:', data)
 
-    // Early return pattern for cleaner code
-    if (!data.success || !data.data) {
-      console.warn('No data received from API')
+    // FIX: Use the actual API response structure
+    if (!data.success || !data.posts) {
+      console.warn('❌ API returned no posts', {
+        success: data.success,
+        posts: data.posts
+      })
       setPosts(prev => append ? prev : [])
       setHasMore(false)
       return
     }
 
-    // Extract data to avoid TypeScript issues
-    const responseData = data.data
+    // FIX: Use data.posts instead of data.data.items
+    console.log('✅ Posts received:', {
+      postsCount: data.posts.length,
+      hasNext: data.pagination?.hasNext,
+      postsSample: data.posts.slice(0, 2)
+    })
 
     if (append) {
-      setPosts(prev => [...prev, ...(responseData.items || [])])
+      setPosts(prev => [...prev, ...(data.posts || [])])
     } else {
-      setPosts(responseData.items || [])
+      setPosts(data.posts || [])
     }
     
-    setHasMore(responseData.pagination?.hasNext || false)
+    setHasMore(data.pagination?.hasNext || false)
     setPage(pageNum)
 
   } catch (error) {
-    console.error('Error loading posts:', error)
-    // Optional: Add user-facing error message here
+    console.error('❌ Error loading posts:', error)
+    setPosts([])
+    setHasMore(false)
   } finally {
     setLoading(false)
     setLoadingMore(false)
