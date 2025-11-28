@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import Post from '@/lib/models/Post'
 import { ApiResponse, PaginatedResponse } from '@/types/post'
+import { Post as PostType } from '@/types/post'
 
 export async function GET(request: NextRequest) {
   try {
@@ -62,22 +63,25 @@ export async function GET(request: NextRequest) {
 
     const totalPosts = await Post.countDocuments({ isPublic: true, isFeatured: true })
 
-    return NextResponse.json<ApiResponse<PaginatedResponse>>({
-      success: true,
-      data: {
-        data: posts,
-        pagination: {
-          currentPage: page,
-          totalPages: Math.ceil(totalPosts / limit),
-          totalItems: totalPosts,
-          hasNext: page < Math.ceil(totalPosts / limit),
-          hasPrev: page > 1
-        }
+    // Create the paginated response correctly - use 'items' instead of 'posts'
+    const paginatedResponse: PaginatedResponse<PostType> = {
+      items: posts, // Changed from 'posts' to 'items'
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(totalPosts / limit),
+        totalItems: totalPosts,
+        hasNext: page < Math.ceil(totalPosts / limit),
+        hasPrev: page > 1
       }
+    }
+
+    return NextResponse.json<ApiResponse<PaginatedResponse<PostType>>>({
+      success: true,
+      data: paginatedResponse
     })
   } catch (error: any) {
     console.error('Error fetching featured posts:', error)
-    return NextResponse.json<ApiResponse>(
+    return NextResponse.json<ApiResponse<null>>(
       { success: false, error: 'Internal server error' },
       { status: 500 }
     )

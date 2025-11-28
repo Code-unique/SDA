@@ -1,3 +1,6 @@
+// ---------------------
+// USER
+// ---------------------
 export interface User {
   _id: string
   clerkId: string
@@ -19,6 +22,9 @@ export interface User {
   updatedAt: string
 }
 
+// ---------------------
+// MEDIA
+// ---------------------
 export interface Media {
   type: 'image' | 'video' | 'gif'
   url: string
@@ -30,6 +36,9 @@ export interface Media {
   height?: number
 }
 
+// ---------------------
+// COMMENT
+// ---------------------
 export interface Comment {
   _id: string
   user: User
@@ -41,6 +50,9 @@ export interface Comment {
   isEdited?: boolean
 }
 
+// ---------------------
+// POST
+// ---------------------
 export interface Post {
   _id: string
   author: User
@@ -63,26 +75,38 @@ export interface Post {
   isEdited?: boolean
   createdAt: string
   updatedAt?: string
+
+  // Monetization
   price?: number
   currency?: string
   availableForSale?: boolean
+
+  // AI / metadata
   aiGenerated?: boolean
   collaboration?: boolean
+
   challenge?: {
     name: string
     id: string
   }
+
   music?: {
     title: string
     artist: string
     url: string
   }
+
   style?: {
     colors: string[]
     style: string[]
     materials: string[]
   }
 }
+
+// ---------------------
+// POST CARD PROPS
+// ---------------------
+export type ViewMode = 'grid' | 'list' | 'feed' | 'detailed'
 
 export interface PostCardProps {
   post: Post
@@ -102,10 +126,13 @@ export interface PostCardProps {
   showEngagement?: boolean
   compact?: boolean
   featured?: boolean
-  viewMode?: 'grid' | 'list'
+  viewMode?: ViewMode
   className?: string
 }
 
+// ---------------------
+// BASE API RESPONSE
+// ---------------------
 export interface ApiResponse<T = any> {
   success: boolean
   data?: T
@@ -113,8 +140,11 @@ export interface ApiResponse<T = any> {
   message?: string
 }
 
-export interface PaginatedResponse<T = any> {
-  data: T[]
+// ---------------------
+// PAGINATED GENERIC RESPONSE
+// ---------------------
+export interface PaginatedResponse<T> {
+  items: T[]
   pagination: {
     currentPage: number
     totalPages: number
@@ -124,14 +154,33 @@ export interface PaginatedResponse<T = any> {
   }
 }
 
-interface FeaturedPost {
-  _id: string;
+// ---------------------
+// POSTS SPECIFIC PAGINATED RESPONSE
+// ---------------------
+export interface PostsApiResponse {
+  success: boolean
+  posts: Post[]
+  pagination: {
+    currentPage: number
+    totalPages: number
+    totalItems: number
+    hasNext: boolean
+    hasPrev: boolean
+  }
+  message?: string
+}
+
+// ---------------------
+// FEATURED POST
+// ---------------------
+export interface FeaturedPost {
+  _id: string
   author: {
-    _id: string;          // ✅ Required
-    firstName: string;
-    lastName: string;
-    username: string;
-    media:Media
-    avatar: string;
-  };
+    _id: string
+    firstName: string
+    lastName: string
+    username: string
+    avatar: string
+    media: Media
+  }
 }
