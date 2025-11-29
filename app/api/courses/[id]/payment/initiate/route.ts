@@ -92,7 +92,7 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid course price' }, { status: 400 })
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL 
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL 
 
     // STRIPE PAYMENT FLOW
     if (paymentMethod === 'stripe') {
