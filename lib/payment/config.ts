@@ -1,94 +1,105 @@
 class PaymentConfig {
-  private validateKey(key: string | undefined, keyName: string, allowedPrefixes: string[]) {
-    if (!key) throw new Error(`Missing ${keyName}`);
-    if (!allowedPrefixes.some(p => key.startsWith(p))) {
-      throw new Error(`${keyName} must start with one of: ${allowedPrefixes.join(', ')}`);
-    }
+  private validateKey(key: string | undefined, keyName: string, expectedPrefix: string) {
+    if (!key) throw new Error(`Missing ${keyName}`)
+    if (!key.startsWith(expectedPrefix)) throw new Error(`Invalid ${keyName} format. Must start with "${expectedPrefix}"`)
   }
 
   get stripe() {
-    const publicKey = process.env.NEXT_PUBLIC_STRIPE_PUBLIC_KEY;
-    const secretKey = process.env.STRIPE_SECRET_KEY;
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const publicKey = process.env.NEXT_PUBLIC_STRIPE_PUBLIC_KEY;
+  const secretKey = process.env.STRIPE_SECRET_KEY;
 
-    const isProdRuntime =
-      process.env.NODE_ENV === 'production' && process.env.VERCEL === '1';
+  // Allow both test & live keys in all environments
+  const validPublicPrefixes = ["pk_test_", "pk_live_"];
+  const validSecretPrefixes = ["sk_test_", "sk_live_"];
 
-    // 🚫 DO NOT VALIDATE DURING BUILD
-    if (isProdRuntime) {
-      this.validateKey(publicKey, 'Stripe public key', ['pk_live_']);
-      this.validateKey(secretKey, 'Stripe secret key', ['sk_live_']);
-    } else {
-      // Dev-friendly non-breaking warnings
-      if (publicKey && !publicKey.startsWith('pk_test_') && !publicKey.startsWith('pk_live_')) {
-        console.warn('⚠ Stripe public key should start with pk_test_ in development.');
-      }
-      if (secretKey && !secretKey.startsWith('sk_test_') && !secretKey.startsWith('sk_live_')) {
-        console.warn('⚠ Stripe secret key should start with sk_test_ in development.');
-      }
-    }
+  if (!publicKey) throw new Error("Missing Stripe public key");
+  if (!secretKey) throw new Error("Missing Stripe secret key");
 
-    return {
-      publicKey: publicKey?.trim() || '',
-      secretKey: secretKey?.trim() || '',
-      webhookSecret: webhookSecret?.trim() || '',
-    };
+  if (!validPublicPrefixes.some(p => publicKey.startsWith(p))) {
+    throw new Error(
+      `Invalid Stripe public key. Must start with one of: ${validPublicPrefixes.join(", ")}`
+    );
   }
+
+  if (!validSecretPrefixes.some(p => secretKey.startsWith(p))) {
+    throw new Error(
+      `Invalid Stripe secret key. Must start with one of: ${validSecretPrefixes.join(", ")}`
+    );
+  }
+
+  return {
+    publicKey: publicKey.trim(),
+    secretKey: secretKey.trim(),
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET?.trim() || "",
+  };
+}
+
+
 
   get khalti() {
-    const publicKey = process.env.NEXT_PUBLIC_KHALTI_PUBLIC_KEY;
-    const secretKey = process.env.KHALTI_SECRET_KEY;
+  const publicKey = process.env.NEXT_PUBLIC_KHALTI_PUBLIC_KEY
+  const secretKey = process.env.KHALTI_SECRET_KEY
 
-    if (!publicKey || !secretKey) {
-      throw new Error('Missing Khalti keys. Please check your environment variables.');
-    }
-
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('Khalti Key Check:', {
-        publicKey: publicKey.substring(0, 8) + '...',
-        secretKey: secretKey.substring(0, 8) + '...',
-        publicKeyLength: publicKey.length,
-        secretKeyLength: secretKey.length,
-      });
-    }
-
-    return {
-      publicKey: publicKey.trim(),
-      secretKey: secretKey.trim(),
-      webhookSecret: process.env.KHALTI_WEBHOOK_SECRET?.trim() || '',
-      baseUrl: process.env.KHALTI_BASE_URL || 'https://dev.khalti.com/api/v2',
-    };
+  // More flexible validation for Khalti
+  if (!publicKey || !secretKey) {
+    throw new Error('Missing Khalti keys. Please check your environment variables.')
   }
 
+  const trimmedPublicKey = publicKey.trim()
+  const trimmedSecretKey = secretKey.trim()
+
+  // Khalti keys don't follow predictable patterns, so remove prefix validation
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('Khalti Key Check:', {
+      publicKey: trimmedPublicKey.substring(0, 8) + '...',
+      secretKey: trimmedSecretKey.substring(0, 8) + '...',
+      publicKeyLength: trimmedPublicKey.length,
+      secretKeyLength: trimmedSecretKey.length
+    })
+  }
+
+  return {
+    publicKey: trimmedPublicKey,
+    secretKey: trimmedSecretKey,
+    webhookSecret: process.env.KHALTI_WEBHOOK_SECRET?.trim() || '',
+    baseUrl: process.env.KHALTI_BASE_URL || 'https://dev.khalti.com/api/v2',
+  }
+}
+
   get currency() {
-    return 'USD';
+    return 'USD'
   }
 
   get nepaliCurrency() {
-    return 'NPR';
+    return 'NPR'
   }
 
   get exchangeRate() {
-    return 133;
+    return 133 // USD to NPR
   }
 
   get paymentTimeout() {
-    return 30 * 60 * 1000;
+    return 30 * 60 * 1000 // 30 minutes
   }
 }
 
-export const paymentConfig = new PaymentConfig();
+export const paymentConfig = new PaymentConfig()
 
 export function validatePaymentConfig() {
+  const { stripe, khalti } = paymentConfig
+  
   if (process.env.NODE_ENV === 'production') {
-    const required = ['STRIPE_SECRET_KEY', 'KHALTI_SECRET_KEY'];
+    const required = [
+      'STRIPE_SECRET_KEY',
+      'KHALTI_SECRET_KEY',
+    ]
 
-    const missing = required.filter(key => !process.env[key]);
-
+    const missing = required.filter(key => !process.env[key])
+    
     if (missing.length > 0) {
-      throw new Error(`Missing required payment environment variables: ${missing.join(', ')}`);
+      throw new Error(`Missing required payment environment variables: ${missing.join(', ')}`)
     }
   }
 }
 
-export type PaymentMethod = 'stripe' | 'khalti' | 'free';
+export type PaymentMethod = 'stripe' | 'khalti' | 'free'
