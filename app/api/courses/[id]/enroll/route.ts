@@ -4,6 +4,7 @@ import { connectToDatabase } from '@/lib/mongodb'
 import User from '@/lib/models/User'
 import Course from '@/lib/models/Course'
 import UserProgress from '@/lib/models/UserProgress'
+import { rateLimit } from '@/lib/rate-limit'
 import mongoose from 'mongoose'
 
 export async function POST(
@@ -11,14 +12,24 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // Rate limiting
     const user = await currentUser()
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const rateLimitKey = `enroll:${user.id}`
+    const rateLimitResult = rateLimit(rateLimitKey, 5) // 5 attempts per minute
+    
+    if (rateLimitResult.isRateLimited) {
+      return NextResponse.json(
+        { error: 'Too many enrollment attempts. Please try again later.' }, 
+        { status: 429, headers: rateLimitResult.headers }
+      )
+    }
+
     await connectToDatabase()
     
-    // Get the current user from database
     const currentUserDoc = await User.findOne({ clerkId: user.id })
     if (!currentUserDoc) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
@@ -26,16 +37,17 @@ export async function POST(
 
     const { id } = await params
 
-    // Check if the ID is a valid MongoDB ObjectId
-    const isValidObjectId = mongoose.Types.ObjectId.isValid(id)
+    // Validate course ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return NextResponse.json({ error: 'Invalid course ID' }, { status: 400 })
+    }
     
     let course
     
-    if (isValidObjectId) {
-      // Search by ObjectId
+    // Try by ObjectId first, then by slug
+    if (mongoose.Types.ObjectId.isValid(id)) {
       course = await Course.findById(id)
     } else {
-      // Search by slug
       course = await Course.findOne({ slug: id })
     }
 
@@ -47,29 +59,29 @@ export async function POST(
       return NextResponse.json({ error: 'Course is not available' }, { status: 403 })
     }
 
-    // Check if user is already enrolled
+    // Check if user is already enrolled using your Course model
     const isAlreadyEnrolled = course.students.some(
       (student: any) => student.user.toString() === currentUserDoc._id.toString()
     )
 
     if (isAlreadyEnrolled) {
-      // Get existing progress
-      const existingProgress = await UserProgress.findOne({
-        courseId: course._id,
-        userId: currentUserDoc._id
-      })
-
       return NextResponse.json({ 
         alreadyEnrolled: true,
-        message: 'Already enrolled in this course',
-        courseId: course._id,
-        slug: course.slug,
-        progress: existingProgress
+        message: 'Already enrolled in this course'
       })
     }
 
-    // Add user to course students with proper data structure
-    const updatedCourse = await Course.findByIdAndUpdate(
+    // For paid courses, redirect to payment
+    if (!course.isFree && course.price > 0) {
+      return NextResponse.json({ 
+        requiresPayment: true,
+        price: course.price,
+        message: 'Course requires payment'
+      }, { status: 402 }) // Payment Required
+    }
+
+    // For free courses, use your Course model's addStudent method
+    await Course.findByIdAndUpdate(
       course._id,
       {
         $push: {
@@ -77,17 +89,13 @@ export async function POST(
             user: currentUserDoc._id,
             enrolledAt: new Date(),
             progress: 0,
-            completed: false
+            completed: false,
+            enrolledThrough: 'free'
           }
         },
         $inc: { totalStudents: 1 }
-      },
-      { new: true }
-    ).populate('instructor', 'firstName lastName username avatar bio rating totalStudents')
-
-    if (!updatedCourse) {
-      throw new Error('Failed to update course enrollment')
-    }
+      }
+    )
 
     // Create initial user progress
     const firstLesson = course.modules[0]?.lessons[0]
@@ -102,26 +110,32 @@ export async function POST(
       completed: false
     })
 
-    // Create enrollment activity (optional - if you have activities collection)
-    try {
-      await mongoose.connection.collection('activities').insertOne({
-        type: 'enrollment',
-        userId: currentUserDoc._id,
-        courseId: course._id,
-        courseTitle: course.title,
-        createdAt: new Date(),
-        metadata: {
-          price: course.price,
-          isFree: course.isFree,
-          instructor: course.instructor
-        }
-      })
-    } catch (activityError) {
-      console.warn('Failed to create activity log:', activityError)
-      // Continue even if activity logging fails
+    // Create enrollment activity
+    await mongoose.connection.collection('activities').insertOne({
+      type: 'enrollment',
+      userId: currentUserDoc._id,
+      courseId: course._id,
+      courseTitle: course.title,
+      createdAt: new Date(),
+      metadata: {
+        price: course.price,
+        isFree: course.isFree,
+        instructor: course.instructor,
+        enrolledThrough: 'free'
+      }
+    })
+
+    // Refresh course data to get updated student count
+    const updatedCourse = await Course.findById(course._id)
+      .populate('instructor', 'firstName lastName username avatar bio rating totalStudents')
+
+    // Fix: Add null check for updatedCourse
+    if (!updatedCourse) {
+      throw new Error('Failed to retrieve updated course data')
     }
 
     return NextResponse.json({
+      success: true,
       enrolled: true,
       message: 'Successfully enrolled in course',
       courseId: course._id,
@@ -132,40 +146,15 @@ export async function POST(
         title: updatedCourse.title,
         totalStudents: updatedCourse.totalStudents,
         instructor: updatedCourse.instructor
-      }
+      },
+      headers: rateLimitResult.headers
     })
 
   } catch (error: any) {
     console.error('Error enrolling in course:', error)
     
-    // More detailed error response
-    if (error.name === 'ValidationError') {
-      console.error('Validation error details:', error.errors)
-      return NextResponse.json(
-        { 
-          error: 'Validation failed',
-          details: Object.keys(error.errors).map(key => ({
-            field: key,
-            message: error.errors[key].message
-          }))
-        }, 
-        { status: 400 }
-      )
-    }
-    
-    // Handle duplicate key errors (if user somehow gets enrolled twice)
-    if (error.code === 11000) {
-      return NextResponse.json(
-        { 
-          alreadyEnrolled: true,
-          message: 'Already enrolled in this course'
-        }, 
-        { status: 200 }
-      )
-    }
-    
     return NextResponse.json(
-      { error: 'Internal server error' }, 
+      { error: 'Failed to enroll in course' }, 
       { status: 500 }
     )
   }

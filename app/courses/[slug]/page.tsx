@@ -1,4 +1,3 @@
-// app/courses/[slug]/page.tsx
 'use client'
 
 import { useState, useEffect } from 'react'
@@ -9,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { useToast } from "@/components/ui/use-toast"
 import { Textarea } from '@/components/ui/textarea'
+import { PaymentModal } from '@/components/payment/PaymentModal'
 import { 
   Star, 
   Users, 
@@ -33,7 +33,9 @@ import {
   ArrowRight,
   Video,
   Zap,
-  Check
+  Check,
+  CreditCard,
+  Smartphone
 } from 'lucide-react'
 
 interface S3Asset {
@@ -160,7 +162,7 @@ export default function CourseDetailPage() {
   const [updatingProgress, setUpdatingProgress] = useState<string | null>(null)
   const [activeLesson, setActiveLesson] = useState<Lesson | null>(null)
   const [completedLessons, setCompletedLessons] = useState<Set<string>>(new Set())
-  const [enrolledCourses, setEnrolledCourses] = useState<Set<string>>(new Set())
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showEnrollmentSuccess, setShowEnrollmentSuccess] = useState(false)
 
   const slug = params.slug as string
@@ -236,8 +238,6 @@ export default function CourseDetailPage() {
         } else if (processedCourse.modules[0]?.lessons[0]) {
           setActiveLesson(processedCourse.modules[0].lessons[0])
         }
-        
-        setEnrolledCourses(prev => new Set([...prev, processedCourse._id]))
       } else {
         setUserProgress(null)
       }
@@ -286,52 +286,56 @@ export default function CourseDetailPage() {
         }
       })
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || `Failed to enroll (${response.status})`)
-      }
-
       const result = await response.json()
-      
-      if (result.alreadyEnrolled || result.enrolled) {
-        toast({
-          title: result.alreadyEnrolled ? 'Welcome Back!' : '🎉 Successfully Enrolled!',
-          description: result.alreadyEnrolled 
-            ? 'Continuing your learning journey' 
-            : `You've been enrolled in "${course.title}". Check your notifications for details!`,
-          variant: 'default',
-        })
-        
-        setCourse(prev => prev ? {
-          ...prev,
-          totalStudents: result.course?.totalStudents || prev.totalStudents + 1,
-          instructor: result.course?.instructor || prev.instructor
-        } : null)
-        
-        if (result.progress) {
-          setUserProgress(result.progress)
-          setCompletedLessons(new Set(result.progress.completedLessons || []))
+
+      if (response.ok) {
+        if (result.requiresPayment) {
+          // Show payment modal for paid courses
+          setShowPaymentModal(true)
+          setIsEnrolling(false)
+          return
         }
-        
-        setEnrolledCourses(prev => new Set([...prev, course!._id]))
-        
-        if (result.enrolled) {
-          setShowEnrollmentSuccess(true)
-          setTimeout(() => setShowEnrollmentSuccess(false), 3000)
-        }
-        
-        if (result.enrolled && course?.modules[0]?.lessons[0]) {
-          setActiveLesson(course.modules[0].lessons[0])
-          setTimeout(() => setIsLearningMode(true), 1000)
-        } else if (result.alreadyEnrolled && result.progress?.currentLesson) {
-          const currentLesson = findLessonById(course!, result.progress.currentLesson)
-          if (currentLesson) {
-            setActiveLesson(currentLesson)
-            setIsLearningMode(true)
+
+        if (result.alreadyEnrolled || result.enrolled) {
+          toast({
+            title: result.alreadyEnrolled ? 'Welcome Back!' : '🎉 Successfully Enrolled!',
+            description: result.alreadyEnrolled 
+              ? 'Continuing your learning journey' 
+              : `You've been enrolled in "${course.title}". Check your notifications for details!`,
+            variant: 'default',
+          })
+          
+          setCourse(prev => prev ? {
+            ...prev,
+            totalStudents: result.course?.totalStudents || prev.totalStudents + 1,
+            instructor: result.course?.instructor || prev.instructor
+          } : null)
+          
+          if (result.progress) {
+            setUserProgress(result.progress)
+            setCompletedLessons(new Set(result.progress.completedLessons || []))
           }
+          
+          if (result.enrolled) {
+            setShowEnrollmentSuccess(true)
+            setTimeout(() => setShowEnrollmentSuccess(false), 3000)
+          }
+          
+          if (result.enrolled && course?.modules[0]?.lessons[0]) {
+            setActiveLesson(course.modules[0].lessons[0])
+            setTimeout(() => setIsLearningMode(true), 1000)
+          } else if (result.alreadyEnrolled && result.progress?.currentLesson) {
+            const currentLesson = findLessonById(course!, result.progress.currentLesson)
+            if (currentLesson) {
+              setActiveLesson(currentLesson)
+              setIsLearningMode(true)
+            }
+          }
+        } else {
+          throw new Error('Unexpected response from server')
         }
       } else {
-        throw new Error('Unexpected response from server')
+        throw new Error(result.error || `Failed to enroll (${response.status})`)
       }
 
     } catch (err: any) {
@@ -346,6 +350,28 @@ export default function CourseDetailPage() {
     } finally {
       setIsEnrolling(false)
     }
+  }
+
+  const handlePaymentSuccess = (courseId: string) => {
+    setShowPaymentModal(false)
+    setShowEnrollmentSuccess(true)
+    
+    // Refresh course data
+    fetchCourseData()
+    
+    toast({
+      title: '🎉 Enrollment Successful!',
+      description: 'Payment completed and you have been enrolled in the course',
+      variant: 'default',
+    })
+    
+    setTimeout(() => {
+      setShowEnrollmentSuccess(false)
+      if (course?.modules[0]?.lessons[0]) {
+        setActiveLesson(course.modules[0].lessons[0])
+        setIsLearningMode(true)
+      }
+    }, 2000)
   }
 
   const updateProgress = async (lessonId: string, completed: boolean = false, isCurrent: boolean = true) => {
@@ -558,7 +584,7 @@ export default function CourseDetailPage() {
   }
 
   const EnrollmentButton = () => {
-    if (enrolledCourses.has(course!._id)) {
+    if (userProgress) {
       return (
         <Button
           onClick={() => setIsLearningMode(true)}
@@ -1304,7 +1330,7 @@ export default function CourseDetailPage() {
                                   </p>
                                 </div>
                               </div>
-                              {enrolledCourses.has(course._id) && (
+                              {userProgress && (
                                 <div className="flex items-center space-x-2">
                                   {completedLessons.has(lesson._id) && (
                                     <CheckCircle className="w-4 h-4 text-green-500" />
@@ -1323,7 +1349,7 @@ export default function CourseDetailPage() {
                                   </Button>
                                 </div>
                               )}
-                              {lesson.isPreview && lesson.video && !enrolledCourses.has(course._id) && (
+                              {lesson.isPreview && lesson.video && !userProgress && (
                                 <Button 
                                   variant="outline" 
                                   size="sm" 
@@ -1585,6 +1611,16 @@ export default function CourseDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Payment Modal */}
+      {course && (
+        <PaymentModal
+          course={course}
+          isOpen={showPaymentModal}
+          onClose={() => setShowPaymentModal(false)}
+          onSuccess={handlePaymentSuccess}
+        />
+      )}
     </div>
   )
 }

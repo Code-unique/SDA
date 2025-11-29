@@ -1,4 +1,3 @@
-// app/courses/page.tsx
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
@@ -43,7 +42,6 @@ import {
   DownloadCloud,
   CheckCircle,
   ArrowRight,
-  CrownIcon,
   Flame,
   BookCheck,
   Play,
@@ -61,8 +59,11 @@ import {
   Clock4,
   ShieldCheck,
   X,
-  SlidersHorizontal
+  SlidersHorizontal,
+  CreditCard,
+  Smartphone
 } from 'lucide-react'
+import { PaymentModal } from '@/components/payment/PaymentModal'
 
 interface S3Asset {
   key: string
@@ -177,6 +178,8 @@ export default function CoursesPage() {
   const [isEnrolling, setIsEnrolling] = useState<string | null>(null)
   const [favoriteCourses, setFavoriteCourses] = useState<Set<string>>(new Set())
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [enrollingCourse, setEnrollingCourse] = useState<Course | null>(null)
   const observerTarget = useRef<HTMLDivElement>(null)
   const streamController = useRef<AbortController | null>(null)
   const filtersRef = useRef<HTMLDivElement>(null)
@@ -403,37 +406,51 @@ export default function CoursesPage() {
     }
   }
 
-  // Enhanced quick enroll function
-  const quickEnroll = async (courseId: string, courseSlug?: string) => {
-    if (isEnrolling) return
-    
-    setIsEnrolling(courseId)
-    try {
-      const response = await fetch(`/api/courses/${courseId}/enroll`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      })
+  // Enhanced enrollment function with proper payment handling
+const enrollInCourse = async (course: Course) => {
+  if (isEnrolling) return
+  
+  setIsEnrolling(course._id)
+  setError(null)
+  
+  try {
+    const response = await fetch(`/api/courses/${course._id}/enroll`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    })
 
-      const result = await response.json()
+    const result = await response.json()
 
-      if (response.ok) {
-        setCourses(prev => prev.map(course => 
-          course._id === courseId 
+    // Handle payment required - this is NOT an error, it's a normal flow
+    if (response.status === 402 && result.requiresPayment) {
+      // Show payment modal for paid courses
+      setEnrollingCourse(course)
+      setShowPaymentModal(true)
+      setIsEnrolling(null)
+      return // Exit early - this is not an error
+    }
+
+    // Handle other successful responses (200 status)
+    if (response.ok) {
+      if (result.enrolled) {
+        // Handle successful enrollment for free courses
+        setCourses(prev => prev.map(c => 
+          c._id === course._id 
             ? { 
-                ...course, 
-                totalStudents: result.course?.totalStudents || course.totalStudents + 1,
-                instructor: result.course?.instructor || course.instructor
+                ...c, 
+                totalStudents: result.course?.totalStudents || c.totalStudents + 1,
+                instructor: result.course?.instructor || c.instructor
               }
-            : course
+            : c
         ))
         
         setUserProgress(prev => ({
           ...prev,
-          [courseId]: {
-            _id: `temp-${courseId}`,
-            courseId,
+          [course._id]: {
+            _id: `temp-${course._id}`,
+            courseId: course._id,
             userId: 'current-user',
             enrolled: true,
             progress: 0,
@@ -445,23 +462,52 @@ export default function CoursesPage() {
         }))
         
         toast({
-          title: result.alreadyEnrolled ? 'Already Enrolled!' : 'Successfully Enrolled!',
-          description: result.alreadyEnrolled 
-            ? 'You are already enrolled in this course' 
-            : 'You can now start learning immediately',
+          title: 'Successfully Enrolled!',
+          description: 'You can now start learning immediately',
         })
 
-        if (courseSlug && !result.alreadyEnrolled) {
+        if (course.slug) {
           setTimeout(() => {
-            router.push(`/courses/${courseSlug}`)
+            router.push(`/courses/${course.slug}`)
           }, 1500)
         }
-      } else {
-        throw new Error(result.error || `Failed to enroll (${response.status})`)
+      } 
+      // Handle already enrolled case
+      else if (result.alreadyEnrolled) {
+        toast({
+          title: 'Already Enrolled!',
+          description: 'You are already enrolled in this course',
+        })
+        
+        // Update UI to show enrolled status
+        setUserProgress(prev => ({
+          ...prev,
+          [course._id]: {
+            _id: `temp-${course._id}`,
+            courseId: course._id,
+            userId: 'current-user',
+            enrolled: true,
+            progress: result.progress?.progress || 0,
+            completed: result.progress?.completed || false,
+            completedLessons: result.progress?.completedLessons || [],
+            lastAccessed: new Date(),
+            timeSpent: result.progress?.timeSpent || 0
+          }
+        }))
       }
-    } catch (err: any) {
-      console.error('Error enrolling:', err)
-      
+      else {
+        throw new Error('Unexpected response from server')
+      }
+    } else {
+      // Handle actual errors (not 402 payment required)
+      throw new Error(result.error || `Failed to enroll (${response.status})`)
+    }
+
+  } catch (err: any) {
+    console.error('Error enrolling:', err)
+    
+    // Only show error toast for actual errors (not payment flow)
+    if (err.message && !err.message.includes('402')) {
       if (err.message.includes('Unauthorized')) {
         toast({
           title: 'Login Required',
@@ -481,9 +527,40 @@ export default function CoursesPage() {
           variant: 'destructive',
         })
       }
-    } finally {
-      setIsEnrolling(null)
     }
+  } finally {
+    setIsEnrolling(null)
+  }
+}
+
+  // Handle payment success
+  const handlePaymentSuccess = (courseId: string) => {
+    setUserProgress(prev => ({
+      ...prev,
+      [courseId]: {
+        _id: `temp-${courseId}`,
+        courseId,
+        userId: 'current-user',
+        enrolled: true,
+        progress: 0,
+        completed: false,
+        completedLessons: [],
+        lastAccessed: new Date(),
+        timeSpent: 0
+      }
+    }))
+    
+    setShowPaymentModal(false)
+    setEnrollingCourse(null)
+    
+    // Refresh course data
+    fetchCourses(1, false)
+    
+    toast({
+      title: '🎉 Enrollment Successful!',
+      description: 'You have been successfully enrolled in the course',
+      variant: 'default',
+    })
   }
 
   // Continue learning - redirect to course detail page
@@ -505,7 +582,7 @@ export default function CoursesPage() {
   const getEnrollmentButton = (course: Course) => {
     const progress = userProgress[course._id]
     const isEnrolled = isUserEnrolled(course._id)
-    const isLoading = progressLoading.has(course._id)
+    const isLoading = progressLoading.has(course._id) || isEnrolling === course._id
     
     if (isLoading) {
       return (
@@ -529,7 +606,7 @@ export default function CoursesPage() {
           className="rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 shadow-lg shadow-rose-500/25 transition-all duration-200 transform hover:scale-105"
           onClick={(e) => {
             e.stopPropagation()
-            quickEnroll(course._id, course.slug)
+            enrollInCourse(course)
           }}
           disabled={isEnrolling === course._id}
         >
@@ -1145,7 +1222,7 @@ export default function CoursesPage() {
                     variant="default"
                     size="lg" 
                     className="rounded-2xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 shadow-lg shadow-rose-500/25 transition-all duration-200 transform hover:scale-105"
-                    onClick={() => quickEnroll(course._id, course.slug)}
+                    onClick={() => enrollInCourse(course)}
                     disabled={isEnrolling === course._id}
                   >
                     {isEnrolling === course._id ? (
@@ -1903,6 +1980,19 @@ export default function CoursesPage() {
         <QuickViewModal 
           course={selectedCourse} 
           onClose={() => setSelectedCourse(null)} 
+        />
+      )}
+
+      {/* Payment Modal */}
+      {enrollingCourse && (
+        <PaymentModal
+          course={enrollingCourse}
+          isOpen={showPaymentModal}
+          onClose={() => {
+            setShowPaymentModal(false)
+            setEnrollingCourse(null)
+          }}
+          onSuccess={handlePaymentSuccess}
         />
       )}
 

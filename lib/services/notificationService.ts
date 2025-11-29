@@ -3,6 +3,8 @@ import Notification from '@/lib/models/Notification'
 import User from '@/lib/models/User'
 import { Types } from 'mongoose'
 import { connectToDatabase } from '@/lib/mongodb'
+import Post from '@/lib/models/Post'
+
 
 export interface CreateNotificationParams {
   userId: string | Types.ObjectId
