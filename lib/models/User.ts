@@ -1,4 +1,3 @@
-// lib/models/User.ts
 import mongoose, { Document, Schema } from 'mongoose';
 
 export interface IUser extends Document {
@@ -19,6 +18,18 @@ export interface IUser extends Document {
   onboardingCompleted: boolean;
   followers: mongoose.Types.ObjectId[];
   following: mongoose.Types.ObjectId[];
+  // ADD NOTIFICATION PREFERENCES
+  notificationPreferences: {
+    likes: boolean;
+    comments: boolean;
+    follows: boolean;
+    courses: boolean;
+    achievements: boolean;
+    messages: boolean;
+    announcements: boolean;
+    marketing: boolean;
+  };
+  lastNotificationReadAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -107,6 +118,33 @@ const UserSchema = new Schema<IUser>(
       type: Schema.Types.ObjectId,
       ref: 'User'
     }],
+    // ADD NOTIFICATION PREFERENCES
+    notificationPreferences: {
+      type: {
+        likes: { type: Boolean, default: true },
+        comments: { type: Boolean, default: true },
+        follows: { type: Boolean, default: true },
+        courses: { type: Boolean, default: true },
+        achievements: { type: Boolean, default: true },
+        messages: { type: Boolean, default: true },
+        announcements: { type: Boolean, default: true },
+        marketing: { type: Boolean, default: false }
+      },
+      default: {
+        likes: true,
+        comments: true,
+        follows: true,
+        courses: true,
+        achievements: true,
+        messages: true,
+        announcements: true,
+        marketing: false
+      }
+    },
+    lastNotificationReadAt: {
+      type: Date,
+      default: Date.now
+    }
   },
   { timestamps: true }
 );
@@ -115,5 +153,7 @@ const UserSchema = new Schema<IUser>(
 UserSchema.index({ followers: 1 });
 UserSchema.index({ following: 1 });
 UserSchema.index({ createdAt: -1 });
+UserSchema.index({ 'notificationPreferences.likes': 1 });
+UserSchema.index({ 'notificationPreferences.comments': 1 });
 
 export default mongoose.models.User || mongoose.model<IUser>('User', UserSchema);

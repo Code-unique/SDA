@@ -1,12 +1,12 @@
-// app/api/courses/[id]/enroll/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
-import Course from '@/lib/models/Course';
+import Course, { ICourse } from '@/lib/models/Course'; // ADD TYPE IMPORT
 import UserProgress from '@/lib/models/UserProgress';
 import { rateLimit } from '@/lib/rate-limit';
 import mongoose from 'mongoose';
+import { NotificationService } from '@/lib/services/notificationService';
 
 export async function POST(
   request: NextRequest,
@@ -45,14 +45,14 @@ export async function POST(
     const { id } = await params;
 
     // Validate course ID
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!mongoose.Types.ObjectId.isValid(id) && !id.includes('-')) {
       return NextResponse.json(
         { error: 'Invalid course ID' },
         { status: 400 }
       );
     }
 
-    let course;
+    let course: ICourse | null = null;
 
     // Try by ObjectId first, then by slug
     if (mongoose.Types.ObjectId.isValid(id)) {
@@ -141,6 +141,17 @@ export async function POST(
       }
     });
 
+    // CREATE ENROLLMENT NOTIFICATION
+    if (currentUserDoc.notificationPreferences?.courses) {
+      await NotificationService.createNotification({
+        userId: currentUserDoc._id,
+        type: 'course',
+        courseId: course._id as mongoose.Types.ObjectId, // FIX: Type cast
+        message: `You enrolled in "${course.title}"`,
+        actionUrl: `/courses/${course.slug || course._id}`
+      });
+    }
+
     // Refresh course data to get updated student count
     const updatedCourse = await Course.findById(course._id)
       .populate('instructor', 'firstName lastName username avatar bio rating totalStudents');
@@ -168,7 +179,6 @@ export async function POST(
 
   } catch (error: any) {
     console.error('Error enrolling in course:', error);
-
     return NextResponse.json(
       { error: 'Failed to enroll in course' },
       { status: 500 }

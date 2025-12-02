@@ -1,11 +1,11 @@
-// app/api/courses/[id]/progress/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { currentUser } from '@clerk/nextjs/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import User from '@/lib/models/User'
-import Course from '@/lib/models/Course'
+import Course, { ICourse } from '@/lib/models/Course' // ADD TYPE IMPORT
 import UserProgress from '@/lib/models/UserProgress'
 import mongoose from 'mongoose'
+import { NotificationService } from '@/lib/services/notificationService'
 
 export async function GET(
   request: NextRequest,
@@ -29,7 +29,7 @@ export async function GET(
     // Check if the ID is a valid MongoDB ObjectId
     const isValidObjectId = mongoose.Types.ObjectId.isValid(id)
     
-    let course: any
+    let course: ICourse | null = null
     
     if (isValidObjectId) {
       // Search by ObjectId
@@ -112,7 +112,7 @@ export async function POST(
     // Check if the ID is a valid MongoDB ObjectId
     const isValidObjectId = mongoose.Types.ObjectId.isValid(id)
     
-    let course: any
+    let course: ICourse | null = null
     
     if (isValidObjectId) {
       // Search by ObjectId
@@ -201,6 +201,28 @@ export async function POST(
       if (newCompletedCount === totalLessons) {
         updates.completed = true
         updates.completedAt = new Date()
+        
+        // CREATE COURSE COMPLETION NOTIFICATION
+        if (currentUserDoc.notificationPreferences?.achievements) {
+          await NotificationService.createNotification({
+            userId: currentUserDoc._id,
+            type: 'achievement',
+            courseId: course._id as mongoose.Types.ObjectId, // FIX: Type cast
+            message: `🎉 You completed "${course.title}"! Congratulations!`,
+            actionUrl: `/courses/${course.slug || course._id}/certificate`
+          });
+        }
+        
+        // Also create a course completion notification
+        if (currentUserDoc.notificationPreferences?.courses) {
+          await NotificationService.createNotification({
+            userId: currentUserDoc._id,
+            type: 'course',
+            courseId: course._id as mongoose.Types.ObjectId, // FIX: Type cast
+            message: `You successfully completed "${course.title}"!`,
+            actionUrl: `/profile/achievements`
+          });
+        }
       }
     }
 

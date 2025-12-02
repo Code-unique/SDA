@@ -1,11 +1,13 @@
-// app/api/notifications/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { NotificationService } from '@/lib/services/notificationService';
+import { connectToDatabase } from '@/lib/mongodb';
 
 export async function GET(request: NextRequest) {
   try {
+    await connectToDatabase();
     const user = await currentUser();
+    
     if (!user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
@@ -24,7 +26,11 @@ export async function GET(request: NextRequest) {
       unreadOnly
     });
 
-    return NextResponse.json(result);
+    // Add cache control headers for performance
+    const response = NextResponse.json(result);
+    response.headers.set('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
+    
+    return response;
   } catch (error) {
     console.error('Error fetching notifications:', error);
     return NextResponse.json(
@@ -36,7 +42,9 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    await connectToDatabase();
     const user = await currentUser();
+    
     if (!user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
@@ -52,7 +60,7 @@ export async function PATCH(request: NextRequest) {
     } else if (notificationIds && Array.isArray(notificationIds) && notificationIds.length > 0) {
       // Validate notification IDs
       const validIds = notificationIds.filter((id: string) =>
-        typeof id === 'string' && id.length === 24
+        typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id)
       );
 
       if (validIds.length === 0) {

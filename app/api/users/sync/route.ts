@@ -1,4 +1,3 @@
-// app/api/users/sync/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';
@@ -48,7 +47,19 @@ export async function POST(request: NextRequest) {
       isVerified: false,
       followers: [],
       following: [],
-      onboardingCompleted: false
+      onboardingCompleted: false,
+      // ADD DEFAULT NOTIFICATION PREFERENCES
+      notificationPreferences: {
+        likes: true,
+        comments: true,
+        follows: true,
+        courses: true,
+        achievements: true,
+        messages: true,
+        announcements: true,
+        marketing: false
+      },
+      lastNotificationReadAt: new Date()
     });
 
     return NextResponse.json({
