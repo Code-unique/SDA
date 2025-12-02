@@ -1,8 +1,15 @@
-import mongoose from 'mongoose'
+// lib/models/PendingEnrollment.ts
+import mongoose from 'mongoose';
 
 const pendingEnrollmentSchema = new mongoose.Schema({
-  paymentIntentId: String,
-  pidx: String,
+  paymentIntentId: {
+    type: String,
+    index: true
+  },
+  pidx: {
+    type: String,
+    index: true
+  },
   courseId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Course',
@@ -13,9 +20,19 @@ const pendingEnrollmentSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
-  amount: Number,
-  amountInNPR: Number,
-  currency: String,
+  amount: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  amountInNPR: {
+    type: Number,
+    min: 0
+  },
+  currency: {
+    type: String,
+    required: true
+  },
   paymentMethod: {
     type: String,
     enum: ['stripe', 'khalti'],
@@ -29,17 +46,16 @@ const pendingEnrollmentSchema = new mongoose.Schema({
   expiresAt: {
     type: Date,
     required: true
-    // Remove the index definition from here
   }
 }, {
   timestamps: true
-})
+});
 
-// Define indexes separately (not in schema fields)
-pendingEnrollmentSchema.index({ paymentIntentId: 1 })
-pendingEnrollmentSchema.index({ pidx: 1 })
-pendingEnrollmentSchema.index({ userId: 1, courseId: 1 })
-pendingEnrollmentSchema.index({ status: 1 })
-pendingEnrollmentSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 }) // TTL index
+// Define indexes
+pendingEnrollmentSchema.index({ paymentIntentId: 1 });
+pendingEnrollmentSchema.index({ pidx: 1 });
+pendingEnrollmentSchema.index({ userId: 1, courseId: 1 });
+pendingEnrollmentSchema.index({ status: 1 });
+pendingEnrollmentSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
-export default mongoose.models.PendingEnrollment || mongoose.model('PendingEnrollment', pendingEnrollmentSchema)
+export default mongoose.models.PendingEnrollment || mongoose.model('PendingEnrollment', pendingEnrollmentSchema);

@@ -2,12 +2,11 @@
 const nextConfig = {
   // ✅ Experimental features for App Router
   experimental: {
-    serverComponentsExternalPackages: ['mongoose', 'cloudinary'],
-    serverActions: true,
+    serverActions: {},
   },
 
   // ✅ Allow external packages in server runtime
-  serverExternalPackages: ['mongoose', 'cloudinary'],
+  serverExternalPackages: ['mongoose', 'cloudinary', 'aws-sdk'],
 
   // ✅ Image configurations
   images: {
@@ -16,8 +15,14 @@ const nextConfig = {
       { protocol: 'https', hostname: 'images.clerk.dev' },
       { protocol: 'https', hostname: 'img.clerk.com' },
       { protocol: 'https', hostname: 'images.unsplash.com' },
-      // Remove the generic '**' pattern as it's too broad
+      // ✅ Add S3 domains for your uploaded images/videos
+      { protocol: 'https', hostname: '*.s3.amazonaws.com' },
+      { protocol: 'https', hostname: '*.s3.*.amazonaws.com' },
+      { protocol: 'https', hostname: process.env.AWS_S3_BUCKET_NAME ? `${process.env.AWS_S3_BUCKET_NAME}.s3.amazonaws.com` : '' },
     ],
+    // ✅ Allow larger image sizes if needed
+    deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
+    imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
   },
 
   // ✅ TypeScript configuration
@@ -25,16 +30,44 @@ const nextConfig = {
     ignoreBuildErrors: false,
   },
 
-  // ✅ Environment variables
-  env: {
-    CLOUDINARY_URL: process.env.CLOUDINARY_URL,
-  },
+ 
 
-  // ✅ Add logging for debugging
-  logging: {
-    fetches: {
-      fullUrl: true,
-    },
+  // ✅ Compression for better performance
+  compress: true,
+
+  // ✅ Security headers
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'X-DNS-Prefetch-Control',
+            value: 'on'
+          },
+          {
+            key: 'Strict-Transport-Security',
+            value: 'max-age=63072000; includeSubDomains; preload'
+          },
+          {
+            key: 'X-XSS-Protection',
+            value: '1; mode=block'
+          },
+          {
+            key: 'X-Frame-Options',
+            value: 'SAMEORIGIN'
+          },
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff'
+          },
+          {
+            key: 'Referrer-Policy',
+            value: 'origin-when-cross-origin'
+          }
+        ],
+      },
+    ]
   },
 };
 

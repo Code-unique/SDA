@@ -1,3 +1,4 @@
+// app/api/courses/[id]/progress/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { currentUser } from '@clerk/nextjs/server'
 import { connectToDatabase } from '@/lib/mongodb'
@@ -28,7 +29,7 @@ export async function GET(
     // Check if the ID is a valid MongoDB ObjectId
     const isValidObjectId = mongoose.Types.ObjectId.isValid(id)
     
-    let course
+    let course: any
     
     if (isValidObjectId) {
       // Search by ObjectId
@@ -67,7 +68,17 @@ export async function GET(
       })
     }
 
-    return NextResponse.json(userProgress)
+    // Convert to plain object for serialization
+    const progressData = userProgress.toObject ? userProgress.toObject() : userProgress
+    
+    return NextResponse.json({
+      ...progressData,
+      _id: (progressData._id as any)?.toString() || '',
+      courseId: (progressData.courseId as any)?.toString() || '',
+      userId: (progressData.userId as any)?.toString() || '',
+      currentLesson: (progressData.currentLesson as any)?.toString() || null,
+      completedLessons: (progressData.completedLessons || []).map((id: any) => id?.toString() || '')
+    })
   } catch (error: any) {
     console.error('Error fetching user progress:', error)
     return NextResponse.json(
@@ -101,7 +112,7 @@ export async function POST(
     // Check if the ID is a valid MongoDB ObjectId
     const isValidObjectId = mongoose.Types.ObjectId.isValid(id)
     
-    let course
+    let course: any
     
     if (isValidObjectId) {
       // Search by ObjectId
@@ -121,9 +132,9 @@ export async function POST(
       return NextResponse.json({ error: 'Not enrolled in this course' }, { status: 403 })
     }
 
-    // Verify lesson exists in course
-    let lessonExists = false
+    // Verify lesson exists in course and get its ObjectId
     let lessonObjectId: mongoose.Types.ObjectId | null = null
+    let lessonExists = false
 
     for (const module of course.modules) {
       for (const lesson of module.lessons) {
@@ -159,32 +170,37 @@ export async function POST(
       })
     }
 
+    // Calculate total lessons
+    const totalLessons = course.modules.reduce((total: number, module: any) => 
+      total + module.lessons.length, 0
+    )
+
     // Update progress
     const updates: any = {
       lastAccessed: new Date(),
-      $inc: { timeSpent }
+      timeSpent: (userProgress.timeSpent || 0) + timeSpent
     }
 
     if (current && lessonObjectId) {
       updates.currentLesson = lessonObjectId
     }
 
-    if (completed && lessonObjectId) {
-      if (!userProgress.completedLessons.includes(lessonObjectId)) {
-        updates.$addToSet = { completedLessons: lessonObjectId }
-        
-        // Calculate new progress
-        const totalLessons = course.modules.reduce((total: number, module: any) => 
-          total + module.lessons.length, 0
-        )
-        const newCompletedCount = userProgress.completedLessons.length + 1
-        updates.progress = Math.min(newCompletedCount / totalLessons, 1)
-        
-        // Check if course is completed
-        if (newCompletedCount === totalLessons) {
-          updates.completed = true
-          updates.completedAt = new Date()
-        }
+    let completedLessons = [...(userProgress.completedLessons || [])]
+    
+    if (completed && lessonObjectId && !completedLessons.some(id => 
+      (id as any)?.toString() === lessonObjectId?.toString()
+    )) {
+      completedLessons.push(lessonObjectId)
+      updates.completedLessons = completedLessons
+      
+      // Calculate new progress
+      const newCompletedCount = completedLessons.length
+      updates.progress = Math.min(newCompletedCount / totalLessons, 1)
+      
+      // Check if course is completed
+      if (newCompletedCount === totalLessons) {
+        updates.completed = true
+        updates.completedAt = new Date()
       }
     }
 
@@ -194,7 +210,17 @@ export async function POST(
       { new: true }
     )
 
-    return NextResponse.json(updatedProgress)
+    // Convert to plain object for serialization
+    const progressData = updatedProgress?.toObject ? updatedProgress.toObject() : updatedProgress
+    
+    return NextResponse.json({
+      ...progressData,
+      _id: (progressData?._id as any)?.toString() || '',
+      courseId: (progressData?.courseId as any)?.toString() || '',
+      userId: (progressData?.userId as any)?.toString() || '',
+      currentLesson: (progressData?.currentLesson as any)?.toString() || null,
+      completedLessons: (progressData?.completedLessons || []).map((id: any) => id?.toString() || '')
+    })
   } catch (error: any) {
     console.error('Error updating user progress:', error)
     return NextResponse.json(

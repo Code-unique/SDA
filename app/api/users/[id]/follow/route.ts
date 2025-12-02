@@ -1,61 +1,70 @@
 // app/api/users/[id]/follow/route.ts
-import { NextRequest, NextResponse } from 'next/server'
-import { currentUser } from '@clerk/nextjs/server'
-import { connectToDatabase } from '@/lib/mongodb'
-import User from '@/lib/models/User'
-import { NotificationService } from '@/lib/services/notificationService'
+import { NextRequest, NextResponse } from 'next/server';
+import { currentUser } from '@clerk/nextjs/server';
+import { connectToDatabase } from '@/lib/mongodb';
+import User from '@/lib/models/User';
+import { NotificationService } from '@/lib/services/notificationService';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await currentUser()
+    const user = await currentUser();
     if (!user) {
-      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json(
+        { success: false, error: 'Unauthorized' },
+        { status: 401 }
+      );
     }
 
-    await connectToDatabase()
-    
-    const { id } = await params
+    await connectToDatabase();
 
-    const currentAppUser = await User.findOne({ clerkId: user.id })
-    
+    const { id } = await params;
+
+    const currentAppUser = await User.findOne({ clerkId: user.id });
+
     // Handle both MongoDB ObjectId and username lookups
-    let targetUser
+    let targetUser;
     if (id.match(/^[0-9a-fA-F]{24}$/)) {
-      targetUser = await User.findById(id)
+      targetUser = await User.findById(id);
     } else {
-      targetUser = await User.findOne({ username: id })
+      targetUser = await User.findOne({ username: id });
     }
 
     if (!currentAppUser || !targetUser) {
-      return NextResponse.json({ success: false, error: 'User not found' }, { status: 404 })
+      return NextResponse.json(
+        { success: false, error: 'User not found' },
+        { status: 404 }
+      );
     }
 
     // Prevent users from following themselves
     if (currentAppUser._id.toString() === targetUser._id.toString()) {
-      return NextResponse.json({ success: false, error: 'Cannot follow yourself' }, { status: 400 })
+      return NextResponse.json(
+        { success: false, error: 'Cannot follow yourself' },
+        { status: 400 }
+      );
     }
 
-    const isFollowing = currentAppUser.following.includes(targetUser._id)
+    const isFollowing = currentAppUser.following.includes(targetUser._id);
 
     if (isFollowing) {
       // Unfollow logic
       await User.findByIdAndUpdate(currentAppUser._id, {
         $pull: { following: targetUser._id }
-      })
+      });
       await User.findByIdAndUpdate(targetUser._id, {
         $pull: { followers: currentAppUser._id }
-      })
+      });
     } else {
       // Follow logic
       await User.findByIdAndUpdate(currentAppUser._id, {
         $addToSet: { following: targetUser._id }
-      })
+      });
       await User.findByIdAndUpdate(targetUser._id, {
         $addToSet: { followers: currentAppUser._id }
-      })
+      });
 
       // Create notification
       await NotificationService.createNotification({
@@ -64,7 +73,7 @@ export async function POST(
         fromUserId: currentAppUser._id,
         message: `${currentAppUser.firstName} ${currentAppUser.lastName} started following you`,
         actionUrl: `/profile/${currentAppUser.username}`
-      })
+      });
     }
 
     // Return updated follow status
@@ -72,21 +81,19 @@ export async function POST(
       success: true,
       data: {
         following: !isFollowing,
-        currentUserId: currentAppUser._id,
-        targetUserId: targetUser._id
+        currentUserId: currentAppUser._id.toString(),
+        targetUserId: targetUser._id.toString()
       }
-    })
+    });
 
   } catch (error: any) {
-    console.error('Error in follow action:', error)
+    console.error('Error in follow action:', error);
     return NextResponse.json(
-      { success: false, error: 'Failed to follow user: ' + error.message }, 
+      { success: false, error: 'Failed to follow user: ' + error.message },
       { status: 500 }
-    )
+    );
   }
 }
-
-// GET endpoint remains the same...
 
 // GET endpoint to check follow status
 export async function GET(
@@ -94,45 +101,51 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await currentUser()
+    const user = await currentUser();
     if (!user) {
-      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json(
+        { success: false, error: 'Unauthorized' },
+        { status: 401 }
+      );
     }
 
-    await connectToDatabase()
-    
-    const { id } = await params
+    await connectToDatabase();
 
-    const currentAppUser = await User.findOne({ clerkId: user.id })
-    
+    const { id } = await params;
+
+    const currentAppUser = await User.findOne({ clerkId: user.id });
+
     // Handle both MongoDB ObjectId and username lookups
-    let targetUser
+    let targetUser;
     if (id.match(/^[0-9a-fA-F]{24}$/)) {
-      targetUser = await User.findById(id)
+      targetUser = await User.findById(id);
     } else {
-      targetUser = await User.findOne({ username: id })
+      targetUser = await User.findOne({ username: id });
     }
 
     if (!currentAppUser || !targetUser) {
-      return NextResponse.json({ success: false, error: 'User not found' }, { status: 404 })
+      return NextResponse.json(
+        { success: false, error: 'User not found' },
+        { status: 404 }
+      );
     }
 
-    const isFollowing = currentAppUser.following.includes(targetUser._id)
+    const isFollowing = currentAppUser.following.includes(targetUser._id);
 
-    return NextResponse.json({ 
+    return NextResponse.json({
       success: true,
       data: {
         isFollowing,
-        currentUserId: currentAppUser._id,
-        targetUserId: targetUser._id
+        currentUserId: currentAppUser._id.toString(),
+        targetUserId: targetUser._id.toString()
       }
-    })
+    });
 
   } catch (error: any) {
-    console.error('Error checking follow status:', error)
+    console.error('Error checking follow status:', error);
     return NextResponse.json(
-      { success: false, error: 'Failed to check follow status: ' + error.message }, 
+      { success: false, error: 'Failed to check follow status: ' + error.message },
       { status: 500 }
-    )
+    );
   }
 }

@@ -1,69 +1,82 @@
 // app/api/posts/[id]/like/route.ts
-import { NextRequest, NextResponse } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
-import { connectToDatabase } from '@/lib/mongodb'
-import User from '@/lib/models/User'
-import Post from '@/lib/models/Post'
-import { ApiResponse } from '@/types/post'
-import { NotificationService } from '@/lib/services/notificationService'
-
+import { NextRequest, NextResponse } from 'next/server';
+import { auth } from '@clerk/nextjs/server';
+import { connectToDatabase } from '@/lib/mongodb';
+import User from '@/lib/models/User';
+import Post from '@/lib/models/Post';
+import { ApiResponse } from '@/types/post';
+import { NotificationService } from '@/lib/services/notificationService';
+import mongoose from 'mongoose';
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { userId } = await auth()
+    const { userId } = await auth();
     if (!userId) {
       return NextResponse.json<ApiResponse>(
         { success: false, error: 'Unauthorized' },
         { status: 401 }
-      )
+      );
     }
 
-    const { id } = await params
-    if (!id) {
+    const { id } = await params;
+    if (!id || id.length !== 24) {
       return NextResponse.json<ApiResponse>(
-        { success: false, error: 'Post ID is required' },
+        { success: false, error: 'Valid post ID is required' },
         { status: 400 }
-      )
+      );
     }
 
-    await connectToDatabase()
+    await connectToDatabase();
 
-    const currentUser = await User.findOne({ clerkId: userId })
+    const currentUser = await User.findOne({ clerkId: userId });
     if (!currentUser) {
       return NextResponse.json<ApiResponse>(
         { success: false, error: 'User not found' },
         { status: 404 }
-      )
+      );
     }
 
-    const post = await Post.findById(id).populate('author')
+    const post = await Post.findById(id).populate('author');
     if (!post) {
       return NextResponse.json<ApiResponse>(
         { success: false, error: 'Post not found' },
         { status: 404 }
-      )
+      );
     }
 
     const isLiked = post.likes.some(
       (likeId: any) => likeId.toString() === currentUser._id.toString()
-    )
+    );
 
     if (isLiked) {
       // Unlike
       post.likes = post.likes.filter(
         (likeId: any) => likeId.toString() !== currentUser._id.toString()
-      )
+      );
     } else {
       // Like
-      post.likes.push(currentUser._id)
+      post.likes.push(currentUser._id);
+      
+      // Create notification for post author if not liking own post
+      if (post.author._id.toString() !== currentUser._id.toString()) {
+        await NotificationService.createNotification({
+          userId: post.author._id,
+          type: 'like',
+          fromUserId: currentUser._id,
+          postId: post._id as mongoose.Types.ObjectId,
+
+          message: `${currentUser.username} liked your post`,
+          actionUrl: `/posts/${post._id}`
+        });
+      }
     }
 
-    await post.save()
+    await post.save();
 
-    await post.populate('author', 'username firstName lastName avatar isVerified isPro')
-    await post.populate('comments.user', 'username firstName lastName avatar isVerified isPro')
+    await post.populate('author', 'username firstName lastName avatar isVerified isPro');
+    await post.populate('comments.user', 'username firstName lastName avatar isVerified isPro');
 
     return NextResponse.json<ApiResponse>({
       success: true,
@@ -72,12 +85,12 @@ export async function POST(
         likesCount: post.likes.length,
         post
       }
-    })
+    });
   } catch (error) {
-    console.error('Error liking post:', error)
+    console.error('Error liking post:', error);
     return NextResponse.json<ApiResponse>(
       { success: false, error: 'Internal server error' },
       { status: 500 }
-    )
+    );
   }
 }

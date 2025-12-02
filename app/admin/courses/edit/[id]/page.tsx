@@ -1,9 +1,10 @@
-//app/admin/courses/edit/[id]/pageXOffset.tsx
+// app/admin/courses/edit/[id]/page.tsx
 
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { useAuth } from '@clerk/nextjs'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -29,151 +30,436 @@ import {
   CheckCircle,
   AlertCircle,
   ArrowLeft,
-  Loader2
+  Loader2,
+  CloudUpload
 } from 'lucide-react'
 import { useToast } from '@/components/ui/use-toast'
 
-interface CloudinaryAsset {
-  public_id: string
-  secure_url: string
-  format: string
-  resource_type: 'image' | 'video'
-  width?: number
-  height?: number
-  duration?: number
-  bytes: number
-}
+// Import the shared components and types from create page
+import { S3Asset, UploadProgress, Lesson, Module, Course } from '@/types/course'
 
-interface UploadProgress {
-  [key: string]: {
-    progress: number
-    fileName: string
-    type: 'thumbnail' | 'previewVideo' | 'lessonVideo'
+// File Upload Area Component
+const FileUploadArea = ({
+  type,
+  label,
+  acceptedFiles,
+  maxSize,
+  currentFile,
+  onFileChange,
+  moduleIndex,
+  lessonIndex,
+  uploadProgress,
+  onCancelUpload
+}: {
+  type: 'thumbnail' | 'previewVideo' | 'lessonVideo'
+  label: string
+  acceptedFiles: string
+  maxSize: string
+  currentFile: S3Asset | null
+  onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void
+  moduleIndex?: number
+  lessonIndex?: number
+  uploadProgress?: UploadProgress
+  onCancelUpload?: (identifier: string) => void
+}) => {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const uploadId = type === 'lessonVideo' ? `lesson-${moduleIndex}-${lessonIndex}` : type
+  const upload = uploadProgress?.[uploadId]
+  const isUploading = upload?.status === 'generating-url' || upload?.status === 'uploading'
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes'
+    const k = 1024
+    const sizes = ['Bytes', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
-}
 
-interface Lesson {
-  _id?: string
-  title: string
-  description: string
-  content: string
-  video?: CloudinaryAsset
-  duration: number
-  isPreview: boolean
-  resources: {
-    title: string
-    url: string
-    type: 'pdf' | 'document' | 'link' | 'video'
-  }[]
-  order: number
-}
-
-interface Module {
-  _id?: string
-  title: string
-  description: string
-  lessons: Lesson[]
-  order: number
-}
-
-interface Course {
-  _id: string
-  title: string
-  description: string
-  shortDescription: string
-  slug: string
-  instructor: {
-    _id: string
-    firstName: string
-    lastName: string
-    username: string
-    avatar?: string
+  const getStatusColor = () => {
+    switch (upload?.status) {
+      case 'generating-url': return 'bg-blue-500'
+      case 'uploading': return 'bg-blue-500'
+      case 'processing': return 'bg-yellow-500'
+      case 'completed': return 'bg-green-500'
+      case 'error': return 'bg-red-500'
+      default: return 'bg-gray-500'
+    }
   }
-  price: number
-  isFree: boolean
-  level: 'beginner' | 'intermediate' | 'advanced'
-  category: string
-  tags: string[]
-  thumbnail: CloudinaryAsset | null
-  previewVideo: CloudinaryAsset | null
-  modules: Module[]
-  requirements: string[]
-  learningOutcomes: string[]
-  isPublished: boolean
-  isFeatured: boolean
-  totalStudents: number
-  averageRating: number
-  totalDuration: number
-  totalLessons: number
-  createdAt: string
-  updatedAt: string
+
+  const getStatusIcon = () => {
+    switch (upload?.status) {
+      case 'generating-url': return <CloudUpload className="w-4 h-4" />
+      case 'uploading': return <CloudUpload className="w-4 h-4" />
+      case 'processing': return <AlertCircle className="w-4 h-4" />
+      case 'completed': return <CheckCircle className="w-4 h-4" />
+      case 'error': return <AlertCircle className="w-4 h-4" />
+      default: return <CloudUpload className="w-4 h-4" />
+    }
+  }
+
+  const getStatusText = () => {
+    switch (upload?.status) {
+      case 'generating-url': return 'Preparing upload...'
+      case 'uploading': return `Uploading... ${upload.progress}%`
+      case 'processing': return 'Processing...'
+      case 'completed': return 'Upload completed'
+      case 'error': return 'Upload failed'
+      default: return 'Uploading...'
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <label className="text-sm font-medium flex items-center space-x-2">
+        {type === 'thumbnail' ? <Image className="w-4 h-4" /> : <Video className="w-4 h-4" />}
+        <span>{label}</span>
+      </label>
+      
+      <input
+        ref={inputRef}
+        type="file"
+        accept={acceptedFiles}
+        onChange={onFileChange}
+        className="hidden"
+        disabled={isUploading}
+      />
+      
+      <div 
+        className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-colors ${
+          isUploading 
+            ? 'border-blue-300 bg-blue-50 dark:border-blue-700 dark:bg-blue-900/20 cursor-not-allowed' 
+            : 'border-slate-300 dark:border-slate-600 hover:border-rose-400'
+        }`}
+        onClick={() => !isUploading && inputRef.current?.click()}
+      >
+        {currentFile ? (
+          <div className="space-y-2">
+            {type === 'thumbnail' ? (
+              <img
+                src={currentFile.url}
+                alt="Preview"
+                className="w-32 h-32 object-cover rounded-xl mx-auto"
+              />
+            ) : (
+              <div className="relative">
+                <video className="w-32 h-32 object-cover rounded-xl mx-auto">
+                  <source src={currentFile.url} type="video/mp4" />
+                </video>
+                <Play className="w-6 h-6 text-white absolute inset-0 m-auto" />
+              </div>
+            )}
+            <p className="text-sm text-slate-600">Click to change</p>
+            <p className="text-xs text-slate-500">
+              {formatFileSize(currentFile.size)}
+              {currentFile.duration && type !== 'thumbnail' && ` • ${currentFile.duration}s`}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {type === 'thumbnail' ? (
+              <Image className="w-8 h-8 text-slate-400 mx-auto" />
+            ) : (
+              <Video className="w-8 h-8 text-slate-400 mx-auto" />
+            )}
+            <p className="text-sm font-medium">
+              {isUploading ? 'Uploading...' : `Upload ${type === 'thumbnail' ? 'Thumbnail' : 'Video'}`}
+            </p>
+            <p className="text-xs text-slate-500">
+              {acceptedFiles.split(',').join(', ')} up to {maxSize}
+            </p>
+            {type !== 'thumbnail' && (
+              <p className="text-xs text-blue-500 mt-1">
+                Large files supported (up to 5GB)
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+      
+      {/* Upload Progress */}
+      {upload && (
+        <div className="flex items-center space-x-3 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl">
+          <div className={`p-1 rounded-full ${getStatusColor()} text-white`}>
+            {getStatusIcon()}
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-medium truncate max-w-[200px]">
+                {upload.fileName}
+              </span>
+              <span className="text-slate-500">
+                {getStatusText()}
+              </span>
+            </div>
+            {(upload.status === 'generating-url' || upload.status === 'uploading') && (
+              <Progress value={upload.progress} className="h-2 mt-1" />
+            )}
+            {upload.status === 'error' && upload.error && (
+              <p className="text-xs text-red-500 mt-1">{upload.error}</p>
+            )}
+          </div>
+          {(upload.status === 'generating-url' || upload.status === 'uploading') && onCancelUpload && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => onCancelUpload(uploadId)}
+              className="text-red-500 hover:text-red-600"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
-const CLOUDINARY_CONFIG = {
-  cloudName: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME!,
-  uploadPreset: 'sutra_courses',
+// Upload Optimization Tips Component
+const UploadOptimizationTips = ({ fileSize }: { fileSize: number }) => {
+  const sizeInMB = fileSize / (1024 * 1024)
+  
+  return (
+    <Card className="rounded-2xl border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20">
+      <CardContent className="p-4">
+        <div className="flex items-start space-x-3">
+          <AlertCircle className="w-5 h-5 text-yellow-600 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-yellow-800 dark:text-yellow-300 mb-2">
+              Large File Upload in Progress ({sizeInMB.toFixed(2)}MB)
+            </p>
+            <ul className="text-xs text-yellow-700 dark:text-yellow-400 space-y-1">
+              <li>• Keep this page open during upload</li>
+              <li>• Use a stable internet connection</li>
+              <li>• Avoid uploading multiple large files simultaneously</li>
+              <li>• Upload time depends on your internet speed</li>
+            </ul>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
 }
 
-const uploadToCloudinary = async (
-  file: File, 
-  type: 'thumbnail' | 'previewVideo' | 'lessonVideo',
-  onProgress?: (progress: number) => void
-): Promise<any> => {
-  return new Promise((resolve, reject) => {
-    const formData = new FormData()
-    formData.append('file', file)
-    formData.append('upload_preset', CLOUDINARY_CONFIG.uploadPreset)
-    formData.append('folder', `sutra-courses/${type}s`)
-    
-    if (type !== 'thumbnail') {
-      formData.append('resource_type', 'video')
+// Custom hook for S3 file uploads with Clerk auth
+const useS3Upload = () => {
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress>({})
+  const { getToken, userId } = useAuth()
+
+  const uploadFile = async (
+    file: File,
+    type: 'thumbnail' | 'previewVideo' | 'lessonVideo',
+    identifier: string
+  ) => {
+    const maxSize = type === 'thumbnail' ? 5 * 1024 * 1024 : 5 * 1024 * 1024 * 1024
+    if (file.size > maxSize) {
+      throw new Error(
+        `File too large. Maximum size: ${type === 'thumbnail' ? '5MB' : '5GB'}`
+      )
     }
 
-    const xhr = new XMLHttpRequest()
-
-    xhr.upload.addEventListener('progress', (event) => {
-      if (event.lengthComputable && onProgress) {
-        const progress = (event.loaded / event.total) * 100
-        onProgress(Math.round(progress))
-      }
-    })
-
-    xhr.addEventListener('load', () => {
-      if (xhr.status === 200) {
-        const response = JSON.parse(xhr.responseText)
-        resolve(response)
-      } else {
-        reject(new Error('Upload failed'))
-      }
-    })
-
-    xhr.addEventListener('error', () => {
-      reject(new Error('Upload failed'))
-    })
-
-    xhr.open(
-      'POST',
-      `https://api.cloudinary.com/v1_1/${CLOUDINARY_CONFIG.cloudName}/${
-        type === 'thumbnail' ? 'image' : 'video'
-      }/upload`
+    // Calculate dynamic timeout (1 minute per 100MB + 10 minutes buffer)
+    const timeoutDuration = Math.max(
+      10 * 60 * 1000, // Minimum 10 minutes
+      Math.ceil(file.size / (100 * 1024 * 1024)) * 60 * 1000 + 10 * 60 * 1000
     )
-    xhr.send(formData)
-  })
+
+    try {
+      setUploadProgress(prev => ({
+        ...prev,
+        [identifier]: { 
+          progress: 0, 
+          fileName: file.name, 
+          type,
+          status: 'generating-url'
+        }
+      }))
+
+      console.log('🔐 Getting Clerk token...')
+      const token = await getToken()
+      
+      if (!token || !userId) {
+        throw new Error('Authentication failed. Please sign in again.')
+      }
+
+      console.log('✅ Token obtained, making upload request...')
+
+      // Get presigned URL
+      const presignedResponse = await fetch('/api/admin/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          fileName: file.name,
+          fileType: file.type,
+          fileSize: file.size,
+          folder: `${type}s`
+        }),
+      })
+
+      console.log('📡 Upload API response status:', presignedResponse.status)
+
+      if (!presignedResponse.ok) {
+        const errorText = await presignedResponse.text()
+        let errorData
+        try {
+          errorData = JSON.parse(errorText)
+        } catch {
+          errorData = { error: 'Failed to get upload URL' }
+        }
+        throw new Error(errorData.error || `Upload failed with status: ${presignedResponse.status}`)
+      }
+
+      const { presignedUrl, fileUrl, fileKey } = await presignedResponse.json()
+
+      console.log('✅ Presigned URL received, starting upload...')
+      console.log(`⏰ Using timeout: ${timeoutDuration / 1000 / 60} minutes for ${(file.size / (1024 * 1024)).toFixed(2)}MB file`)
+
+      setUploadProgress(prev => ({
+        ...prev,
+        [identifier]: { 
+          ...prev[identifier], 
+          status: 'uploading',
+          progress: 5
+        }
+      }))
+
+      // Enhanced upload with better progress tracking
+      const uploadResult = await new Promise<S3Asset>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        const uploadStartTime = Date.now()
+        let lastProgressUpdate = Date.now()
+        let lastLoaded = 0
+
+        xhr.upload.addEventListener('progress', (event) => {
+          if (event.lengthComputable) {
+            const currentTime = Date.now()
+            const progress = 5 + (event.loaded / event.total) * 90 // 5% to 95%
+            
+            // Calculate speed (only update every 500ms to reduce noise)
+            if (currentTime - lastProgressUpdate > 500) {
+              const timeDiff = (currentTime - lastProgressUpdate) / 1000
+              const loadedDiff = event.loaded - lastLoaded
+              const uploadSpeed = loadedDiff / timeDiff // bytes per second
+              
+              console.log(`📊 Upload progress: ${Math.round(progress)}% - Speed: ${(uploadSpeed / (1024 * 1024)).toFixed(2)} MB/s`)
+              
+              lastProgressUpdate = currentTime
+              lastLoaded = event.loaded
+            }
+
+            setUploadProgress(prev => ({
+              ...prev,
+              [identifier]: { 
+                ...prev[identifier], 
+                progress: Math.round(progress)
+              }
+            }))
+          }
+        })
+
+        xhr.addEventListener('load', () => {
+          const uploadTime = (Date.now() - uploadStartTime) / 1000
+          console.log(`✅ Upload completed in ${uploadTime} seconds`)
+          
+          if (xhr.status === 200) {
+            setUploadProgress(prev => ({
+              ...prev,
+              [identifier]: { 
+                ...prev[identifier], 
+                progress: 100,
+                status: 'completed'
+              }
+            }))
+
+            resolve({
+              key: fileKey,
+              url: fileUrl,
+              size: file.size,
+              type: type === 'thumbnail' ? 'image' : 'video',
+              duration: type !== 'thumbnail' ? 0 : undefined
+            })
+          } else {
+            console.error('❌ Upload failed with status:', xhr.status)
+            reject(new Error(`Upload failed with status: ${xhr.status}`))
+          }
+        })
+
+        xhr.addEventListener('error', (e) => {
+          console.error('❌ Network error during upload:', e)
+          reject(new Error('Network error during upload. Please check your connection.'))
+        })
+
+        xhr.addEventListener('abort', () => {
+          console.error('❌ Upload was cancelled')
+          reject(new Error('Upload was cancelled'))
+        })
+
+        // Set timeout and handle timeout gracefully
+        xhr.timeout = timeoutDuration
+        xhr.ontimeout = () => {
+          const elapsed = (Date.now() - uploadStartTime) / 1000
+          const uploadedMB = (lastLoaded / (1024 * 1024)).toFixed(2)
+          console.error(`❌ Upload timeout after ${elapsed} seconds, uploaded: ${uploadedMB}MB`)
+          reject(new Error(`Upload timeout after ${Math.round(elapsed / 60)} minutes. Uploaded ${uploadedMB}MB of ${(file.size / (1024 * 1024)).toFixed(2)}MB.`))
+        }
+
+        console.log('📤 Starting direct upload to S3...')
+        xhr.open('PUT', presignedUrl)
+        xhr.setRequestHeader('Content-Type', file.type)
+        // Remove unsafe headers - browser will set Content-Length automatically
+        
+        xhr.send(file)
+      })
+
+      // Clear progress after success
+      setTimeout(() => {
+        setUploadProgress(prev => {
+          const newProgress = { ...prev }
+          delete newProgress[identifier]
+          return newProgress
+        })
+      }, 3000)
+
+      return uploadResult
+
+    } catch (error) {
+      console.error('❌ Upload error:', error)
+      setUploadProgress(prev => ({
+        ...prev,
+        [identifier]: { 
+          ...prev[identifier], 
+          status: 'error',
+          error: error instanceof Error ? error.message : 'Upload failed'
+        }
+      }))
+      throw error
+    }
+  }
+
+  const cancelUpload = (identifier: string) => {
+    console.log('🚫 Cancelling upload:', identifier)
+    setUploadProgress(prev => {
+      const newProgress = { ...prev }
+      delete newProgress[identifier]
+      return newProgress
+    })
+  }
+
+  return { uploadProgress, uploadFile, cancelUpload }
 }
 
 export default function EditCoursePage() {
   const params = useParams()
   const router = useRouter()
-  const { toast } = useToast() // FIX: Use toast directly
+  const { toast } = useToast()
+  const { uploadProgress, uploadFile, cancelUpload } = useS3Upload()
   
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState<UploadProgress>({})
-  const thumbnailInputRef = useRef<HTMLInputElement>(null)
-  const videoInputRef = useRef<HTMLInputElement>(null)
-  const lessonVideoInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({})
-
   const [course, setCourse] = useState<Course | null>(null)
+  
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -183,8 +469,8 @@ export default function EditCoursePage() {
     level: 'beginner' as 'beginner' | 'intermediate' | 'advanced',
     category: '',
     tags: [] as string[],
-    thumbnail: null as CloudinaryAsset | null,
-    previewVideo: null as CloudinaryAsset | null,
+    thumbnail: null as S3Asset | null,
+    previewVideo: null as S3Asset | null,
     modules: [] as Module[],
     requirements: [] as string[],
     learningOutcomes: [] as string[],
@@ -196,8 +482,15 @@ export default function EditCoursePage() {
   const [newRequirement, setNewRequirement] = useState('')
   const [newOutcome, setNewOutcome] = useState('')
 
+  // Calculate upload stats
+  const activeUploads = Object.values(uploadProgress).filter(
+    upload => upload.status === 'generating-url' || upload.status === 'uploading'
+  ).length
+
   useEffect(() => {
-    fetchCourse()
+    if (params.id) {
+      fetchCourse()
+    }
   }, [params.id])
 
   const fetchCourse = async () => {
@@ -211,6 +504,21 @@ export default function EditCoursePage() {
 
       const courseData = await response.json()
       setCourse(courseData)
+      
+      // Transform Cloudinary assets to S3 assets if needed
+      const transformAsset = (asset: any): S3Asset | null => {
+        if (!asset) return null
+        return {
+          key: asset.public_id || asset.key || '',
+          url: asset.secure_url || asset.url || '',
+          size: asset.bytes || asset.size || 0,
+          type: asset.resource_type === 'image' ? 'image' : 'video',
+          duration: asset.duration,
+          width: asset.width,
+          height: asset.height
+        }
+      }
+
       setFormData({
         title: courseData.title,
         description: courseData.description,
@@ -220,16 +528,21 @@ export default function EditCoursePage() {
         level: courseData.level,
         category: courseData.category,
         tags: courseData.tags,
-        thumbnail: courseData.thumbnail,
-        previewVideo: courseData.previewVideo,
-        modules: courseData.modules,
+        thumbnail: transformAsset(courseData.thumbnail),
+        previewVideo: transformAsset(courseData.previewVideo),
+        modules: courseData.modules.map((module: any) => ({
+          ...module,
+          lessons: module.lessons.map((lesson: any) => ({
+            ...lesson,
+            video: transformAsset(lesson.video)
+          }))
+        })),
         requirements: courseData.requirements,
         learningOutcomes: courseData.learningOutcomes,
         isPublished: courseData.isPublished,
         isFeatured: courseData.isFeatured
       })
       
-      // FIX: Use toast function directly
       toast({
         title: 'Success',
         description: 'Course loaded successfully!',
@@ -237,7 +550,6 @@ export default function EditCoursePage() {
       })
     } catch (err: any) {
       console.error('Error fetching course:', err)
-      // FIX: Use toast function directly
       toast({
         title: 'Error',
         description: 'Failed to load course',
@@ -257,62 +569,25 @@ export default function EditCoursePage() {
     const uploadId = type === 'lessonVideo' ? `lesson-${moduleIndex}-${lessonIndex}` : type
     
     try {
-      setUploadProgress(prev => ({
-        ...prev,
-        [uploadId]: { progress: 0, fileName: file.name, type }
-      }))
+      const result = await uploadFile(file, type, uploadId)
 
-      const maxSize = type === 'thumbnail' ? 5 * 1024 * 1024 : 100 * 1024 * 1024
-      if (file.size > maxSize) {
-        throw new Error(`File too large. Maximum size: ${maxSize / 1024 / 1024}MB`)
-      }
-
-      const result = await uploadToCloudinary(file, type, (progress) => {
-        setUploadProgress(prev => ({
-          ...prev,
-          [uploadId]: { ...prev[uploadId], progress }
-        }))
-      })
-
-      const asset: CloudinaryAsset = {
-        public_id: result.public_id,
-        secure_url: result.secure_url,
-        format: result.format,
-        resource_type: type === 'thumbnail' ? 'image' : 'video',
-        width: result.width,
-        height: result.height,
-        duration: result.duration,
-        bytes: result.bytes
-      }
-
+      // Update form data based on upload type
       if (type === 'thumbnail') {
         setFormData(prev => ({
           ...prev,
-          thumbnail: asset
+          thumbnail: result
         }))
       } else if (type === 'previewVideo') {
         setFormData(prev => ({
           ...prev,
-          previewVideo: asset
+          previewVideo: result
         }))
       } else if (type === 'lessonVideo' && moduleIndex !== undefined && lessonIndex !== undefined) {
         const updatedModules = [...formData.modules]
-        updatedModules[moduleIndex].lessons[lessonIndex].video = asset
-        if (asset.duration) {
-          updatedModules[moduleIndex].lessons[lessonIndex].duration = Math.round(asset.duration / 60)
-        }
+        updatedModules[moduleIndex].lessons[lessonIndex].video = result
         setFormData(prev => ({ ...prev, modules: updatedModules }))
       }
 
-      setTimeout(() => {
-        setUploadProgress(prev => {
-          const newProgress = { ...prev }
-          delete newProgress[uploadId]
-          return newProgress
-        })
-      }, 2000)
-
-      // FIX: Use toast function directly
       toast({
         title: 'Success',
         description: `${type.replace(/([A-Z])/g, ' $1')} uploaded successfully!`,
@@ -320,14 +595,7 @@ export default function EditCoursePage() {
       })
     } catch (error) {
       console.error('Error uploading file:', error)
-      setUploadProgress(prev => {
-        const newProgress = { ...prev }
-        delete newProgress[uploadId]
-        return newProgress
-      })
-      
       const errorMessage = error instanceof Error ? error.message : 'Failed to upload file. Please try again.'
-      // FIX: Use toast function directly
       toast({
         title: 'Error',
         description: errorMessage,
@@ -454,7 +722,7 @@ export default function EditCoursePage() {
     updatedModules[moduleIndex].lessons[lessonIndex].resources.push({
       title: '',
       url: '',
-      type: 'pdf'
+      type: 'pdf' as const
     })
     setFormData(prev => ({ ...prev, modules: updatedModules }))
   }
@@ -470,11 +738,25 @@ export default function EditCoursePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // Check if any uploads are in progress
+    const hasActiveUploads = Object.values(uploadProgress).some(
+      upload => upload.status === 'generating-url' || upload.status === 'uploading'
+    )
+    
+    if (hasActiveUploads) {
+      toast({
+        title: 'Error',
+        description: 'Please wait for all uploads to complete before saving',
+        variant: 'destructive'
+      })
+      return
+    }
+
     setSaving(true)
 
     try {
       if (!formData.thumbnail) {
-        // FIX: Use toast function directly
         toast({
           title: 'Error',
           description: 'Please upload a course thumbnail',
@@ -492,7 +774,6 @@ export default function EditCoursePage() {
       })
 
       if (response.ok) {
-        // FIX: Use toast function directly
         toast({
           title: 'Success',
           description: 'Course updated successfully!',
@@ -502,7 +783,6 @@ export default function EditCoursePage() {
         router.refresh()
       } else {
         const error = await response.json()
-        // FIX: Use toast function directly
         toast({
           title: 'Error',
           description: error.error || 'Failed to update course',
@@ -511,7 +791,6 @@ export default function EditCoursePage() {
       }
     } catch (error) {
       console.error('Error updating course:', error)
-      // FIX: Use toast function directly
       toast({
         title: 'Error',
         description: 'Failed to update course. Please try again.',
@@ -536,7 +815,6 @@ export default function EditCoursePage() {
 
       if (response.ok) {
         setFormData(prev => ({ ...prev, isPublished: !prev.isPublished }))
-        // FIX: Use toast function directly
         toast({
           title: 'Success',
           description: formData.isPublished ? 'Course unpublished!' : 'Course published successfully!',
@@ -547,7 +825,6 @@ export default function EditCoursePage() {
       }
     } catch (error) {
       console.error('Error toggling publish:', error)
-      // FIX: Use toast function directly
       toast({
         title: 'Error',
         description: 'Failed to update publish status',
@@ -567,7 +844,6 @@ export default function EditCoursePage() {
       })
 
       if (response.ok) {
-        // FIX: Use toast function directly
         toast({
           title: 'Success',
           description: 'Course deleted successfully!',
@@ -580,7 +856,6 @@ export default function EditCoursePage() {
       }
     } catch (error) {
       console.error('Error deleting course:', error)
-      // FIX: Use toast function directly
       toast({
         title: 'Error',
         description: 'Failed to delete course',
@@ -599,14 +874,6 @@ export default function EditCoursePage() {
     const hours = Math.floor(minutes / 60)
     const mins = minutes % 60
     return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`
-  }
-
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes'
-    const k = 1024
-    const sizes = ['Bytes', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
 
   if (loading) {
@@ -630,8 +897,6 @@ export default function EditCoursePage() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
-      {/* REMOVED: ToastContainer - it's automatically provided */}
-
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
@@ -679,25 +944,32 @@ export default function EditCoursePage() {
         </div>
       </div>
 
-      {/* Upload Status Banner */}
-      {Object.keys(uploadProgress).length > 0 && (
-        <Card className="rounded-2xl border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20">
-          <CardContent className="p-4">
-            <div className="flex items-center space-x-3">
-              <AlertCircle className="w-5 h-5 text-blue-600" />
-              <div className="flex-1">
-                <p className="text-sm font-medium text-blue-800 dark:text-blue-300">
-                  Uploading files to Cloudinary...
-                </p>
-                <p className="text-xs text-blue-600 dark:text-blue-400">
-                  {Object.values(uploadProgress).map(upload => 
-                    `${upload.fileName} (${upload.progress}%)`
-                  ).join(', ')}
-                </p>
+      {/* Enhanced upload status banner */}
+      {activeUploads > 0 && (
+        <div className="space-y-3">
+          <Card className="rounded-2xl border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20">
+            <CardContent className="p-4">
+              <div className="flex items-center space-x-3">
+                <CloudUpload className="w-5 h-5 text-blue-600" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-blue-800 dark:text-blue-300">
+                    Uploading {activeUploads} file{activeUploads > 1 ? 's' : ''} to AWS S3...
+                  </p>
+                  <p className="text-xs text-blue-600 dark:text-blue-400">
+                    Large video support enabled • Do not close this page during upload
+                  </p>
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+          
+          {/* Show optimization tips for large files */}
+          {Object.values(uploadProgress).map(upload => 
+            upload.status === 'uploading' && uploadProgress[upload.fileName]?.progress < 100
+          ).filter(Boolean).length > 0 && (
+            <UploadOptimizationTips fileSize={1680.41 * 1024 * 1024} />
+          )}
+        </div>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -803,113 +1075,34 @@ export default function EditCoursePage() {
               <CardHeader>
                 <CardTitle>Course Media</CardTitle>
                 <CardDescription>
-                  Upload thumbnail and preview video to Cloudinary
+                  Upload thumbnail and preview video to AWS S3
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Thumbnail Upload */}
-                  <div className="space-y-4">
-                    <label className="text-sm font-medium flex items-center space-x-2">
-                      <Image className="w-4 h-4" />
-                      <span>Course Thumbnail *</span>
-                    </label>
-                    
-                    <input
-                      ref={thumbnailInputRef}
-                      type="file"
-                      accept="image/jpeg,image/jpg,image/png,image/webp,image/gif"
-                      onChange={handleThumbnailChange}
-                      className="hidden"
-                    />
-                    
-                    <div 
-                      className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-2xl p-6 text-center cursor-pointer hover:border-rose-400 transition-colors"
-                      onClick={() => thumbnailInputRef.current?.click()}
-                    >
-                      {formData.thumbnail ? (
-                        <div className="space-y-2">
-                          <img
-                            src={formData.thumbnail.secure_url}
-                            alt="Thumbnail preview"
-                            className="w-32 h-32 object-cover rounded-xl mx-auto"
-                          />
-                          <p className="text-sm text-slate-600">Click to change</p>
-                          <p className="text-xs text-slate-500">
-                            {formatFileSize(formData.thumbnail.bytes)}
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <Image className="w-8 h-8 text-slate-400 mx-auto" />
-                          <p className="text-sm font-medium">Upload Thumbnail</p>
-                          <p className="text-xs text-slate-500">JPEG, PNG, WebP, GIF up to 5MB</p>
-                        </div>
-                      )}
-                    </div>
-                    
-                    {uploadProgress.thumbnail && (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span>Uploading {uploadProgress.thumbnail.fileName}...</span>
-                          <span>{uploadProgress.thumbnail.progress}%</span>
-                        </div>
-                        <Progress value={uploadProgress.thumbnail.progress} className="h-2" />
-                      </div>
-                    )}
-                  </div>
+                  <FileUploadArea
+                    type="thumbnail"
+                    label="Course Thumbnail *"
+                    acceptedFiles="image/jpeg,image/jpg,image/png,image/webp,image/gif"
+                    maxSize="5MB"
+                    currentFile={formData.thumbnail}
+                    onFileChange={handleThumbnailChange}
+                    uploadProgress={uploadProgress}
+                    onCancelUpload={cancelUpload}
+                  />
 
                   {/* Preview Video Upload */}
-                  <div className="space-y-4">
-                    <label className="text-sm font-medium flex items-center space-x-2">
-                      <Video className="w-4 h-4" />
-                      <span>Preview Video (Optional)</span>
-                    </label>
-                    
-                    <input
-                      ref={videoInputRef}
-                      type="file"
-                      accept="video/mp4,video/webm,video/ogg,video/quicktime,video/x-msvideo"
-                      onChange={handlePreviewVideoChange}
-                      className="hidden"
-                    />
-                    
-                    <div 
-                      className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-2xl p-6 text-center cursor-pointer hover:border-rose-400 transition-colors"
-                      onClick={() => videoInputRef.current?.click()}
-                    >
-                      {formData.previewVideo ? (
-                        <div className="space-y-2">
-                          <div className="relative">
-                            <video className="w-32 h-32 object-cover rounded-xl mx-auto">
-                              <source src={formData.previewVideo.secure_url} type={`video/${formData.previewVideo.format}`} />
-                            </video>
-                            <Play className="w-6 h-6 text-white absolute inset-0 m-auto" />
-                          </div>
-                          <p className="text-sm text-slate-600">Click to change</p>
-                          <p className="text-xs text-slate-500">
-                            {formatFileSize(formData.previewVideo.bytes)} • {formData.previewVideo.duration ? `${Math.round(formData.previewVideo.duration)}s` : ''}
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <Video className="w-8 h-8 text-slate-400 mx-auto" />
-                          <p className="text-sm font-medium">Upload Preview Video</p>
-                          <p className="text-xs text-slate-500">MP4, WebM, OGG up to 100MB</p>
-                        </div>
-                      )}
-                    </div>
-                    
-                    {uploadProgress.previewVideo && (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span>Uploading {uploadProgress.previewVideo.fileName}...</span>
-                          <span>{uploadProgress.previewVideo.progress}%</span>
-                        </div>
-                        <Progress value={uploadProgress.previewVideo.progress} className="h-2" />
-                      </div>
-                    )}
-                  </div>
+                  <FileUploadArea
+                    type="previewVideo"
+                    label="Preview Video (Optional)"
+                    acceptedFiles="video/mp4,video/webm,video/ogg,video/quicktime,video/x-msvideo,video/avi,video/mkv,video/mov"
+                    maxSize="5GB"
+                    currentFile={formData.previewVideo}
+                    onFileChange={handlePreviewVideoChange}
+                    uploadProgress={uploadProgress}
+                    onCancelUpload={cancelUpload}
+                  />
                 </div>
               </CardContent>
             </Card>
@@ -1051,224 +1244,176 @@ export default function EditCoursePage() {
                     />
                     
                     <div className="space-y-4">
-                      {module.lessons.map((lesson, lessonIndex) => {
-                        const uploadId = `lesson-${moduleIndex}-${lessonIndex}`
-                        const currentUploadProgress = uploadProgress[uploadId]
-                        
-                        return (
-                          <div key={lessonIndex} className="border border-slate-200 dark:border-slate-600 rounded-2xl p-4">
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="flex items-center space-x-3 flex-1">
-                                <div className="w-6 h-6 bg-slate-100 dark:bg-slate-700 rounded-md flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold text-xs">
-                                  {lessonIndex + 1}
-                                </div>
-                                <Input
-                                  placeholder="Lesson Title *"
-                                  value={lesson.title}
-                                  onChange={(e) => {
-                                    const updatedModules = [...formData.modules]
-                                    updatedModules[moduleIndex].lessons[lessonIndex].title = e.target.value
-                                    setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                  }}
-                                  className="rounded-2xl flex-1"
-                                  required
-                                />
+                      {module.lessons.map((lesson, lessonIndex) => (
+                        <div key={lessonIndex} className="border border-slate-200 dark:border-slate-600 rounded-2xl p-4">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center space-x-3 flex-1">
+                              <div className="w-6 h-6 bg-slate-100 dark:bg-slate-700 rounded-md flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold text-xs">
+                                {lessonIndex + 1}
                               </div>
-                              <Button 
-                                type="button" 
-                                variant="ghost" 
-                                size="icon"
-                                onClick={() => removeLesson(moduleIndex, lessonIndex)}
-                                className="text-red-500 rounded-2xl hover:text-red-600 hover:bg-red-50"
-                              >
-                                <X className="w-4 h-4" />
-                              </Button>
-                            </div>
-
-                            <Textarea
-                              placeholder="Lesson Description *"
-                              value={lesson.description}
-                              onChange={(e) => {
-                                const updatedModules = [...formData.modules]
-                                updatedModules[moduleIndex].lessons[lessonIndex].description = e.target.value
-                                setFormData(prev => ({ ...prev, modules: updatedModules }))
-                              }}
-                              className="rounded-2xl mb-3 min-h-[60px]"
-                              required
-                            />
-
-                            {/* Video Upload */}
-                            <div className="mb-3">
-                              <label className="text-sm font-medium mb-2 block">Lesson Video *</label>
-                              
-                              <input
-                                ref={el => {
-  lessonVideoInputRefs.current[uploadId] = el;
-}}
-                                type="file"
-                                accept="video/mp4,video/webm,video/ogg,video/quicktime,video/x-msvideo"
-                                onChange={(e) => handleLessonVideoChange(e, moduleIndex, lessonIndex)}
-                                className="hidden"
+                              <Input
+                                placeholder="Lesson Title *"
+                                value={lesson.title}
+                                onChange={(e) => {
+                                  const updatedModules = [...formData.modules]
+                                  updatedModules[moduleIndex].lessons[lessonIndex].title = e.target.value
+                                  setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                }}
+                                className="rounded-2xl flex-1"
+                                required
                               />
-                              
-                              {lesson.video ? (
-                                <div className="border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 rounded-xl p-3">
-                                  <div className="flex items-center space-x-3">
-                                    <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
-                                    <div className="flex-1">
-                                      <p className="text-sm font-medium text-green-800 dark:text-green-300">
-                                        Video uploaded successfully
-                                      </p>
-                                      <p className="text-xs text-green-600 dark:text-green-400">
-                                        {formatFileSize(lesson.video.bytes)} • {lesson.duration} minutes
-                                      </p>
-                                    </div>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => lessonVideoInputRefs.current[uploadId]?.click()}
-                                      className="rounded-xl"
-                                    >
-                                      Change
-                                    </Button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div 
-                                  className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl p-4 text-center cursor-pointer hover:border-rose-400 transition-colors"
-                                  onClick={() => lessonVideoInputRefs.current[uploadId]?.click()}
-                                >
-                                  <Video className="w-6 h-6 text-slate-400 mx-auto mb-2" />
-                                  <p className="text-sm font-medium">Upload Lesson Video</p>
-                                  <p className="text-xs text-slate-500">MP4, WebM, OGG up to 100MB</p>
-                                </div>
-                              )}
-
-                              {currentUploadProgress && (
-                                <div className="mt-2 space-y-2">
-                                  <div className="flex items-center justify-between text-sm">
-                                    <span>Uploading {currentUploadProgress.fileName}...</span>
-                                    <span>{currentUploadProgress.progress}%</span>
-                                  </div>
-                                  <Progress value={currentUploadProgress.progress} className="h-2" />
-                                </div>
-                              )}
                             </div>
+                            <Button 
+                              type="button" 
+                              variant="ghost" 
+                              size="icon"
+                              onClick={() => removeLesson(moduleIndex, lessonIndex)}
+                              className="text-red-500 rounded-2xl hover:text-red-600 hover:bg-red-50"
+                            >
+                              <X className="w-4 h-4" />
+                            </Button>
+                          </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-                              <div>
-                                <label className="text-sm font-medium mb-1 block">Duration (minutes)</label>
-                                <Input
-                                  type="number"
-                                  placeholder="Duration"
-                                  value={lesson.duration}
-                                  onChange={(e) => {
-                                    const updatedModules = [...formData.modules]
-                                    updatedModules[moduleIndex].lessons[lessonIndex].duration = parseInt(e.target.value) || 0
-                                    setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                  }}
-                                  className="rounded-2xl"
-                                  min="0"
-                                />
-                              </div>
-                            </div>
+                          <Textarea
+                            placeholder="Lesson Description *"
+                            value={lesson.description}
+                            onChange={(e) => {
+                              const updatedModules = [...formData.modules]
+                              updatedModules[moduleIndex].lessons[lessonIndex].description = e.target.value
+                              setFormData(prev => ({ ...prev, modules: updatedModules }))
+                            }}
+                            className="rounded-2xl mb-3 min-h-[60px]"
+                            required
+                          />
 
-                            <Textarea
-                              placeholder="Lesson Content *"
-                              value={lesson.content}
-                              onChange={(e) => {
-                                const updatedModules = [...formData.modules]
-                                updatedModules[moduleIndex].lessons[lessonIndex].content = e.target.value
-                                setFormData(prev => ({ ...prev, modules: updatedModules }))
-                              }}
-                              className="rounded-2xl mb-3 min-h-[100px]"
-                              required
+                          {/* Video Upload */}
+                          <div className="mb-3">
+                            <FileUploadArea
+                              type="lessonVideo"
+                              label="Lesson Video *"
+                              acceptedFiles="video/mp4,video/webm,video/ogg,video/quicktime,video/x-msvideo,video/avi,video/mkv,video/mov"
+                              maxSize="5GB"
+                              currentFile={lesson.video || null}
+                              onFileChange={(e) => handleLessonVideoChange(e, moduleIndex, lessonIndex)}
+                              moduleIndex={moduleIndex}
+                              lessonIndex={lessonIndex}
+                              uploadProgress={uploadProgress}
+                              onCancelUpload={cancelUpload}
                             />
+                          </div>
 
-                            <div className="flex items-center justify-between mb-3">
-                              <label className="flex items-center space-x-2">
-                                <input
-                                  type="checkbox"
-                                  checked={lesson.isPreview}
-                                  onChange={(e) => {
-                                    const updatedModules = [...formData.modules]
-                                    updatedModules[moduleIndex].lessons[lessonIndex].isPreview = e.target.checked
-                                    setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                  }}
-                                  className="rounded"
-                                />
-                                <span className="text-sm">Preview Lesson (Free to watch)</span>
-                              </label>
-                            </div>
-
-                            {/* Resources */}
-                            <div className="space-y-3">
-                              <div className="flex items-center justify-between">
-                                <h4 className="text-sm font-medium">Resources</h4>
-                                <Button 
-                                  type="button" 
-                                  onClick={() => addResource(moduleIndex, lessonIndex)} 
-                                  variant="outline" 
-                                  size="sm" 
-                                  className="rounded-2xl"
-                                >
-                                  <Plus className="w-3 h-3 mr-1" />
-                                  Add Resource
-                                </Button>
-                              </div>
-                              
-                              {lesson.resources.map((resource, resourceIndex) => (
-                                <div key={resourceIndex} className="grid grid-cols-1 md:grid-cols-12 gap-2 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl">
-                                  <Input
-                                    placeholder="Resource Title"
-                                    value={resource.title}
-                                    onChange={(e) => {
-                                      const updatedModules = [...formData.modules]
-                                      updatedModules[moduleIndex].lessons[lessonIndex].resources[resourceIndex].title = e.target.value
-                                      setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                    }}
-                                    className="rounded-xl md:col-span-4"
-                                  />
-                                  <Input
-                                    placeholder="URL"
-                                    value={resource.url}
-                                    onChange={(e) => {
-                                      const updatedModules = [...formData.modules]
-                                      updatedModules[moduleIndex].lessons[lessonIndex].resources[resourceIndex].url = e.target.value
-                                      setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                    }}
-                                    className="rounded-xl md:col-span-5"
-                                  />
-                                  <select
-                                    value={resource.type}
-                                    onChange={(e) => {
-                                      const updatedModules = [...formData.modules]
-                                      updatedModules[moduleIndex].lessons[lessonIndex].resources[resourceIndex].type = e.target.value as any
-                                      setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                    }}
-                                    className="rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 px-2 py-1 text-sm md:col-span-2"
-                                  >
-                                    <option value="pdf">PDF</option>
-                                    <option value="document">Document</option>
-                                    <option value="link">Link</option>
-                                    <option value="video">Video</option>
-                                  </select>
-                                  <Button 
-                                    type="button" 
-                                    variant="ghost" 
-                                    size="icon"
-                                    onClick={() => removeResource(moduleIndex, lessonIndex, resourceIndex)}
-                                    className="text-red-500 rounded-xl hover:text-red-600 md:col-span-1"
-                                  >
-                                    <X className="w-3 h-3" />
-                                  </Button>
-                                </div>
-                              ))}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                            <div>
+                              <label className="text-sm font-medium mb-1 block">Duration (minutes)</label>
+                              <Input
+                                type="number"
+                                placeholder="Duration"
+                                value={lesson.duration}
+                                onChange={(e) => {
+                                  const updatedModules = [...formData.modules]
+                                  updatedModules[moduleIndex].lessons[lessonIndex].duration = parseInt(e.target.value) || 0
+                                  setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                }}
+                                className="rounded-2xl"
+                                min="0"
+                              />
                             </div>
                           </div>
-                        )
-                      })}
+
+                          <Textarea
+                            placeholder="Lesson Content *"
+                            value={lesson.content}
+                            onChange={(e) => {
+                              const updatedModules = [...formData.modules]
+                              updatedModules[moduleIndex].lessons[lessonIndex].content = e.target.value
+                              setFormData(prev => ({ ...prev, modules: updatedModules }))
+                            }}
+                            className="rounded-2xl mb-3 min-h-[100px]"
+                            required
+                          />
+
+                          <div className="flex items-center justify-between mb-3">
+                            <label className="flex items-center space-x-2">
+                              <input
+                                type="checkbox"
+                                checked={lesson.isPreview}
+                                onChange={(e) => {
+                                  const updatedModules = [...formData.modules]
+                                  updatedModules[moduleIndex].lessons[lessonIndex].isPreview = e.target.checked
+                                  setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                }}
+                                className="rounded"
+                              />
+                              <span className="text-sm">Preview Lesson (Free to watch)</span>
+                            </label>
+                          </div>
+
+                          {/* Resources */}
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <h4 className="text-sm font-medium">Resources</h4>
+                              <Button 
+                                type="button" 
+                                onClick={() => addResource(moduleIndex, lessonIndex)} 
+                                variant="outline" 
+                                size="sm" 
+                                className="rounded-2xl"
+                              >
+                                <Plus className="w-3 h-3 mr-1" />
+                                Add Resource
+                              </Button>
+                            </div>
+                            
+                            {lesson.resources.map((resource, resourceIndex) => (
+                              <div key={resourceIndex} className="grid grid-cols-1 md:grid-cols-12 gap-2 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl">
+                                <Input
+                                  placeholder="Resource Title"
+                                  value={resource.title}
+                                  onChange={(e) => {
+                                    const updatedModules = [...formData.modules]
+                                    updatedModules[moduleIndex].lessons[lessonIndex].resources[resourceIndex].title = e.target.value
+                                    setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                  }}
+                                  className="rounded-xl md:col-span-4"
+                                />
+                                <Input
+                                  placeholder="URL"
+                                  value={resource.url}
+                                  onChange={(e) => {
+                                    const updatedModules = [...formData.modules]
+                                    updatedModules[moduleIndex].lessons[lessonIndex].resources[resourceIndex].url = e.target.value
+                                    setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                  }}
+                                  className="rounded-xl md:col-span-5"
+                                />
+                                <select
+                                  value={resource.type}
+                                  onChange={(e) => {
+                                    const updatedModules = [...formData.modules]
+                                    updatedModules[moduleIndex].lessons[lessonIndex].resources[resourceIndex].type = e.target.value as any
+                                    setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                  }}
+                                  className="rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 px-2 py-1 text-sm md:col-span-2"
+                                >
+                                  <option value="pdf">PDF</option>
+                                  <option value="document">Document</option>
+                                  <option value="link">Link</option>
+                                  <option value="video">Video</option>
+                                </select>
+                                <Button 
+                                  type="button" 
+                                  variant="ghost" 
+                                  size="icon"
+                                  onClick={() => removeResource(moduleIndex, lessonIndex, resourceIndex)}
+                                  className="text-red-500 rounded-xl hover:text-red-600 md:col-span-1"
+                                >
+                                  <X className="w-3 h-3" />
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
                       
                       <Button 
                         type="button" 
@@ -1429,7 +1574,7 @@ export default function EditCoursePage() {
                   type="submit" 
                   variant="premium" 
                   className="w-full rounded-2xl" 
-                  disabled={saving || !formData.thumbnail || Object.keys(uploadProgress).length > 0}
+                  disabled={saving || !formData.thumbnail || activeUploads > 0}
                 >
                   {saving ? (
                     <>

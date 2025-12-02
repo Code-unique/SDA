@@ -1,4 +1,5 @@
-import mongoose from 'mongoose'
+// lib/models/Payment.ts
+import mongoose from 'mongoose';
 
 const paymentSchema = new mongoose.Schema({
   userId: {
@@ -13,7 +14,8 @@ const paymentSchema = new mongoose.Schema({
   },
   amount: {
     type: Number,
-    required: true
+    required: true,
+    min: 0
   },
   currency: {
     type: String,
@@ -33,10 +35,9 @@ const paymentSchema = new mongoose.Schema({
   transactionId: {
     type: String,
     required: true
-    // Remove unique: true from here - define it in indexes below
   },
-  paymentIntentId: String, // For Stripe
-  pidx: String, // For Khalti
+  paymentIntentId: String,
+  pidx: String,
   metadata: {
     courseTitle: String,
     instructorId: {
@@ -53,13 +54,13 @@ const paymentSchema = new mongoose.Schema({
   }]
 }, {
   timestamps: true
-})
+});
 
-// Define ALL indexes separately (not in schema fields)
-paymentSchema.index({ userId: 1, createdAt: -1 })
-paymentSchema.index({ courseId: 1 })
-paymentSchema.index({ transactionId: 1 }, { unique: true }) // Unique index defined here
-paymentSchema.index({ status: 1 })
-paymentSchema.index({ createdAt: 1 })
+// Define indexes
+paymentSchema.index({ userId: 1, createdAt: -1 });
+paymentSchema.index({ courseId: 1 });
+paymentSchema.index({ transactionId: 1 }, { unique: true });
+paymentSchema.index({ status: 1 });
+paymentSchema.index({ createdAt: 1 });
 
-export default mongoose.models.Payment || mongoose.model('Payment', paymentSchema)
+export default mongoose.models.Payment || mongoose.model('Payment', paymentSchema);

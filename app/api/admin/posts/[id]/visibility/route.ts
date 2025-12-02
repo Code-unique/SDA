@@ -1,49 +1,72 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { currentUser } from '@clerk/nextjs/server'
-import { connectToDatabase } from '@/lib/mongodb'
-import User from '@/lib/models/User'
-import Post from '@/lib/models/Post'
+// app/api/admin/posts/[id]/publish/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { currentUser } from '@clerk/nextjs/server';
+import { connectToDatabase } from '@/lib/mongodb';
+import User from '@/lib/models/User';
+import Post from '@/lib/models/Post';
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await currentUser()
+    const user = await currentUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
     }
 
-    await connectToDatabase()
-    
+    await connectToDatabase();
+
     // Verify admin role
-    const adminUser = await User.findOne({ clerkId: user.id })
+    const adminUser = await User.findOne({ clerkId: user.id });
     if (!adminUser || adminUser.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      return NextResponse.json(
+        { error: 'Forbidden' },
+        { status: 403 }
+      );
     }
 
-    const body = await request.json()
-    const { isPublic } = body
+    const body = await request.json();
+    const { isPublic } = body;
 
-    // Await the params Promise
-    const { id } = await params
+    if (typeof isPublic !== 'boolean') {
+      return NextResponse.json(
+        { error: 'Invalid isPublic value' },
+        { status: 400 }
+      );
+    }
+
+    const { id } = await params;
+
+    if (!id || id.length !== 24) {
+      return NextResponse.json(
+        { error: 'Invalid post ID' },
+        { status: 400 }
+      );
+    }
 
     const post = await Post.findByIdAndUpdate(
-      id, // Use the unwrapped id
+      id,
       { isPublic },
       { new: true }
-    ).populate('author', 'username firstName lastName avatar')
+    ).populate('author', 'username firstName lastName avatar');
 
     if (!post) {
-      return NextResponse.json({ error: 'Post not found' }, { status: 404 })
+      return NextResponse.json(
+        { error: 'Post not found' },
+        { status: 404 }
+      );
     }
 
-    return NextResponse.json(post)
+    return NextResponse.json(post);
   } catch (error) {
-    console.error('Error updating post visibility:', error)
+    console.error('Error updating post visibility:', error);
     return NextResponse.json(
-      { error: 'Internal server error' }, 
+      { error: 'Internal server error' },
       { status: 500 }
-    )
+    );
   }
 }

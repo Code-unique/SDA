@@ -1,13 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { connectToDatabase } from '@/lib/mongodb'
-import Post from '@/lib/models/Post'
+// app/api/explore/posts/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { connectToDatabase } from '@/lib/mongodb';
+import Post from '@/lib/models/Post';
 
 export async function GET(request: NextRequest) {
   try {
-    await connectToDatabase()
+    await connectToDatabase();
 
-    const { searchParams } = new URL(request.url)
-    const limit = Number(searchParams.get("limit")) || 50
+    const { searchParams } = new URL(request.url);
+    const limit = Math.max(1, Math.min(100, Number(searchParams.get("limit")) || 50));
 
     const posts = await Post.find({ isPublic: true })
       .populate({
@@ -16,14 +17,14 @@ export async function GET(request: NextRequest) {
         strictPopulate: false
       })
       .sort({ createdAt: -1 })
-      .limit(limit)
+      .limit(limit);
 
-    return NextResponse.json({ posts })
+    return NextResponse.json({ posts });
   } catch (error: any) {
-    console.error("Error fetching posts:", error)
+    console.error("Error fetching posts:", error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
-    )
+    );
   }
 }

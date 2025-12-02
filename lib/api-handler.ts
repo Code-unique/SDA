@@ -1,62 +1,62 @@
 // lib/api-handler.ts
-import { NextRequest, NextResponse } from 'next/server'
-import { currentUser } from '@clerk/nextjs/server'
-import { connectToDatabase } from '@/lib/mongodb'
+import { NextRequest, NextResponse } from 'next/server';
+import { currentUser } from '@clerk/nextjs/server';
+import { connectToDatabase } from '@/lib/mongodb';
 
 export function withAuth(handler: (req: NextRequest, userId: string) => Promise<any>) {
   return async (request: NextRequest) => {
     try {
       // Connect to database
-      await connectToDatabase()
-      
+      await connectToDatabase();
+
       // Verify authentication
-      const user = await currentUser()
+      const user = await currentUser();
       if (!user) {
         return NextResponse.json(
-          { error: 'Unauthorized' }, 
+          { error: 'Unauthorized' },
           { status: 401 }
-        )
+        );
       }
 
-      return await handler(request, user.id)
+      return await handler(request, user.id);
     } catch (error: any) {
-      console.error('API Error:', error)
-      
+      console.error('API Error:', error);
+
       if (error.name === 'ValidationError') {
         return NextResponse.json(
-          { error: 'Validation failed', details: error.errors }, 
+          { error: 'Validation failed', details: error.errors },
           { status: 400 }
-        )
+        );
       }
-      
+
       if (error.code === 11000) {
         return NextResponse.json(
-          { error: 'Duplicate entry' }, 
+          { error: 'Duplicate entry' },
           { status: 409 }
-        )
+        );
       }
-      
+
       return NextResponse.json(
-        { error: 'Internal server error' }, 
+        { error: 'Internal server error' },
         { status: 500 }
-      )
+      );
     }
-  }
+  };
 }
 
 export function withOptionalAuth(handler: (req: NextRequest, userId?: string) => Promise<any>) {
   return async (request: NextRequest) => {
     try {
-      await connectToDatabase()
-      const user = await currentUser()
-      const userId = user?.id
-      return await handler(request, userId)
+      await connectToDatabase();
+      const user = await currentUser();
+      const userId = user?.id;
+      return await handler(request, userId);
     } catch (error) {
-      console.error('API Error:', error)
+      console.error('API Error:', error);
       return NextResponse.json(
-        { error: 'Internal server error' }, 
+        { error: 'Internal server error' },
         { status: 500 }
-      )
+      );
     }
-  }
+  };
 }

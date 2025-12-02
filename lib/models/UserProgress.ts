@@ -1,5 +1,5 @@
-//lib/models/UserProgress.ts
-import mongoose from 'mongoose'
+// lib/models/UserProgress.ts
+import mongoose from 'mongoose';
 
 const UserProgressSchema = new mongoose.Schema({
   courseId: {
@@ -13,12 +13,10 @@ const UserProgressSchema = new mongoose.Schema({
     required: true
   },
   completedLessons: [{
-    type: mongoose.Schema.Types.ObjectId,
-    // Remove ref: 'Lesson' since Lesson is embedded in Course
+    type: mongoose.Schema.Types.ObjectId
   }],
   currentLesson: {
-    type: mongoose.Schema.Types.ObjectId,
-    // Remove ref: 'Lesson'
+    type: mongoose.Schema.Types.ObjectId
   },
   progress: {
     type: Number,
@@ -27,8 +25,9 @@ const UserProgressSchema = new mongoose.Schema({
     max: 1
   },
   timeSpent: {
-    type: Number, // in minutes
-    default: 0
+    type: Number,
+    default: 0,
+    min: 0
   },
   lastAccessed: {
     type: Date,
@@ -44,8 +43,13 @@ const UserProgressSchema = new mongoose.Schema({
   notes: [{
     lessonId: {
       type: mongoose.Schema.Types.ObjectId,
+      required: true
     },
-    content: String,
+    content: {
+      type: String,
+      required: true,
+      maxlength: 5000
+    },
     createdAt: {
       type: Date,
       default: Date.now
@@ -57,19 +61,26 @@ const UserProgressSchema = new mongoose.Schema({
   }]
 }, {
   timestamps: true
-})
+});
 
 // Compound index for efficient queries
-UserProgressSchema.index({ courseId: 1, userId: 1 }, { unique: true })
+UserProgressSchema.index({ courseId: 1, userId: 1 }, { unique: true });
+UserProgressSchema.index({ userId: 1 });
+UserProgressSchema.index({ courseId: 1 });
 
 // Add method to calculate progress
-UserProgressSchema.methods.calculateProgress = function(totalLessons: number) {
-  this.progress = this.completedLessons.length / totalLessons
-  if (this.progress === 1) {
-    this.completed = true
-    this.completedAt = new Date()
+UserProgressSchema.methods.calculateProgress = function (totalLessons: number) {
+  if (totalLessons === 0) {
+    this.progress = 0;
+    return this.progress;
   }
-  return this.progress
-}
 
-export default mongoose.models.UserProgress || mongoose.model('UserProgress', UserProgressSchema)
+  this.progress = this.completedLessons.length / totalLessons;
+  if (this.progress === 1) {
+    this.completed = true;
+    this.completedAt = new Date();
+  }
+  return this.progress;
+};
+
+export default mongoose.models.UserProgress || mongoose.model('UserProgress', UserProgressSchema);

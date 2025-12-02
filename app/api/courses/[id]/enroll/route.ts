@@ -1,11 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { currentUser } from '@clerk/nextjs/server'
-import { connectToDatabase } from '@/lib/mongodb'
-import User from '@/lib/models/User'
-import Course from '@/lib/models/Course'
-import UserProgress from '@/lib/models/UserProgress'
-import { rateLimit } from '@/lib/rate-limit'
-import mongoose from 'mongoose'
+// app/api/courses/[id]/enroll/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { currentUser } from '@clerk/nextjs/server';
+import { connectToDatabase } from '@/lib/mongodb';
+import User from '@/lib/models/User';
+import Course from '@/lib/models/Course';
+import UserProgress from '@/lib/models/UserProgress';
+import { rateLimit } from '@/lib/rate-limit';
+import mongoose from 'mongoose';
 
 export async function POST(
   request: NextRequest,
@@ -13,71 +14,86 @@ export async function POST(
 ) {
   try {
     // Rate limiting
-    const user = await currentUser()
+    const user = await currentUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
     }
 
-    const rateLimitKey = `enroll:${user.id}`
-    const rateLimitResult = rateLimit(rateLimitKey, 5) // 5 attempts per minute
-    
+    const rateLimitKey = `enroll:${user.id}`;
+    const rateLimitResult = rateLimit(rateLimitKey, 5); // 5 attempts per minute
+
     if (rateLimitResult.isRateLimited) {
       return NextResponse.json(
-        { error: 'Too many enrollment attempts. Please try again later.' }, 
+        { error: 'Too many enrollment attempts. Please try again later.' },
         { status: 429, headers: rateLimitResult.headers }
-      )
+      );
     }
 
-    await connectToDatabase()
-    
-    const currentUserDoc = await User.findOne({ clerkId: user.id })
+    await connectToDatabase();
+
+    const currentUserDoc = await User.findOne({ clerkId: user.id });
     if (!currentUserDoc) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 })
+      return NextResponse.json(
+        { error: 'User not found' },
+        { status: 404 }
+      );
     }
 
-    const { id } = await params
+    const { id } = await params;
 
     // Validate course ID
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return NextResponse.json({ error: 'Invalid course ID' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Invalid course ID' },
+        { status: 400 }
+      );
     }
-    
-    let course
-    
+
+    let course;
+
     // Try by ObjectId first, then by slug
     if (mongoose.Types.ObjectId.isValid(id)) {
-      course = await Course.findById(id)
+      course = await Course.findById(id);
     } else {
-      course = await Course.findOne({ slug: id })
+      course = await Course.findOne({ slug: id });
     }
 
     if (!course) {
-      return NextResponse.json({ error: 'Course not found' }, { status: 404 })
+      return NextResponse.json(
+        { error: 'Course not found' },
+        { status: 404 }
+      );
     }
 
     if (!course.isPublished) {
-      return NextResponse.json({ error: 'Course is not available' }, { status: 403 })
+      return NextResponse.json(
+        { error: 'Course is not available' },
+        { status: 403 }
+      );
     }
 
     // Check if user is already enrolled using your Course model
     const isAlreadyEnrolled = course.students.some(
       (student: any) => student.user.toString() === currentUserDoc._id.toString()
-    )
+    );
 
     if (isAlreadyEnrolled) {
-      return NextResponse.json({ 
+      return NextResponse.json({
         alreadyEnrolled: true,
         message: 'Already enrolled in this course'
-      })
+      });
     }
 
     // For paid courses, redirect to payment
     if (!course.isFree && course.price > 0) {
-      return NextResponse.json({ 
+      return NextResponse.json({
         requiresPayment: true,
         price: course.price,
         message: 'Course requires payment'
-      }, { status: 402 }) // Payment Required
+      }, { status: 402 }); // Payment Required
     }
 
     // For free courses, use your Course model's addStudent method
@@ -95,10 +111,10 @@ export async function POST(
         },
         $inc: { totalStudents: 1 }
       }
-    )
+    );
 
     // Create initial user progress
-    const firstLesson = course.modules[0]?.lessons[0]
+    const firstLesson = course.modules[0]?.lessons[0];
     const userProgress = await UserProgress.create({
       courseId: course._id,
       userId: currentUserDoc._id,
@@ -108,7 +124,7 @@ export async function POST(
       timeSpent: 0,
       lastAccessed: new Date(),
       completed: false
-    })
+    });
 
     // Create enrollment activity
     await mongoose.connection.collection('activities').insertOne({
@@ -123,15 +139,15 @@ export async function POST(
         instructor: course.instructor,
         enrolledThrough: 'free'
       }
-    })
+    });
 
     // Refresh course data to get updated student count
     const updatedCourse = await Course.findById(course._id)
-      .populate('instructor', 'firstName lastName username avatar bio rating totalStudents')
+      .populate('instructor', 'firstName lastName username avatar bio rating totalStudents');
 
     // Fix: Add null check for updatedCourse
     if (!updatedCourse) {
-      throw new Error('Failed to retrieve updated course data')
+      throw new Error('Failed to retrieve updated course data');
     }
 
     return NextResponse.json({
@@ -148,14 +164,14 @@ export async function POST(
         instructor: updatedCourse.instructor
       },
       headers: rateLimitResult.headers
-    })
+    });
 
   } catch (error: any) {
-    console.error('Error enrolling in course:', error)
-    
+    console.error('Error enrolling in course:', error);
+
     return NextResponse.json(
-      { error: 'Failed to enroll in course' }, 
+      { error: 'Failed to enroll in course' },
       { status: 500 }
-    )
+    );
   }
 }

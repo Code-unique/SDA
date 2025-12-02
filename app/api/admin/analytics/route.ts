@@ -1,30 +1,36 @@
 // app/api/admin/analytics/route.ts
-import { NextRequest, NextResponse } from 'next/server'
-import { currentUser } from '@clerk/nextjs/server'
-import { connectToDatabase } from '@/lib/mongodb'
-import User from '@/lib/models/User'
-import Post from '@/lib/models/Post'
-import Course from '@/lib/models/Course'
+import { NextRequest, NextResponse } from 'next/server';
+import { currentUser } from '@clerk/nextjs/server';
+import { connectToDatabase } from '@/lib/mongodb';
+import User from '@/lib/models/User';
+import Post from '@/lib/models/Post';
+import Course from '@/lib/models/Course';
 
 export async function GET(request: NextRequest) {
   try {
-    const user = await currentUser()
+    const user = await currentUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
     }
 
-    await connectToDatabase()
-    
+    await connectToDatabase();
+
     // Verify admin role
-    const adminUser = await User.findOne({ clerkId: user.id })
+    const adminUser = await User.findOne({ clerkId: user.id });
     if (!adminUser || adminUser.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      return NextResponse.json(
+        { error: 'Forbidden' },
+        { status: 403 }
+      );
     }
 
     // Get date ranges for analytics
-    const now = new Date()
-    const lastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-    const lastMonth = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+    const now = new Date();
+    const lastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const lastMonth = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
     // Fetch all analytics data in parallel
     const [
@@ -43,19 +49,19 @@ export async function GET(request: NextRequest) {
       User.countDocuments(),
       Post.countDocuments(),
       Course.countDocuments(),
-      
+
       // User analytics
       User.countDocuments({ createdAt: { $gte: lastWeek } }),
       User.countDocuments({ createdAt: { $gte: lastMonth } }),
       User.countDocuments({ lastActive: { $gte: lastWeek } }),
-      
+
       // Content analytics
       Post.find({ isPublic: true })
         .populate('author', 'username')
         .sort({ likes: -1 })
         .limit(10)
         .lean(),
-      
+
       // Course analytics
       Course.aggregate([
         {
@@ -69,7 +75,7 @@ export async function GET(request: NextRequest) {
         { $sort: { totalStudents: -1 } },
         { $limit: 10 }
       ]),
-      
+
       // Growth analytics
       User.aggregate([
         {
@@ -85,7 +91,7 @@ export async function GET(request: NextRequest) {
         { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } },
         { $limit: 30 }
       ]),
-      
+
       // Engagement metrics
       Post.aggregate([
         {
@@ -98,7 +104,12 @@ export async function GET(request: NextRequest) {
           }
         }
       ])
-    ])
+    ]);
+
+    // Calculate engagement rate safely
+    const engagementRate = totalUsers > 0 
+      ? ((activeUsersThisWeek / totalUsers) * 100).toFixed(1)
+      : '0.0';
 
     const analytics = {
       overview: {
@@ -108,21 +119,24 @@ export async function GET(request: NextRequest) {
         newUsersThisWeek,
         newUsersThisMonth,
         activeUsersThisWeek,
-        engagementRate: ((activeUsersThisWeek / totalUsers) * 100).toFixed(1)
+        engagementRate
       },
       growth: userGrowth.map((item: any) => ({
-        date: `${item._id.year}-${item._id.month}-${item._id.day}`,
+        date: `${item._id.year}-${item._id.month.toString().padStart(2, '0')}-${item._id.day.toString().padStart(2, '0')}`,
         users: item.count
       })),
       popularContent: {
         posts: popularPosts.map((post: any) => ({
-          id: post._id,
-          title: post.caption?.substring(0, 50) + '...' || 'Untitled Post',
-          author: post.author.username,
+          id: post._id.toString(),
+          title: post.caption?.substring(0, 50) + (post.caption?.length > 50 ? '...' : '') || 'Untitled Post',
+          author: post.author?.username || 'Unknown',
           likes: post.likes?.length || 0,
           comments: post.comments?.length || 0
         })),
-        courses: courseEnrollments
+        courses: courseEnrollments.map((course: any) => ({
+          ...course,
+          _id: course._id?.toString()
+        }))
       },
       engagement: engagementMetrics[0] || {
         totalLikes: 0,
@@ -130,14 +144,14 @@ export async function GET(request: NextRequest) {
         avgLikesPerPost: 0,
         avgCommentsPerPost: 0
       }
-    }
+    };
 
-    return NextResponse.json(analytics)
+    return NextResponse.json(analytics);
   } catch (error) {
-    console.error('Error fetching analytics:', error)
+    console.error('Error fetching analytics:', error);
     return NextResponse.json(
-      { error: 'Internal server error' }, 
+      { error: 'Internal server error' },
       { status: 500 }
-    )
+    );
   }
 }

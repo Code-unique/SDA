@@ -1,120 +1,138 @@
 // app/api/admin/courses/route.ts
-import { NextRequest, NextResponse } from 'next/server'
-import { currentUser } from '@clerk/nextjs/server'
-import { connectToDatabase } from '@/lib/mongodb'
-import User from '@/lib/models/User'
-import Course, { IS3Asset } from '@/lib/models/Course'
+import { NextRequest, NextResponse } from 'next/server';
+import { currentUser } from '@clerk/nextjs/server';
+import { connectToDatabase } from '@/lib/mongodb';
+import User from '@/lib/models/User';
+import Course, { IS3Asset } from '@/lib/models/Course';
 
+// app/api/admin/courses/route.ts (POST method - preserve S3 pattern)
 export async function POST(request: NextRequest) {
   try {
-    const user = await currentUser()
+    const user = await currentUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    await connectToDatabase()
-    
-    const adminUser = await User.findOne({ clerkId: user.id })
-    if (!adminUser || adminUser.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
-
-    const body = await request.json()
-    
-    console.log('📝 Received course data:', JSON.stringify(body, null, 2))
-    
-    const {
-      title,
-      description,
-      shortDescription,
-      price,
-      isFree,
-      level,
-      category,
-      tags,
-      thumbnail,
-      previewVideo,
-      modules,
-      requirements,
-      learningOutcomes,
-      isFeatured
-    } = body
-
-    // Validate required fields
-    if (!title || !description || !shortDescription || !level || !category || !thumbnail) {
       return NextResponse.json(
-        { error: 'Missing required fields' }, 
-        { status: 400 }
-      )
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
     }
 
-    // Generate slug
-    const slug = title
+    await connectToDatabase();
+
+    const adminUser = await User.findOne({ clerkId: user.id });
+    if (!adminUser || adminUser.role !== 'admin') {
+      return NextResponse.json(
+        { error: 'Forbidden' },
+        { status: 403 }
+      );
+    }
+
+    const body = await request.json();
+
+    // Enhanced validation (preserve original pattern with improvements)
+    const requiredFields = ['title', 'description', 'shortDescription', 'level', 'category', 'thumbnail'];
+    const missingFields = requiredFields.filter(field => !body[field]);
+
+    if (missingFields.length > 0) {
+      return NextResponse.json(
+        { error: `Missing required fields: ${missingFields.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
+    // Preserve original field length patterns
+    if (body.title.length > 100) {
+      return NextResponse.json(
+        { error: 'Title must be less than 100 characters' },
+        { status: 400 }
+      );
+    }
+
+    if (body.shortDescription.length > 200) {
+      return NextResponse.json(
+        { error: 'Short description must be less than 200 characters' },
+        { status: 400 }
+      );
+    }
+
+    if (!['beginner', 'intermediate', 'advanced'].includes(body.level)) {
+      return NextResponse.json(
+        { error: 'Invalid level value' },
+        { status: 400 }
+      );
+    }
+
+    // Validate price (preserve original pattern)
+    if (body.price !== undefined && (typeof body.price !== 'number' || body.price < 0)) {
+      return NextResponse.json(
+        { error: 'Invalid price value' },
+        { status: 400 }
+      );
+    }
+
+    // Generate slug (preserve original pattern)
+    const slug = body.title
       .toLowerCase()
       .replace(/[^a-z0-9\s-]/g, '')
       .trim()
       .replace(/\s+/g, '-')
       .replace(/-+/g, '-')
+      .substring(0, 100);
 
-    // Check for existing course
-    const existingCourse = await Course.findOne({ 
+    // Check for existing course (preserve original pattern)
+    const existingCourse = await Course.findOne({
       $or: [
-        { title },
+        { title: body.title },
         { slug }
       ]
-    })
+    });
 
     if (existingCourse) {
       return NextResponse.json(
-        { error: 'Course with this title already exists' }, 
+        { error: 'Course with this title already exists' },
         { status: 400 }
-      )
+      );
     }
 
-    // Transform modules data to match schema
-    const transformedModules = modules?.map((module: any, index: number) => ({
-      title: module.title,
-      description: module.description,
-      order: module.order !== undefined ? module.order : index,
+    // Transform modules data with validation (preserve original pattern)
+    const transformedModules = body.modules?.map((module: any, index: number) => ({
+      title: module.title?.substring(0, 200) || '',
+      description: module.description?.substring(0, 1000) || '',
+      order: typeof module.order === 'number' ? module.order : index,
       lessons: module.lessons?.map((lesson: any, lessonIndex: number) => ({
-        title: lesson.title,
-        description: lesson.description,
+        title: lesson.title?.substring(0, 200) || '',
+        description: lesson.description?.substring(0, 1000) || '',
         content: lesson.content || '',
-        video: lesson.video as IS3Asset,
-        duration: lesson.duration || 0,
-        isPreview: lesson.isPreview || false,
-        resources: lesson.resources || [],
-        order: lesson.order !== undefined ? lesson.order : lessonIndex
+        video: lesson.video as IS3Asset, // Preserve S3 asset pattern
+        duration: Math.max(0, Math.min(lesson.duration || 0, 10000)),
+        isPreview: !!lesson.isPreview,
+        resources: Array.isArray(lesson.resources) ? lesson.resources.slice(0, 10) : [],
+        order: typeof lesson.order === 'number' ? lesson.order : lessonIndex
       })) || []
-    })) || []
+    })) || [];
 
-    // Create course with proper schema structure
+    // Create course with proper schema structure (preserve original pattern)
     const courseData = {
-      title,
+      title: body.title.substring(0, 100),
       slug,
-      description,
-      shortDescription,
-      price: isFree ? 0 : (price || 0),
-      isFree: !!isFree,
-      level,
-      category,
-      tags: tags || [],
-      thumbnail: thumbnail as IS3Asset,
-      previewVideo: previewVideo as IS3Asset | undefined,
+      description: body.description,
+      shortDescription: body.shortDescription.substring(0, 200),
+      price: body.isFree ? 0 : (body.price || 0),
+      isFree: !!body.isFree,
+      level: body.level,
+      category: body.category.substring(0, 50),
+      tags: (body.tags || []).slice(0, 10).map((tag: string) => tag.substring(0, 30)),
+      thumbnail: body.thumbnail as IS3Asset, // Preserve S3 asset pattern
+      previewVideo: body.previewVideo as IS3Asset | undefined, // Preserve S3 asset pattern
       modules: transformedModules,
       instructor: adminUser._id,
-      requirements: requirements || [],
-      learningOutcomes: learningOutcomes || [],
+      requirements: (body.requirements || []).slice(0, 10).map((req: string) => req.substring(0, 200)),
+      learningOutcomes: (body.learningOutcomes || []).slice(0, 10).map((lo: string) => lo.substring(0, 200)),
       isPublished: false,
-      isFeatured: !!isFeatured,
-    }
+      isFeatured: !!body.isFeatured,
+    };
 
-    console.log('🎯 Creating course with data:', JSON.stringify(courseData, null, 2))
-
-    const course = await Course.create(courseData)
-    await course.populate('instructor', 'username firstName lastName avatar')
-
-    console.log('✅ Course created successfully:', course._id)
+    const course = await Course.create(courseData);
+    await course.populate('instructor', 'username firstName lastName avatar');
 
     return NextResponse.json({
       _id: course._id,
@@ -141,72 +159,77 @@ export async function POST(request: NextRequest) {
       totalLessons: course.totalLessons,
       createdAt: course.createdAt,
       updatedAt: course.updatedAt
-    })
+    });
   } catch (error: any) {
-    console.error('❌ Error creating course:', error)
-    console.error('❌ Error details:', error.message)
-    console.error('❌ Error stack:', error.stack)
-    
+    console.error('Error creating course:', error);
+
     if (error.code === 11000) {
       return NextResponse.json(
-        { error: 'Course with this title already exists' }, 
+        { error: 'Course with this title already exists' },
         { status: 400 }
-      )
+      );
     }
-    
+
     return NextResponse.json(
-      { error: 'Internal server error', details: error.message }, 
+      { error: 'Internal server error' },
       { status: 500 }
-    )
+    );
   }
 }
 
 export async function GET(request: NextRequest) {
   try {
-    const user = await currentUser()
+    const user = await currentUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
     }
 
-    await connectToDatabase()
-    
-    const adminUser = await User.findOne({ clerkId: user.id })
+    await connectToDatabase();
+
+    const adminUser = await User.findOne({ clerkId: user.id });
     if (!adminUser || adminUser.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      return NextResponse.json(
+        { error: 'Forbidden' },
+        { status: 403 }
+      );
     }
 
-    const { searchParams } = new URL(request.url)
-    const page = parseInt(searchParams.get('page') || '1')
-    const limit = parseInt(searchParams.get('limit') || '10')
-    const search = searchParams.get('search') || ''
-    const status = searchParams.get('status') || 'all'
+    const { searchParams } = new URL(request.url);
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
+    const limit = Math.max(1, Math.min(100, parseInt(searchParams.get('limit') || '10')));
+    const search = searchParams.get('search') || '';
+    const status = searchParams.get('status') || 'all';
 
-    const skip = (page - 1) * limit
+    const skip = (page - 1) * limit;
 
-    let query: any = {}
-    
+    let query: any = {};
+
     if (search) {
       query.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { category: { $regex: search, $options: 'i' } }
-      ]
+        { title: { $regex: search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+        { description: { $regex: search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+        { category: { $regex: search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } }
+      ];
     }
 
     if (status !== 'all') {
-      if (status === 'published') query.isPublished = true
-      else if (status === 'draft') query.isPublished = false
-      else if (status === 'featured') query.isFeatured = true
+      if (status === 'published') query.isPublished = true;
+      else if (status === 'draft') query.isPublished = false;
+      else if (status === 'featured') query.isFeatured = true;
     }
 
-    const courses = await Course.find(query)
-      .populate('instructor', 'username firstName lastName avatar')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean()
-
-    const total = await Course.countDocuments(query)
+    const [courses, total] = await Promise.all([
+      Course.find(query)
+        .populate('instructor', 'username firstName lastName avatar')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Course.countDocuments(query)
+    ]);
 
     return NextResponse.json({
       courses: courses.map(course => ({
@@ -220,12 +243,12 @@ export async function GET(request: NextRequest) {
         hasNext: page < Math.ceil(total / limit),
         hasPrev: page > 1
       }
-    })
+    });
   } catch (error: any) {
-    console.error('Error fetching courses:', error)
+    console.error('Error fetching courses:', error);
     return NextResponse.json(
-      { error: 'Internal server error', details: error.message }, 
+      { error: 'Internal server error' },
       { status: 500 }
-    )
+    );
   }
 }

@@ -1,28 +1,28 @@
 // lib/auth.ts
-import { auth, currentUser } from '@clerk/nextjs/server'
-import { redirect } from 'next/navigation'
+import { auth, currentUser } from '@clerk/nextjs/server';
+import { redirect } from 'next/navigation';
 
 export async function getAuth() {
-  const user = await currentUser()
-  
+  const user = await currentUser();
+
   if (!user) {
-    redirect('/sign-in')
+    redirect('/sign-in');
   }
-  
-  return user
+
+  return user;
 }
 
 export async function getAuthUserId() {
-  const user = await currentUser()
-  return user?.id
+  const user = await currentUser();
+  return user?.id;
 }
 
 export async function requireAuth() {
-  const user = await currentUser()
-  
+  const user = await currentUser();
+
   if (!user) {
-    redirect('/sign-in')
+    redirect('/sign-in');
   }
-  
-  return user
+
+  return user;
 }

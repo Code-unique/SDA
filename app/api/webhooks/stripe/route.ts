@@ -1,98 +1,105 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { stripe } from '@/lib/payment/stripe'
-import { paymentConfig } from '@/lib/payment/config'
-import { connectToDatabase } from '@/lib/mongodb'
-import Course from '@/lib/models/Course'
-import UserProgress from '@/lib/models/UserProgress'
-import PendingEnrollment from '@/lib/models/PendingEnrollment'
-import Payment from '@/lib/models/Payment'
-import mongoose from 'mongoose'
+// app/api/webhooks/stripe/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { stripe } from '@/lib/payment/stripe';
+import { paymentConfig } from '@/lib/payment/config';
+import { connectToDatabase } from '@/lib/mongodb';
+import Course from '@/lib/models/Course';
+import UserProgress from '@/lib/models/UserProgress';
+import PendingEnrollment from '@/lib/models/PendingEnrollment';
+import Payment from '@/lib/models/Payment';
+import mongoose from 'mongoose';
 
 export async function POST(request: NextRequest) {
-  const body = await request.text()
-  const signature = request.headers.get('stripe-signature')!
+  const body = await request.text();
+  const signature = request.headers.get('stripe-signature')!;
 
-  let event
+  let event;
 
   try {
     event = stripe.webhooks.constructEvent(
       body,
       signature,
       paymentConfig.stripe.webhookSecret
-    )
+    );
   } catch (error: any) {
-    console.error('Webhook signature verification failed:', error.message)
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
+    console.error('Webhook signature verification failed:', error.message);
+    return NextResponse.json(
+      { error: 'Invalid signature' },
+      { status: 400 }
+    );
   }
 
-  const session = await mongoose.startSession()
-  session.startTransaction()
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
   try {
-    await connectToDatabase()
+    await connectToDatabase();
 
     switch (event.type) {
       case 'payment_intent.succeeded':
-        await handlePaymentIntentSucceeded(event.data.object, session)
-        break
-      
+        await handlePaymentIntentSucceeded(event.data.object, session);
+        break;
+
       case 'payment_intent.payment_failed':
-        await handlePaymentIntentFailed(event.data.object, session)
-        break
-      
+        await handlePaymentIntentFailed(event.data.object, session);
+        break;
+
       case 'payment_intent.canceled':
-        await handlePaymentIntentCanceled(event.data.object, session)
-        break
+        await handlePaymentIntentCanceled(event.data.object, session);
+        break;
     }
 
-    await session.commitTransaction()
-    return NextResponse.json({ received: true })
+    await session.commitTransaction();
+    return NextResponse.json({ received: true });
   } catch (error) {
-    await session.abortTransaction()
-    console.error('Webhook error:', error)
-    return NextResponse.json({ error: 'Webhook handler failed' }, { status: 500 })
+    await session.abortTransaction();
+    console.error('Webhook error:', error);
+    return NextResponse.json(
+      { error: 'Webhook handler failed' },
+      { status: 500 }
+    );
   } finally {
-    session.endSession()
+    session.endSession();
   }
 }
 
 async function handlePaymentIntentSucceeded(paymentIntent: any, session: mongoose.ClientSession) {
-  const { metadata } = paymentIntent
-  
-  if (!metadata.courseId || !metadata.userId) {
-    console.warn('Payment intent missing required metadata')
-    return
+  const { metadata } = paymentIntent;
+
+  if (!metadata?.courseId || !metadata?.userId) {
+    console.warn('Payment intent missing required metadata');
+    return;
   }
 
   // Find pending enrollment
   const pendingEnrollment = await PendingEnrollment.findOne({
     paymentIntentId: paymentIntent.id,
     status: 'pending'
-  }).session(session)
+  }).session(session);
 
   if (!pendingEnrollment) {
-    console.warn('No pending enrollment found for payment intent:', paymentIntent.id)
-    return
+    console.warn('No pending enrollment found for payment intent:', paymentIntent.id);
+    return;
   }
 
   // Check if already enrolled
-  const course = await Course.findById(metadata.courseId).session(session)
+  const course = await Course.findById(metadata.courseId).session(session);
   if (!course) {
-    throw new Error('Course not found')
+    throw new Error('Course not found');
   }
 
   const isAlreadyEnrolled = course.students.some(
     (student: any) => student.user.toString() === metadata.userId
-  )
+  );
 
   if (isAlreadyEnrolled) {
-    console.warn('User already enrolled, skipping enrollment')
+    console.warn('User already enrolled, skipping enrollment');
     await PendingEnrollment.findByIdAndUpdate(
       pendingEnrollment._id,
       { status: 'completed' },
       { session }
-    )
-    return
+    );
+    return;
   }
 
   // Enroll user
@@ -113,10 +120,10 @@ async function handlePaymentIntentSucceeded(paymentIntent: any, session: mongoos
       $inc: { totalStudents: 1 }
     },
     { session }
-  )
+  );
 
   // Create user progress
-  const firstLesson = course.modules[0]?.lessons[0]
+  const firstLesson = course.modules[0]?.lessons[0];
   await UserProgress.create([{
     courseId: metadata.courseId,
     userId: metadata.userId,
@@ -126,17 +133,17 @@ async function handlePaymentIntentSucceeded(paymentIntent: any, session: mongoos
     timeSpent: 0,
     lastAccessed: new Date(),
     completed: false
-  }], { session })
+  }], { session });
 
   // Update pending enrollment
   await PendingEnrollment.findByIdAndUpdate(
     pendingEnrollment._id,
-    { 
+    {
       status: 'completed',
       completedAt: new Date()
     },
     { session }
-  )
+  );
 
   // Create payment record
   await Payment.create([{
@@ -149,11 +156,11 @@ async function handlePaymentIntentSucceeded(paymentIntent: any, session: mongoos
     transactionId: paymentIntent.id,
     paymentIntentId: paymentIntent.id,
     metadata: {
-      courseTitle: metadata.courseTitle,
-      userEmail: metadata.userEmail,
-      userName: metadata.userName
+      courseTitle: metadata.courseTitle || 'Unknown Course',
+      userEmail: metadata.userEmail || '',
+      userName: metadata.userName || 'Unknown User'
     }
-  }], { session })
+  }], { session });
 }
 
 async function handlePaymentIntentFailed(paymentIntent: any, session: mongoose.ClientSession) {
@@ -161,7 +168,7 @@ async function handlePaymentIntentFailed(paymentIntent: any, session: mongoose.C
     { paymentIntentId: paymentIntent.id },
     { status: 'failed' },
     { session }
-  )
+  );
 }
 
 async function handlePaymentIntentCanceled(paymentIntent: any, session: mongoose.ClientSession) {
@@ -169,5 +176,5 @@ async function handlePaymentIntentCanceled(paymentIntent: any, session: mongoose
     { paymentIntentId: paymentIntent.id },
     { status: 'failed' },
     { session }
-  )
+  );
 }

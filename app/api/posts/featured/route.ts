@@ -1,18 +1,19 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { connectToDatabase } from '@/lib/mongodb'
-import Post from '@/lib/models/Post'
-import { ApiResponse, PaginatedResponse } from '@/types/post'
-import { Post as PostType } from '@/types/post'
+// app/api/posts/featured/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { connectToDatabase } from '@/lib/mongodb';
+import Post from '@/lib/models/Post';
+import { ApiResponse, PaginatedResponse } from '@/types/post';
+import { Post as PostType } from '@/types/post';
 
 export async function GET(request: NextRequest) {
   try {
-    await connectToDatabase()
+    await connectToDatabase();
 
-    const { searchParams } = new URL(request.url)
-    const limit = Math.min(parseInt(searchParams.get('limit') || '3'), 20)
-    const page = parseInt(searchParams.get('page') || '1')
+    const { searchParams } = new URL(request.url);
+    const limit = Math.min(parseInt(searchParams.get('limit') || '3'), 20);
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
 
-    const skip = (page - 1) * limit
+    const skip = (page - 1) * limit;
 
     // Get featured posts based on engagement (likes + comments)
     const posts = await Post.aggregate([
@@ -59,13 +60,23 @@ export async function GET(request: NextRequest) {
           'author.isPro': 1
         }
       }
-    ])
+    ]);
 
-    const totalPosts = await Post.countDocuments({ isPublic: true, isFeatured: true })
+    const totalPosts = await Post.countDocuments({ isPublic: true, isFeatured: true });
 
-    // Create the paginated response correctly - use 'items' instead of 'posts'
+    // Convert _id to string
+    const formattedPosts = posts.map((post: any) => ({
+      ...post,
+      _id: post._id.toString(),
+      author: {
+        ...post.author,
+        _id: post.author._id.toString()
+      }
+    }));
+
+    // Create the paginated response correctly
     const paginatedResponse: PaginatedResponse<PostType> = {
-      items: posts, // Changed from 'posts' to 'items'
+      items: formattedPosts,
       pagination: {
         currentPage: page,
         totalPages: Math.ceil(totalPosts / limit),
@@ -73,17 +84,17 @@ export async function GET(request: NextRequest) {
         hasNext: page < Math.ceil(totalPosts / limit),
         hasPrev: page > 1
       }
-    }
+    };
 
     return NextResponse.json<ApiResponse<PaginatedResponse<PostType>>>({
       success: true,
       data: paginatedResponse
-    })
+    });
   } catch (error: any) {
-    console.error('Error fetching featured posts:', error)
+    console.error('Error fetching featured posts:', error);
     return NextResponse.json<ApiResponse<null>>(
       { success: false, error: 'Internal server error' },
       { status: 500 }
-    )
+    );
   }
 }

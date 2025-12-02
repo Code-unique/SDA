@@ -35,7 +35,10 @@ import {
   Zap,
   Check,
   CreditCard,
-  Smartphone
+  Smartphone,
+  BookCheck,
+  Play,
+  TrendingUp
 } from 'lucide-react'
 
 interface S3Asset {
@@ -136,12 +139,13 @@ interface UserProgress {
   _id: string
   courseId: string
   userId: string
+  enrolled: boolean
+  progress: number
+  completed: boolean
   completedLessons: string[]
   currentLesson: string | null
-  progress: number
   timeSpent: number
   lastAccessed: Date
-  completed: boolean
   completedAt?: Date
 }
 
@@ -153,7 +157,7 @@ export default function CourseDetailPage() {
   const [userProgress, setUserProgress] = useState<UserProgress | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [isEnrolling, setIsEnrolling] = useState(false)
+  const [isEnrolling, setIsEnrolling] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('overview')
   const [expandedModules, setExpandedModules] = useState<Set<number>>(new Set([0]))
   const [newRating, setNewRating] = useState({ rating: 5, review: '' })
@@ -164,96 +168,126 @@ export default function CourseDetailPage() {
   const [completedLessons, setCompletedLessons] = useState<Set<string>>(new Set())
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showEnrollmentSuccess, setShowEnrollmentSuccess] = useState(false)
+  const [progressLoading, setProgressLoading] = useState(false)
 
   const slug = params.slug as string
 
   const fetchCourseData = async () => {
-    try {
-      setLoading(true)
-      setError(null)
+  try {
+    setLoading(true)
+    setError(null)
 
-      console.log('Fetching course with slug:', slug)
+    console.log('Fetching course with slug:', slug)
 
-      const [courseResponse, progressResponse] = await Promise.all([
-        fetch(`/api/courses/${slug}`),
-        fetch(`/api/courses/${slug}/progress`)
-      ])
+    const [courseResponse, progressResponse] = await Promise.all([
+      fetch(`/api/courses/${slug}`),
+      fetch(`/api/courses/${slug}/progress`)
+    ])
 
-      if (!courseResponse.ok) {
-        const errorData = await courseResponse.json().catch(() => ({}))
-        throw new Error(errorData.error || `API returned ${courseResponse.status}`)
-      }
-
-      const data = await courseResponse.json()
-      
-      const processedCourse: Course = {
-        ...data,
-        thumbnail: data.thumbnail ? {
-          key: data.thumbnail.key || data.thumbnail.public_id,
-          url: data.thumbnail.url || data.thumbnail.secure_url,
-          size: data.thumbnail.size || data.thumbnail.bytes,
-          type: data.thumbnail.type || 'image',
-          width: data.thumbnail.width,
-          height: data.thumbnail.height
-        } : {
-          key: 'default',
-          url: '/default-thumbnail.jpg',
-          size: 0,
-          type: 'image'
-        },
-        previewVideo: data.previewVideo ? {
-          key: data.previewVideo.key || data.previewVideo.public_id,
-          url: data.previewVideo.url || data.previewVideo.secure_url,
-          size: data.previewVideo.size || data.previewVideo.bytes,
-          type: data.previewVideo.type || 'video',
-          duration: data.previewVideo.duration
-        } : undefined,
-        modules: data.modules?.map((module: any) => ({
-          ...module,
-          lessons: module.lessons?.map((lesson: any) => ({
-            ...lesson,
-            video: lesson.video ? {
-              key: lesson.video.key || lesson.video.public_id,
-              url: lesson.video.url || lesson.video.secure_url,
-              size: lesson.video.size || lesson.video.bytes,
-              type: lesson.video.type || 'video',
-              duration: lesson.video.duration
-            } : undefined
-          })) || []
-        })) || []
-      }
-
-      setCourse(processedCourse)
-
-      if (progressResponse.ok) {
-        const progressData = await progressResponse.json()
-        setUserProgress(progressData)
-        setCompletedLessons(new Set(progressData.completedLessons || []))
-        
-        if (progressData.currentLesson) {
-          const lesson = findLessonById(processedCourse, progressData.currentLesson)
-          if (lesson) {
-            setActiveLesson(lesson)
-          }
-        } else if (processedCourse.modules[0]?.lessons[0]) {
-          setActiveLesson(processedCourse.modules[0].lessons[0])
-        }
-      } else {
-        setUserProgress(null)
-      }
-      
-    } catch (err: any) {
-      console.error('Error fetching course:', err)
-      setError(err.message || 'Failed to load course')
-      toast({
-        title: 'Error',
-        description: err.message || 'Failed to load course',
-        variant: 'destructive',
-      })
-    } finally {
-      setLoading(false)
+    if (!courseResponse.ok) {
+      const errorData = await courseResponse.json().catch(() => ({}))
+      throw new Error(errorData.error || `API returned ${courseResponse.status}`)
     }
+
+    const data = await courseResponse.json()
+    
+    const processedCourse: Course = {
+      ...data,
+      thumbnail: data.thumbnail ? {
+        key: data.thumbnail.key || data.thumbnail.public_id,
+        url: data.thumbnail.url || data.thumbnail.secure_url,
+        size: data.thumbnail.size || data.thumbnail.bytes,
+        type: data.thumbnail.type || 'image',
+        width: data.thumbnail.width,
+        height: data.thumbnail.height
+      } : {
+        key: 'default',
+        url: '/default-thumbnail.jpg',
+        size: 0,
+        type: 'image'
+      },
+      previewVideo: data.previewVideo ? {
+        key: data.previewVideo.key || data.previewVideo.public_id,
+        url: data.previewVideo.url || data.previewVideo.secure_url,
+        size: data.previewVideo.size || data.previewVideo.bytes,
+        type: data.previewVideo.type || 'video',
+        duration: data.previewVideo.duration
+      } : undefined,
+      modules: data.modules?.map((module: any) => ({
+        ...module,
+        lessons: module.lessons?.map((lesson: any) => ({
+          ...lesson,
+          video: lesson.video ? {
+            key: lesson.video.key || lesson.video.public_id,
+            url: lesson.video.url || lesson.video.secure_url,
+            size: lesson.video.size || lesson.video.bytes,
+            type: lesson.video.type || 'video',
+            duration: lesson.video.duration
+          } : undefined
+        })) || []
+      })) || []
+    }
+
+    setCourse(processedCourse)
+
+    // Handle progress response
+    console.log('Progress response status:', progressResponse.status)
+    
+    if (progressResponse.ok) {
+      const progressData = await progressResponse.json()
+      console.log('Progress data received:', progressData)
+      
+      // Create user progress object with enrolled flag
+      const userProgressData: UserProgress = {
+        _id: progressData._id || `temp-${processedCourse._id}`,
+        courseId: progressData.courseId || processedCourse._id,
+        userId: progressData.userId || 'current-user',
+        enrolled: true, // User is enrolled if we got progress data
+        progress: progressData.progress || 0,
+        completed: progressData.completed || false,
+        completedLessons: progressData.completedLessons || [],
+        currentLesson: progressData.currentLesson || null,
+        timeSpent: progressData.timeSpent || 0,
+        lastAccessed: progressData.lastAccessed ? new Date(progressData.lastAccessed) : new Date()
+      }
+      
+      console.log('Setting user progress:', userProgressData)
+      setUserProgress(userProgressData)
+      setCompletedLessons(new Set(userProgressData.completedLessons))
+      
+      // Set active lesson
+      if (userProgressData.currentLesson) {
+        const lesson = findLessonById(processedCourse, userProgressData.currentLesson)
+        if (lesson) {
+          setActiveLesson(lesson)
+        }
+      } else if (processedCourse.modules[0]?.lessons[0]) {
+        setActiveLesson(processedCourse.modules[0].lessons[0])
+      }
+    } else {
+      // User is not enrolled - set userProgress to null
+      console.log('User is not enrolled or progress not found. Status:', progressResponse.status)
+      setUserProgress(null)
+      setCompletedLessons(new Set())
+      
+      // Still set active lesson for preview purposes
+      if (processedCourse.modules[0]?.lessons[0]) {
+        setActiveLesson(processedCourse.modules[0].lessons[0])
+      }
+    }
+    
+  } catch (err: any) {
+    console.error('Error fetching course:', err)
+    setError(err.message || 'Failed to load course')
+    toast({
+      title: 'Error',
+      description: err.message || 'Failed to load course',
+      variant: 'destructive',
+    })
+  } finally {
+    setLoading(false)
   }
+}
 
   const findLessonById = (courseData: Course, lessonId: string): Lesson | null => {
     for (const module of courseData.modules) {
@@ -272,89 +306,153 @@ export default function CourseDetailPage() {
     }
   }, [slug])
 
+  // FIXED: Enrollment function - matches the working implementation
   const enrollInCourse = async () => {
-    if (!course || isEnrolling) return
-    
-    setIsEnrolling(true)
-    setError(null)
-    
-    try {
-      const response = await fetch(`/api/courses/${course._id}/enroll`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      })
-
-      const result = await response.json()
-
-      if (response.ok) {
-        if (result.requiresPayment) {
-          // Show payment modal for paid courses
-          setShowPaymentModal(true)
-          setIsEnrolling(false)
-          return
-        }
-
-        if (result.alreadyEnrolled || result.enrolled) {
-          toast({
-            title: result.alreadyEnrolled ? 'Welcome Back!' : '🎉 Successfully Enrolled!',
-            description: result.alreadyEnrolled 
-              ? 'Continuing your learning journey' 
-              : `You've been enrolled in "${course.title}". Check your notifications for details!`,
-            variant: 'default',
-          })
-          
-          setCourse(prev => prev ? {
-            ...prev,
-            totalStudents: result.course?.totalStudents || prev.totalStudents + 1,
-            instructor: result.course?.instructor || prev.instructor
-          } : null)
-          
-          if (result.progress) {
-            setUserProgress(result.progress)
-            setCompletedLessons(new Set(result.progress.completedLessons || []))
-          }
-          
-          if (result.enrolled) {
-            setShowEnrollmentSuccess(true)
-            setTimeout(() => setShowEnrollmentSuccess(false), 3000)
-          }
-          
-          if (result.enrolled && course?.modules[0]?.lessons[0]) {
-            setActiveLesson(course.modules[0].lessons[0])
-            setTimeout(() => setIsLearningMode(true), 1000)
-          } else if (result.alreadyEnrolled && result.progress?.currentLesson) {
-            const currentLesson = findLessonById(course!, result.progress.currentLesson)
-            if (currentLesson) {
-              setActiveLesson(currentLesson)
-              setIsLearningMode(true)
-            }
-          }
-        } else {
-          throw new Error('Unexpected response from server')
-        }
-      } else {
-        throw new Error(result.error || `Failed to enroll (${response.status})`)
+  if (!course || isEnrolling) return
+  
+  setIsEnrolling(course._id)
+  setError(null)
+  
+  try {
+    const response = await fetch(`/api/courses/${course._id}/enroll`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
       }
+    })
 
-    } catch (err: any) {
-      console.error('Error enrolling:', err)
-      const errorMessage = err.message || 'Failed to enroll in course. Please try again.'
-      setError(errorMessage)
-      toast({
-        title: 'Enrollment Failed',
-        description: errorMessage,
-        variant: 'destructive',
-      })
-    } finally {
-      setIsEnrolling(false)
+    const result = await response.json()
+    console.log('Enrollment response:', { status: response.status, result })
+
+    // Handle payment required
+    if (response.status === 402 && result.requiresPayment) {
+      setShowPaymentModal(true)
+      setIsEnrolling(null)
+      return
     }
+
+    if (response.ok) {
+      if (result.enrolled) {
+        // Successfully enrolled
+        setCourse(prev => prev ? {
+          ...prev,
+          totalStudents: result.course?.totalStudents || prev.totalStudents + 1,
+          instructor: result.course?.instructor || prev.instructor
+        } : null)
+        
+        // Create user progress object
+        const newProgress: UserProgress = {
+          _id: result.progress?._id || `temp-${course._id}`,
+          courseId: course._id,
+          userId: 'current-user',
+          enrolled: true, // Explicitly set enrolled to true
+          progress: result.progress?.progress || 0,
+          completed: result.progress?.completed || false,
+          completedLessons: result.progress?.completedLessons || [],
+          currentLesson: result.progress?.currentLesson || course.modules[0]?.lessons[0]?._id || null,
+          timeSpent: result.progress?.timeSpent || 0,
+          lastAccessed: new Date()
+        }
+        
+        setUserProgress(newProgress)
+        setCompletedLessons(new Set(newProgress.completedLessons))
+        
+        toast({
+          title: 'Successfully Enrolled!',
+          description: 'You can now start learning immediately',
+          variant: 'default',
+        })
+
+        setShowEnrollmentSuccess(true)
+        
+        if (course.modules[0]?.lessons[0]) {
+          setActiveLesson(course.modules[0].lessons[0])
+          setTimeout(() => setIsLearningMode(true), 1500)
+        }
+      } 
+      else if (result.alreadyEnrolled) {
+        toast({
+          title: 'Already Enrolled!',
+          description: 'You are already enrolled in this course',
+        })
+        
+        // User is already enrolled, update progress
+        const updatedProgress: UserProgress = {
+          _id: result.progress?._id || `temp-${course._id}`,
+          courseId: course._id,
+          userId: 'current-user',
+          enrolled: true, // Explicitly set enrolled to true
+          progress: result.progress?.progress || 0,
+          completed: result.progress?.completed || false,
+          completedLessons: result.progress?.completedLessons || [],
+          currentLesson: result.progress?.currentLesson || null,
+          timeSpent: result.progress?.timeSpent || 0,
+          lastAccessed: new Date()
+        }
+        
+        setUserProgress(updatedProgress)
+        setCompletedLessons(new Set(updatedProgress.completedLessons))
+        
+        if (result.progress?.currentLesson) {
+          const currentLesson = findLessonById(course, result.progress.currentLesson)
+          if (currentLesson) {
+            setActiveLesson(currentLesson)
+          }
+        }
+      }
+      else {
+        throw new Error('Unexpected response from server')
+      }
+    } else {
+      throw new Error(result.error || `Failed to enroll (${response.status})`)
+    }
+
+  } catch (err: any) {
+    console.error('Error enrolling:', err)
+    
+    if (err.message && !err.message.includes('402')) {
+      if (err.message.includes('Unauthorized')) {
+        toast({
+          title: 'Login Required',
+          description: 'Please log in to enroll in courses',
+          variant: 'destructive',
+        })
+      } else if (err.message.includes('not found')) {
+        toast({
+          title: 'Course Not Available',
+          description: 'This course is no longer available',
+          variant: 'destructive',
+        })
+      } else {
+        toast({
+          title: 'Enrollment Failed',
+          description: err.message || 'Failed to enroll in course. Please try again.',
+          variant: 'destructive',
+        })
+      }
+    }
+  } finally {
+    setIsEnrolling(null)
   }
+}
 
   const handlePaymentSuccess = (courseId: string) => {
     setShowPaymentModal(false)
     setShowEnrollmentSuccess(true)
+    
+    // Update user progress after payment
+    setUserProgress({
+      _id: `temp-${courseId}`,
+      courseId,
+      userId: 'current-user',
+      enrolled: true,
+      progress: 0,
+      completed: false,
+      completedLessons: [],
+      currentLesson: course?.modules[0]?.lessons[0]?._id || null,
+      timeSpent: 0,
+      lastAccessed: new Date()
+    })
     
     // Refresh course data
     fetchCourseData()
@@ -375,7 +473,7 @@ export default function CourseDetailPage() {
   }
 
   const updateProgress = async (lessonId: string, completed: boolean = false, isCurrent: boolean = true) => {
-    if (!course) return
+    if (!course || !userProgress?.enrolled) return
 
     setUpdatingProgress(lessonId)
     
@@ -583,47 +681,39 @@ export default function CourseDetailPage() {
     return (completedInModule / module.lessons.length) * 100
   }
 
-  const EnrollmentButton = () => {
-    if (userProgress) {
-      return (
-        <Button
-          onClick={() => setIsLearningMode(true)}
-          variant="default"
-          className="w-full rounded-2xl mb-4 relative overflow-hidden group bg-rose-600 hover:bg-rose-700"
-          size="lg"
-        >
-          <div className="flex items-center">
-            <PlayCircle className="w-5 h-5 mr-2" />
-            {userProgress?.progress && userProgress.progress > 0 ? 'Continue Learning' : 'Start Learning'}
-          </div>
-          {userProgress?.progress && userProgress.progress > 0 && !userProgress.completed && (
-            <div className="absolute bottom-0 left-0 right-0 h-1 bg-rose-700/30">
-              <div 
-                className="h-full bg-rose-100 transition-all duration-1000"
-                style={{ width: `${userProgress.progress * 100}%` }}
-              />
-            </div>
-          )}
-        </Button>
-      )
-    }
+  // FIXED: Enrollment Button component with proper states
+  // Replace the EnrollmentButton component in your course detail page with this:
 
+// Replace the EnrollmentButton component with this simplified version:
+
+const EnrollmentButton = () => {
+  console.log('EnrollmentButton - Current state:', {
+    userProgress: !!userProgress,
+    enrolled: userProgress?.enrolled,
+    progress: userProgress?.progress,
+    completed: userProgress?.completed,
+    isEnrolling
+  })
+
+  // User is NOT enrolled
+  if (!userProgress || userProgress.enrolled === false) {
+    console.log('Showing ENROLL button - user not enrolled')
     return (
       <Button
         onClick={enrollInCourse}
-        disabled={isEnrolling}
+        disabled={!!isEnrolling}
         variant="default"
-        className="w-full rounded-2xl mb-4 relative overflow-hidden group bg-rose-600 hover:bg-rose-700"
+        className="w-full rounded-2xl mb-4 relative overflow-hidden group bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 shadow-lg shadow-rose-500/25 transition-all duration-200 transform hover:scale-105"
         size="lg"
       >
-        {isEnrolling ? (
+        {isEnrolling === course?._id ? (
           <>
             <Loader2 className="w-5 h-5 animate-spin mr-2" />
             Enrolling...
           </>
         ) : (
           <>
-            <Zap className="w-5 h-5 mr-2" />
+            <BookCheck className="w-5 h-5 mr-2" />
             {course?.isFree ? 'Enroll for Free' : `Enroll Now - $${course?.price}`}
           </>
         )}
@@ -639,6 +729,55 @@ export default function CourseDetailPage() {
       </Button>
     )
   }
+
+  // User IS enrolled
+  console.log('User is enrolled, showing START/CONTINUE button')
+  
+  // User completed the course
+  if (userProgress.completed) {
+    return (
+      <Button
+        onClick={() => router.push(`/certificates/${course?._id}`)}
+        variant="default"
+        className="w-full rounded-2xl mb-4 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 shadow-lg shadow-green-500/25"
+        size="lg"
+      >
+        <Award className="w-5 h-5 mr-2" />
+        View Certificate
+      </Button>
+    )
+  }
+
+  // User enrolled but hasn't started or is in progress
+  const hasProgress = userProgress.progress > 0
+  console.log('Has progress:', hasProgress, 'Progress:', userProgress.progress)
+  
+  return (
+    <Button
+      onClick={() => setIsLearningMode(true)}
+      variant="default"
+      className="w-full rounded-2xl mb-4 relative overflow-hidden group bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 shadow-lg shadow-rose-500/25"
+      size="lg"
+    >
+      <div className="flex items-center">
+        {hasProgress ? (
+          <Play className="w-5 h-5 mr-2" />
+        ) : (
+          <PlayCircle className="w-5 h-5 mr-2" />
+        )}
+        {hasProgress ? 'Continue Learning' : 'Start Learning'}
+      </div>
+      {hasProgress && !userProgress.completed && (
+        <div className="absolute bottom-0 left-0 right-0 h-1 bg-rose-700/30">
+          <div 
+            className="h-full bg-rose-100 transition-all duration-1000"
+            style={{ width: `${userProgress.progress * 100}%` }}
+          />
+        </div>
+      )}
+    </Button>
+  )
+}
 
   if (loading) {
     return (
@@ -1070,7 +1209,7 @@ export default function CourseDetailPage() {
                   <EnrollmentButton />
 
                   {/* Progress for enrolled users */}
-                  {userProgress && (
+                  {userProgress?.enrolled && (
                     <div className="mb-4">
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-sm font-medium">Your Progress</span>
@@ -1079,6 +1218,14 @@ export default function CourseDetailPage() {
                         </span>
                       </div>
                       <Progress value={userProgress.progress * 100} className="h-2" />
+                      {userProgress.progress > 0 && userProgress.progress < 1 && (
+                        <div className="flex items-center space-x-2 mt-2">
+                          <TrendingUp className="w-4 h-4 text-green-500" />
+                          <span className="text-xs text-green-600">
+                            In Progress - {Math.round(userProgress.progress * 100)}% complete
+                          </span>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -1330,7 +1477,7 @@ export default function CourseDetailPage() {
                                   </p>
                                 </div>
                               </div>
-                              {userProgress && (
+                              {userProgress?.enrolled && (
                                 <div className="flex items-center space-x-2">
                                   {completedLessons.has(lesson._id) && (
                                     <CheckCircle className="w-4 h-4 text-green-500" />
@@ -1349,7 +1496,7 @@ export default function CourseDetailPage() {
                                   </Button>
                                 </div>
                               )}
-                              {lesson.isPreview && lesson.video && !userProgress && (
+                              {lesson.isPreview && lesson.video && !userProgress?.enrolled && (
                                 <Button 
                                   variant="outline" 
                                   size="sm" 
