@@ -58,6 +58,13 @@ import { Post, Comment, ApiResponse } from '@/types/post'
 import { cn } from '@/lib/utils'
 import { useUser } from '@clerk/nextjs'
 
+// Define status interface
+interface BatchStatuses {
+  likeStatuses: Record<string, boolean>
+  saveStatuses: Record<string, { saved: boolean; savedAt?: string }>
+  followStatuses: Record<string, boolean>
+}
+
 export default function PostDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -85,6 +92,11 @@ export default function PostDetailPage() {
   const [videoProgress, setVideoProgress] = useState(0)
   const [isHovered, setIsHovered] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [statuses, setStatuses] = useState<BatchStatuses>({
+    likeStatuses: {},
+    saveStatuses: {},
+    followStatuses: {}
+  })
 
   const headerRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -114,9 +126,51 @@ export default function PostDetailPage() {
       optimisticFollowers,
       isLiking,
       isCommenting,
-      isSaving
+      isSaving,
+      statuses
     })
-  }, [post, currentUserId, isFollowing, optimisticFollowers, isLiking, isCommenting, isSaving, userLoaded, isSignedIn])
+  }, [post, currentUserId, isFollowing, optimisticFollowers, isLiking, isCommenting, isSaving, userLoaded, isSignedIn, statuses])
+
+  // Fetch statuses for the post
+  const fetchStatuses = useCallback(async () => {
+    if (!postId || !isSignedIn) return
+
+    try {
+      console.log('Fetching statuses for:', { postId, userIds: [post?.author?._id] })
+      const response = await fetch('/api/batch-status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          postIds: [postId],
+          userIds: post?.author?._id ? [post.author._id] : []
+        })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        console.log('Statuses fetched:', data)
+        if (data.success && data.data) {
+          setStatuses(data.data)
+          
+          // Update saved status
+          if (data.data.saveStatuses[postId]) {
+            setIsSaved(data.data.saveStatuses[postId].saved)
+          }
+          
+          // Update follow status
+          if (post?.author?._id && data.data.followStatuses[post.author._id]) {
+            setIsFollowing(data.data.followStatuses[post.author._id])
+          }
+        }
+      } else {
+        console.error('Failed to fetch statuses:', response.status)
+      }
+    } catch (error) {
+      console.error('Error fetching statuses:', error)
+    }
+  }, [postId, isSignedIn, post?.author?._id])
 
   // Fetch post data
   const fetchPost = useCallback(async () => {
@@ -130,36 +184,26 @@ export default function PostDetailPage() {
         const data = await response.json()
         console.log('Post data received:', data)
         if (data.success && data.data) {
-          setPost(data.data)
+          const postData = data.data
+          setPost(postData)
           
           // Set optimistic follower count
-          const followerCount = Array.isArray(data.data.author?.followers) 
-            ? data.data.author.followers.length 
+          const followerCount = Array.isArray(postData.author?.followers) 
+            ? postData.author.followers.length 
             : 0
           setOptimisticFollowers(followerCount)
           
-          // Check if current user is following the author
-          if (currentUserId && data.data.author?.followers) {
-            const isUserFollowing = data.data.author.followers.some(
-              (follower: any) => 
-                (typeof follower === 'string' && follower === currentUserId) ||
-                (follower._id && follower._id === currentUserId) ||
-                (follower.id && follower.id === currentUserId)
-            )
-            setIsFollowing(isUserFollowing)
-            console.log('Follow status:', isUserFollowing)
+          // Fetch statuses after post is loaded
+          if (isSignedIn) {
+            await fetchStatuses()
           }
 
-          // Check if current user liked the post
-          if (currentUserId && data.data.likes) {
-            const isLiked = data.data.likes.some(
-              (like: any) => 
-                (typeof like === 'string' && like === currentUserId) ||
-                (like._id && like._id === currentUserId) ||
-                (like.id && like.id === currentUserId)
-            )
-            console.log('Like status:', isLiked)
-          }
+          console.log('Post loaded successfully:', {
+            postId: postData._id,
+            likes: postData.likes?.length || 0,
+            comments: postData.comments?.length || 0,
+            author: postData.author?._id
+          })
         } else {
           setError(data.error || 'Failed to load post')
         }
@@ -174,16 +218,13 @@ export default function PostDetailPage() {
     } finally {
       setLoading(false)
     }
-  }, [postId, currentUserId])
+  }, [postId, fetchStatuses, isSignedIn])
 
   useEffect(() => {
     if (postId && userLoaded) {
       fetchPost()
-      if (isSignedIn) {
-        checkIfSaved()
-      }
     }
-  }, [postId, fetchPost, userLoaded, isSignedIn])
+  }, [postId, fetchPost, userLoaded])
 
   useEffect(() => {
     const handleScroll = () => {
@@ -208,128 +249,117 @@ export default function PostDetailPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  const checkIfSaved = async () => {
-    if (!isSignedIn) return
-    
-    try {
-      const response = await fetch(`/api/posts/${postId}/save`)
-      if (response.ok) {
-        const data = await response.json()
-        if (data.success) {
-          setIsSaved(data.data?.saved || false)
-        }
-      }
-    } catch (error) {
-      console.error('Error checking save status:', error)
-    }
-  }
-
   // FIXED: Like functionality with proper API integration
   const handleLike = async () => {
-  if (!post || isLiking) {
-    console.log("Like prevented: no post or already liking");
-    return;
-  }
-
-  if (!isSignedIn) {
-    alert("Please log in to like posts");
-    return;
-  }
-
-  console.log("Starting like action:", { postId, currentUserId });
-
-  // Normalize "likes" shape:
-  type LikeEntry = string | { _id?: string; id?: string };
-
-  const likes: LikeEntry[] = post.likes ?? [];
-
-  const wasLiked = likes.some((like) => {
-    if (typeof like === "string") return like === currentUserId;
-    if (typeof like === "object" && like !== null) {
-      return (
-        like._id === currentUserId ||
-        like.id === currentUserId
-      );
-    }
-    return false;
-  });
-
-  console.log("Previous state:", { wasLiked });
-
-  //
-  // --- Optimistic update ---
-  //
- setPost((prev) => {
-  if (!prev) return prev;
-
-  // Normalize all likes to strings for consistent handling
-  const normalizeLike = (like: string | LikeEntry): string => {
-    if (typeof like === 'string') return like;
-    return like._id || like.id || '';
-  };
-
-  const currentLikeIds = (prev.likes ?? []).map(normalizeLike);
-  let newLikeIds: string[];
-
-  if (wasLiked) {
-    // Remove like
-    newLikeIds = currentLikeIds.filter(likeId => likeId !== currentUserId);
-  } else {
-    // Add like
-    newLikeIds = [...currentLikeIds, currentUserId];
-  }
-
-  return {
-    ...prev,
-    likes: newLikeIds, // Store as strings for consistency
-  };
-});
-
-  setIsLiking(true);
-
-  try {
-    const response = await fetch(`/api/posts/${postId}/like`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: currentUserId }),
-    });
-
-    console.log("Like API response:", response.status);
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+    if (!post || isLiking) {
+      console.log("Like prevented: no post or already liking")
+      return
     }
 
-    type LikeApiResponse = {
-      success: boolean;
-      data?: {
-        post: typeof post;
-      };
-      error?: string;
-    };
-
-    const data: LikeApiResponse = await response.json();
-
-    console.log("Like API success:", data);
-
-    if (data.success && data.data?.post) {
-      // Server-authoritative state update
-      setPost(data.data.post);
-    } else {
-      await fetchPost();
-      throw new Error(data.error || "Failed to like post");
+    if (!isSignedIn) {
+      alert("Please log in to like posts")
+      return
     }
-  } catch (error) {
-    console.error("Error liking post:", error);
-    await fetchPost(); // revert UI
-    alert("Failed to like post. Please try again.");
-  } finally {
-    setIsLiking(false);
+
+    console.log("Starting like action:", { postId, currentUserId })
+
+    // Normalize "likes" shape:
+    type LikeEntry = string | { _id?: string; id?: string }
+
+    const likes: LikeEntry[] = post.likes ?? []
+    const wasLiked = statuses.likeStatuses[postId] || false
+
+    console.log("Previous state:", { wasLiked })
+
+    // Optimistic update - update both local state and statuses
+    setPost(prev => {
+      if (!prev) return prev
+
+      // Normalize all likes to strings for consistent handling
+      const normalizeLike = (like: string | LikeEntry): string => {
+        if (typeof like === 'string') return like
+        return like._id || like.id || ''
+      }
+
+      const currentLikeIds = (prev.likes ?? []).map(normalizeLike)
+      let newLikeIds: string[]
+
+      if (wasLiked) {
+        // Remove like
+        newLikeIds = currentLikeIds.filter(likeId => likeId !== currentUserId)
+      } else {
+        // Add like
+        newLikeIds = [...currentLikeIds, currentUserId]
+      }
+
+      return {
+        ...prev,
+        likes: newLikeIds, // Store as strings for consistency
+      }
+    })
+
+    // Update statuses optimistically
+    setStatuses(prev => ({
+      ...prev,
+      likeStatuses: {
+        ...prev.likeStatuses,
+        [postId]: !wasLiked
+      }
+    }))
+
+    setIsLiking(true)
+
+    try {
+      const response = await fetch(`/api/posts/${postId}/like`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: currentUserId }),
+      })
+
+      console.log("Like API response:", response.status)
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+
+      type LikeApiResponse = {
+        success: boolean;
+        data?: {
+          post: typeof post;
+        };
+        error?: string;
+      }
+
+      const data: LikeApiResponse = await response.json()
+
+      console.log("Like API success:", data)
+
+      if (data.success && data.data?.post) {
+        // Server-authoritative state update
+        setPost(data.data.post)
+        // Refresh statuses to ensure consistency
+        await fetchStatuses()
+      } else {
+        await fetchPost() // revert UI
+        throw new Error(data.error || "Failed to like post")
+      }
+    } catch (error) {
+      console.error("Error liking post:", error)
+      // Revert optimistic updates
+      await fetchPost()
+      await fetchStatuses()
+      toast({
+        title: "Error",
+        description: "Failed to like post. Please try again.",
+        variant: "destructive",
+        duration: 5000,
+      })
+    } finally {
+      setIsLiking(false)
+    }
   }
-};
 
-
-  // FIXED: Save functionality
+  // FIXED: Save functionality with batch status integration
   const handleSave = async () => {
     if (!post || isSaving) return
 
@@ -337,6 +367,19 @@ export default function PostDetailPage() {
       alert('Please log in to save posts')
       return
     }
+
+    console.log("Starting save action:", { postId, currentUserId })
+    const wasSaved = statuses.saveStatuses[postId]?.saved || false
+
+    // Optimistic update
+    setIsSaved(!wasSaved)
+    setStatuses(prev => ({
+      ...prev,
+      saveStatuses: {
+        ...prev.saveStatuses,
+        [postId]: { saved: !wasSaved, savedAt: !wasSaved ? new Date().toISOString() : undefined }
+      }
+    }))
 
     setIsSaving(true)
     try {
@@ -354,130 +397,181 @@ export default function PostDetailPage() {
         const data = await response.json()
         console.log('Save API success:', data)
         if (data.success) {
-          setIsSaved(data.data?.saved || false)
+          // Update status from server response
+          if (data.data?.saved !== undefined) {
+            setIsSaved(data.data.saved)
+            setStatuses(prev => ({
+              ...prev,
+              saveStatuses: {
+                ...prev.saveStatuses,
+                [postId]: { 
+                  saved: data.data.saved, 
+                  savedAt: data.data.savedAt 
+                }
+              }
+            }))
+          }
         } else {
+          // Revert optimistic update on error
+          setIsSaved(wasSaved)
+          setStatuses(prev => ({
+            ...prev,
+            saveStatuses: {
+              ...prev.saveStatuses,
+              [postId]: { saved: wasSaved }
+            }
+          }))
           alert(data.error || 'Failed to save post')
         }
       } else {
+        // Revert optimistic update on error
+        setIsSaved(wasSaved)
+        setStatuses(prev => ({
+          ...prev,
+          saveStatuses: {
+            ...prev.saveStatuses,
+            [postId]: { saved: wasSaved }
+          }
+        }))
         alert('Failed to save post')
       }
     } catch (error) {
       console.error('Error saving post:', error)
+      // Revert optimistic update on error
+      setIsSaved(wasSaved)
+      setStatuses(prev => ({
+        ...prev,
+        saveStatuses: {
+          ...prev.saveStatuses,
+          [postId]: { saved: wasSaved }
+        }
+      }))
       alert('Failed to save post')
     } finally {
       setIsSaving(false)
     }
   }
 
- // In PostDetailPage, replace the handleFollow function:
-
-const handleFollow = async () => {
-  if (!post?.author?._id) {
-    console.log("Follow prevented: No author ID");
-    return;
-  }
-
-  if (!isSignedIn) {
-    alert("Please log in to follow users");
-    return;
-  }
-
-  const authorId = post.author._id;
-
-  const previousIsFollowing = isFollowing;
-  const previousFollowerCount = optimisticFollowers;
-
-  console.log("Starting follow action:", {
-    authorId,
-    currentUserId,
-    previousIsFollowing,
-    previousFollowerCount,
-  });
-
-  //
-  // --- Optimistic UI update ---
-  //
-  setIsFollowing((prev) => !prev);
-  setOptimisticFollowers((prev) =>
-    previousIsFollowing ? Math.max(0, prev - 1) : prev + 1
-  );
-
-  try {
-    const response = await fetch(`/api/users/${authorId}/follow`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    });
-
-    console.log("Follow API response:", response.status);
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+  // FIXED: Follow functionality with batch status integration
+  const handleFollow = async () => {
+    if (!post?.author?._id) {
+      console.log("Follow prevented: No author ID")
+      return
     }
 
-    //
-    // --- Type the API response ---
-    //
-    type FollowApiResponse = {
-      success: boolean;
-      data?: {
-        following: boolean;
-      };
-      error?: string;
-    };
-
-    const result: FollowApiResponse = await response.json();
-
-    console.log("Follow API success:", result);
-
-    if (!result.success) {
-      throw new Error(result.error || "Follow request failed");
+    if (!isSignedIn) {
+      alert("Please log in to follow users")
+      return
     }
 
-    // If server returned proper state, use it
-    if (result.data) {
-      const following = result.data.following;
+    const authorId = post.author._id
+    const previousIsFollowing = statuses.followStatuses[authorId] || false
+    const previousFollowerCount = optimisticFollowers
 
-      setIsFollowing(following);
+    console.log("Starting follow action:", {
+      authorId,
+      currentUserId,
+      previousIsFollowing,
+      previousFollowerCount,
+    })
 
-      // Adjust follower count to actual value
-      setOptimisticFollowers((prev) =>
-        following
-          ? previousIsFollowing
-            ? prev // no change
-            : prev + 1
-          : previousIsFollowing
-          ? prev - 1
-          : prev
-      );
+    // Optimistic UI update
+    setIsFollowing(!previousIsFollowing)
+    setOptimisticFollowers(prev => 
+      previousIsFollowing ? Math.max(0, prev - 1) : prev + 1
+    )
+    setStatuses(prev => ({
+      ...prev,
+      followStatuses: {
+        ...prev.followStatuses,
+        [authorId]: !previousIsFollowing
+      }
+    }))
+
+    try {
+      const response = await fetch(`/api/users/${authorId}/follow`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      })
+
+      console.log("Follow API response:", response.status)
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+
+      type FollowApiResponse = {
+        success: boolean;
+        data?: {
+          following: boolean;
+        };
+        error?: string;
+      }
+
+      const result: FollowApiResponse = await response.json()
+
+      console.log("Follow API success:", result)
+
+      if (!result.success) {
+        throw new Error(result.error || "Follow request failed")
+      }
+
+      // If server returned proper state, use it
+      if (result.data) {
+        const following = result.data.following
+
+        setIsFollowing(following)
+        setStatuses(prev => ({
+          ...prev,
+          followStatuses: {
+            ...prev.followStatuses,
+            [authorId]: following
+          }
+        }))
+
+        // Adjust follower count to actual value
+        setOptimisticFollowers(prev =>
+          following
+            ? previousIsFollowing
+              ? prev // no change
+              : prev + 1
+            : previousIsFollowing
+            ? prev - 1
+            : prev
+        )
+
+        toast({
+          title: following ? "Following" : "Unfollowed",
+          description: following
+            ? `You are now following ${post.author.firstName}`
+            : `You unfollowed ${post.author.firstName}`,
+          duration: 3000,
+        })
+      }
+    } catch (error) {
+      console.error("Error following user:", error)
+
+      // Revert optimistic update
+      setIsFollowing(previousIsFollowing)
+      setOptimisticFollowers(previousFollowerCount)
+      setStatuses(prev => ({
+        ...prev,
+        followStatuses: {
+          ...prev.followStatuses,
+          [authorId]: previousIsFollowing
+        }
+      }))
 
       toast({
-        title: following ? "Following" : "Unfollowed",
-        description: following
-          ? `You are now following ${post.author.firstName}`
-          : `You unfollowed ${post.author.firstName}`,
-        duration: 3000,
-      });
+        title: "Error",
+        description:
+          (error as Error).message ||
+          "Failed to follow user. Please try again.",
+        variant: "destructive",
+        duration: 5000,
+      })
     }
-  } catch (error) {
-    console.error("Error following user:", error);
-
-    //
-    // --- Revert optimistic update ---
-    //
-    setIsFollowing(previousIsFollowing);
-    setOptimisticFollowers(previousFollowerCount);
-
-    toast({
-      title: "Error",
-      description:
-        (error as Error).message ||
-        "Failed to follow user. Please try again.",
-      variant: "destructive",
-      duration: 5000,
-    });
   }
-};
-
 
   // FIXED: Comment functionality with proper API integration
   const handleAddComment = async () => {
@@ -503,8 +597,7 @@ const handleFollow = async () => {
       _id: tempCommentId,
       user: {
         _id: currentUserId,
-clerkId: (currentUser as any).clerkId ?? currentUser.id ?? "",
-
+        clerkId: (currentUser as any).clerkId ?? currentUser.id ?? "",
         username: currentUser?.username || 'user',
         firstName: currentUser?.firstName || 'User',
         lastName: currentUser?.lastName || '',
@@ -705,13 +798,8 @@ clerkId: (currentUser as any).clerkId ?? currentUser.id ?? "",
     }
   }
 
-  // FIXED: Like status check with Clerk
-  const isLiked = post?.likes?.some(
-    (like: any) => 
-      (typeof like === 'string' && like === currentUserId) ||
-      (like._id && like._id === currentUserId) ||
-      (like.id && like.id === currentUserId)
-  ) || false
+  // Get like status from batch statuses
+  const isLiked = statuses.likeStatuses[postId] || false
 
   // Check if current user is comment author
   const isCommentAuthor = (commentUserId: string) => {
@@ -750,6 +838,24 @@ clerkId: (currentUser as any).clerkId ?? currentUser.id ?? "",
     if (diffInHours < 168) return `${Math.floor(diffInHours / 24)}d ago`
     return postDate.toLocaleDateString()
   }
+
+  // Refresh statuses when user signs in/out
+  useEffect(() => {
+    if (post && userLoaded) {
+      if (isSignedIn) {
+        fetchStatuses()
+      } else {
+        // Reset statuses when user logs out
+        setStatuses({
+          likeStatuses: {},
+          saveStatuses: {},
+          followStatuses: {}
+        })
+        setIsSaved(false)
+        setIsFollowing(false)
+      }
+    }
+  }, [post, userLoaded, isSignedIn, fetchStatuses])
 
   // Show loading while user is being loaded
   if (!userLoaded || loading) {
@@ -1490,29 +1596,22 @@ clerkId: (currentUser as any).clerkId ?? currentUser.id ?? "",
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                     >
-                    
-
-<motion.div
-  whileHover={{ scale: 1.02 }}
-  whileTap={{ scale: 0.98 }}
->
-  <Button
-    onClick={handleFollow}
-    disabled={!isSignedIn}
-    className={`w-full rounded-2xl transition-all duration-300 h-12 text-base font-semibold ${
-      isFollowing
-        ? 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
-        : 'bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white shadow-lg shadow-rose-500/25 hover:shadow-xl hover:shadow-rose-500/40'
-    } ${!isSignedIn ? 'opacity-50 cursor-not-allowed' : ''}`}
-  >
-    {isFollowing ? (
-      <UserCheck className="w-4 h-4 mr-2" />
-    ) : (
-      <UserPlus className="w-4 h-4 mr-2" />
-    )}
-    {isFollowing ? 'Following' : 'Follow Designer'}
-  </Button>
-</motion.div> 
+                      <Button
+                        onClick={handleFollow}
+                        disabled={!isSignedIn}
+                        className={`w-full rounded-2xl transition-all duration-300 h-12 text-base font-semibold ${
+                          isFollowing
+                            ? 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
+                            : 'bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white shadow-lg shadow-rose-500/25 hover:shadow-xl hover:shadow-rose-500/40'
+                        } ${!isSignedIn ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        {isFollowing ? (
+                          <UserCheck className="w-4 h-4 mr-2" />
+                        ) : (
+                          <UserPlus className="w-4 h-4 mr-2" />
+                        )}
+                        {isFollowing ? 'Following' : 'Follow Designer'}
+                      </Button>
                     </motion.div>
                   </div>
                 </CardContent>

@@ -21,64 +21,160 @@ async function uploadToCloudinary(buffer: Buffer): Promise<any> {
     stream.end(buffer);
   });
 }
-
 // ----------------------------------------------
-// GET — Fetch explore posts
+// GET — Fetch explore posts (Updated with comment population)
 // ----------------------------------------------
 export async function GET(request: NextRequest) {
   try {
-    await connectToDatabase();
-
-    const { searchParams } = new URL(request.url);
-    const sort = searchParams.get('sort') || 'recent';
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
-    const limit = Math.max(1, Math.min(50, parseInt(searchParams.get('limit') || '20')));
-    const skip = (page - 1) * limit;
-
-    let sortOptions: any = {};
-
-    switch (sort) {
-      case 'popular':
-        sortOptions = { likes: -1, createdAt: -1 };
-        break;
-      case 'trending':
-        sortOptions = { engagement: -1, createdAt: -1 };
-        break;
-      default:
-        sortOptions = { createdAt: -1 };
+    await connectToDatabase()
+    
+    const { searchParams } = new URL(request.url)
+    const page = parseInt(searchParams.get('page') || '1')
+    const limit = parseInt(searchParams.get('limit') || '12')
+    const sort = searchParams.get('sort') || 'recent'
+    const search = searchParams.get('search')
+    const category = searchParams.get('category')
+    const filters = searchParams.get('filters')
+    
+    const skip = (page - 1) * limit
+    
+    // Build query
+    const query: any = {}
+    
+    // Search filter
+    if (search) {
+      query.$or = [
+        { caption: { $regex: search, $options: 'i' } },
+        { hashtags: { $in: [new RegExp(search, 'i')] } },
+        { 'author.username': { $regex: search, $options: 'i' } },
+        { 'author.firstName': { $regex: search, $options: 'i' } },
+        { 'author.lastName': { $regex: search, $options: 'i' } }
+      ]
     }
-
-    const [posts, totalPosts] = await Promise.all([
-      Post.find({ isPublic: true })
-        .populate('author', 'username firstName lastName avatar isVerified isPro badges followers following')
-        .populate('comments.user', 'username firstName lastName avatar isVerified isPro')
-        .sort(sortOptions)
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      Post.countDocuments({ isPublic: true })
-    ]);
-
+    
+    // Category filter
+    if (category && category !== 'all') {
+      query.category = category
+    }
+    
+    // Additional filters
+    if (filters) {
+      const filterArray = filters.split(',')
+      const filterQuery: any = {}
+      
+      filterArray.forEach((filter: string) => {
+        if (filter === 'video') {
+          filterQuery['media.type'] = 'video'
+        } else if (filter === 'image') {
+          filterQuery['media.type'] = 'image'
+        } else if (filter === 'ai') {
+          filterQuery.aiGenerated = true
+        } else if (filter === 'collaboration') {
+          filterQuery.collaboration = true
+        } else if (filter === 'forsale') {
+          filterQuery.availableForSale = true
+        } else if (filter === 'featured') {
+          filterQuery.isFeatured = true
+        } else if (filter === 'trending') {
+          // Posts with high engagement in last 7 days
+          const sevenDaysAgo = new Date()
+          sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+          filterQuery.createdAt = { $gte: sevenDaysAgo }
+          filterQuery['$expr'] = { 
+            $gte: [
+              { $size: '$likes' },
+              50
+            ]
+          }
+        }
+      })
+      
+      if (Object.keys(filterQuery).length > 0) {
+        Object.assign(query, filterQuery)
+      }
+    }
+    
+    // Build sort
+    let sortOptions: any = { createdAt: -1 } // Default: recent
+    
+    if (sort === 'popular') {
+      sortOptions = { 
+        $sortByCount: { $size: '$likes' }, 
+        createdAt: -1 
+      }
+    } else if (sort === 'trending') {
+      // Trending: high engagement in last 3 days
+      const threeDaysAgo = new Date()
+      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3)
+      query.createdAt = { $gte: threeDaysAgo }
+      sortOptions = { 
+        $sortByCount: { 
+          $add: [
+            { $size: '$likes' },
+            { $multiply: [{ $size: '$comments' }, 2] },
+            { $ifNull: ['$shares', 0] }
+          ]
+        }, 
+        createdAt: -1 
+      }
+    }
+    
+    // Get posts with populated author AND comments
+    const posts = await Post.find(query)
+      .populate({
+        path: 'author',
+        model: User,
+        select: '_id username firstName lastName avatar isVerified isPro role'
+      })
+      .populate({
+        path: 'comments.user',
+        model: User,
+        select: '_id username firstName lastName avatar isVerified'
+      })
+      .sort(sort === 'trending' ? { likes: -1, comments: -1, createdAt: -1 } : sortOptions)
+      .skip(skip)
+      .limit(limit)
+      .lean()
+    
+    // Also populate likes and saves for better initial state
+    const enhancedPosts = posts.map(post => {
+      // Transform comments to ensure user object is properly structured
+      const enhancedComments = post.comments?.map((comment: any) => ({
+        ...comment,
+        user: comment.user || null // Ensure user is never undefined
+      })) || []
+      
+      return {
+        ...post,
+        comments: enhancedComments
+      }
+    })
+    
+    // Get total count for pagination
+    const totalPosts = await Post.countDocuments(query)
+    const totalPages = Math.ceil(totalPosts / limit)
+    
     return NextResponse.json({
       success: true,
-      posts,
+      posts: enhancedPosts,
       pagination: {
-        currentPage: page,
-        totalPages: Math.ceil(totalPosts / limit),
-        totalItems: totalPosts,
-        hasNext: page < Math.ceil(totalPosts / limit),
-        hasPrev: page > 1
+        page,
+        limit,
+        totalPosts,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrevious: page > 1
       }
-    });
+    })
+    
   } catch (error) {
-    console.error('Error fetching posts:', error);
+    console.error('Error fetching posts:', error)
     return NextResponse.json(
-      { success: false, error: 'Internal server error' },
+      { success: false, error: 'Failed to fetch posts' },
       { status: 500 }
-    );
+    )
   }
 }
-
 // ----------------------------------------------
 // POST — Create a new post with image upload
 // ----------------------------------------------

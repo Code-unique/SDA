@@ -23,6 +23,12 @@ export async function POST(
     const { id } = await params;
 
     const currentAppUser = await User.findOne({ clerkId: user.id });
+    if (!currentAppUser) {
+      return NextResponse.json(
+        { success: false, error: 'User not found' },
+        { status: 404 }
+      );
+    }
 
     // Handle both MongoDB ObjectId and username lookups
     let targetUser;
@@ -32,7 +38,7 @@ export async function POST(
       targetUser = await User.findOne({ username: id });
     }
 
-    if (!currentAppUser || !targetUser) {
+    if (!targetUser) {
       return NextResponse.json(
         { success: false, error: 'User not found' },
         { status: 404 }
@@ -47,7 +53,9 @@ export async function POST(
       );
     }
 
-    const isFollowing = currentAppUser.following.includes(targetUser._id);
+    const isFollowing = currentAppUser.following.some(
+      (followingId: any) => followingId.toString() === targetUser._id.toString()
+    );
 
     if (isFollowing) {
       // Unfollow logic
@@ -76,13 +84,45 @@ export async function POST(
       });
     }
 
-    // Return updated follow status
+    // Get updated user data
+    const updatedCurrentUser = await User.findById(currentAppUser._id)
+      .populate('followers', 'username firstName lastName avatar')
+      .populate('following', 'username firstName lastName avatar');
+
+    const updatedTargetUser = await User.findById(targetUser._id)
+      .populate('followers', 'username firstName lastName avatar')
+      .populate('following', 'username firstName lastName avatar');
+
+    // Return updated follow status with full user data
     return NextResponse.json({
       success: true,
       data: {
         following: !isFollowing,
-        currentUserId: currentAppUser._id.toString(),
-        targetUserId: targetUser._id.toString()
+        message: isFollowing 
+          ? `Unfollowed ${targetUser.username}` 
+          : `Following ${targetUser.username}`,
+        currentUser: {
+          _id: updatedCurrentUser._id,
+          username: updatedCurrentUser.username,
+          firstName: updatedCurrentUser.firstName,
+          lastName: updatedCurrentUser.lastName,
+          avatar: updatedCurrentUser.avatar,
+          followers: updatedCurrentUser.followers,
+          following: updatedCurrentUser.following,
+          followersCount: updatedCurrentUser.followers?.length || 0,
+          followingCount: updatedCurrentUser.following?.length || 0
+        },
+        targetUser: {
+          _id: updatedTargetUser._id,
+          username: updatedTargetUser.username,
+          firstName: updatedTargetUser.firstName,
+          lastName: updatedTargetUser.lastName,
+          avatar: updatedTargetUser.avatar,
+          followers: updatedTargetUser.followers,
+          following: updatedTargetUser.following,
+          followersCount: updatedTargetUser.followers?.length || 0,
+          followingCount: updatedTargetUser.following?.length || 0
+        }
       }
     });
 
@@ -103,10 +143,10 @@ export async function GET(
   try {
     const user = await currentUser();
     if (!user) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
-      );
+      return NextResponse.json({
+        success: true,
+        data: { isFollowing: false }
+      });
     }
 
     await connectToDatabase();
@@ -114,6 +154,12 @@ export async function GET(
     const { id } = await params;
 
     const currentAppUser = await User.findOne({ clerkId: user.id });
+    if (!currentAppUser) {
+      return NextResponse.json({
+        success: true,
+        data: { isFollowing: false }
+      });
+    }
 
     // Handle both MongoDB ObjectId and username lookups
     let targetUser;
@@ -123,29 +169,34 @@ export async function GET(
       targetUser = await User.findOne({ username: id });
     }
 
-    if (!currentAppUser || !targetUser) {
-      return NextResponse.json(
-        { success: false, error: 'User not found' },
-        { status: 404 }
-      );
+    if (!targetUser) {
+      return NextResponse.json({
+        success: true,
+        data: { isFollowing: false }
+      });
     }
 
-    const isFollowing = currentAppUser.following.includes(targetUser._id);
+    const isFollowing = currentAppUser.following.some(
+      (followingId: any) => followingId.toString() === targetUser._id.toString()
+    );
 
     return NextResponse.json({
       success: true,
       data: {
         isFollowing,
         currentUserId: currentAppUser._id.toString(),
-        targetUserId: targetUser._id.toString()
+        targetUserId: targetUser._id.toString(),
+        targetUsername: targetUser.username,
+        followersCount: targetUser.followers?.length || 0,
+        followingCount: targetUser.following?.length || 0
       }
     });
 
   } catch (error: any) {
     console.error('Error checking follow status:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to check follow status: ' + error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      success: true,
+      data: { isFollowing: false }
+    });
   }
 }

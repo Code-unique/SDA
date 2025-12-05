@@ -4,6 +4,7 @@ import { auth } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
 import { SavedItem } from '@/lib/models/UserInteractions';
+import Post from '@/lib/models/Post';
 import { ApiResponse } from '@/types/post';
 
 export async function GET(
@@ -13,16 +14,16 @@ export async function GET(
   try {
     const { userId } = await auth();
     if (!userId) {
-      return NextResponse.json<ApiResponse>(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
-      );
+      return NextResponse.json<ApiResponse>({
+        success: true,
+        data: { saved: false }
+      });
     }
 
     const { id } = await params;
-    if (!id || id.length !== 24) {
+    if (!id) {
       return NextResponse.json<ApiResponse>(
-        { success: false, error: 'Valid post ID is required' },
+        { success: false, error: 'Post ID is required' },
         { status: 400 }
       );
     }
@@ -31,10 +32,10 @@ export async function GET(
 
     const currentUser = await User.findOne({ clerkId: userId });
     if (!currentUser) {
-      return NextResponse.json<ApiResponse>(
-        { success: false, error: 'User not found' },
-        { status: 404 }
-      );
+      return NextResponse.json<ApiResponse>({
+        success: true,
+        data: { saved: false }
+      });
     }
 
     // Check if already saved
@@ -44,16 +45,24 @@ export async function GET(
       itemId: id
     });
 
+    // Also get the post to count saves
+    const post = await Post.findById(id);
+    const saveCount = post?.saves?.length || 0;
+
     return NextResponse.json<ApiResponse>({
       success: true,
-      data: { saved: !!existingSave }
+      data: { 
+        saved: !!existingSave,
+        savedAt: existingSave?.savedAt,
+        saveCount
+      }
     });
   } catch (error) {
     console.error('Error checking save status:', error);
-    return NextResponse.json<ApiResponse>(
-      { success: false, error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json<ApiResponse>({
+      success: true,
+      data: { saved: false }
+    });
   }
 }
 
@@ -71,9 +80,9 @@ export async function POST(
     }
 
     const { id } = await params;
-    if (!id || id.length !== 24) {
+    if (!id) {
       return NextResponse.json<ApiResponse>(
-        { success: false, error: 'Valid post ID is required' },
+        { success: false, error: 'Post ID is required' },
         { status: 400 }
       );
     }
@@ -88,6 +97,15 @@ export async function POST(
       );
     }
 
+    // Check if post exists
+    const post = await Post.findById(id);
+    if (!post) {
+      return NextResponse.json<ApiResponse>(
+        { success: false, error: 'Post not found' },
+        { status: 404 }
+      );
+    }
+
     // Check if already saved
     const existingSave = await SavedItem.findOne({
       user: currentUser._id,
@@ -98,9 +116,19 @@ export async function POST(
     if (existingSave) {
       // Unsave
       await SavedItem.findByIdAndDelete(existingSave._id);
+      
+      // Update post saves array
+      await Post.findByIdAndUpdate(id, {
+        $pull: { saves: currentUser._id }
+      });
+
       return NextResponse.json<ApiResponse>({
         success: true,
-        data: { saved: false }
+        data: { 
+          saved: false,
+          message: 'Post unsaved successfully',
+          saveCount: (post.saves?.length || 1) - 1
+        }
       });
     } else {
       // Save
@@ -110,9 +138,20 @@ export async function POST(
         itemId: id,
         savedAt: new Date()
       });
+
+      // Update post saves array
+      await Post.findByIdAndUpdate(id, {
+        $addToSet: { saves: currentUser._id }
+      });
+
       return NextResponse.json<ApiResponse>({
         success: true,
-        data: { saved: true }
+        data: { 
+          saved: true,
+          message: 'Post saved successfully',
+          savedAt: new Date(),
+          saveCount: (post.saves?.length || 0) + 1
+        }
       });
     }
   } catch (error) {

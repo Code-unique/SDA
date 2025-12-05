@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback, memo } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -40,11 +40,8 @@ import {
   Pause,
   Volume2,
   VolumeX,
-  Eye,
-  BarChart3,
-  ZoomIn,
-  Download,
-  Music
+  Music,
+  LogIn 
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -121,8 +118,15 @@ interface ApiResponse {
   error?: string
 }
 
+interface BatchStatusData {
+  likeStatuses: Record<string, boolean>
+  saveStatuses: Record<string, { saved: boolean; savedAt?: string }>
+  followStatuses: Record<string, boolean>
+}
+
 interface PostCardProps {
   post: Post
+  batchStatusData?: BatchStatusData
   onLike?: (postId: string) => Promise<ApiResponse | void>
   onSave?: (postId: string) => Promise<ApiResponse | void>
   onShare?: (postId: string) => Promise<void>
@@ -170,6 +174,7 @@ const getTimeAgo = (date: string | undefined): string => {
 // Main PostCard Component
 export function PostCard({
   post,
+  batchStatusData,
   onLike,
   onSave,
   onShare,
@@ -192,7 +197,6 @@ export function PostCard({
   const router = useRouter()
   const { toast } = useToast()
   
-  // Consolidated state for better performance
   const [state, setState] = useState({
     isLiked: false,
     isSaved: false,
@@ -214,7 +218,8 @@ export function PostCard({
     videoProgress: 0,
     isHovered: false,
     showFullCaption: false,
-    copied: false
+    copied: false,
+    isLoadingStatus: true
   })
 
   const [actionLoading, setActionLoading] = useState({
@@ -227,35 +232,59 @@ export function PostCard({
   const videoRef = useRef<HTMLVideoElement>(null)
   const optionsRef = useRef<HTMLDivElement>(null)
   const shareRef = useRef<HTMLDivElement>(null)
+  const fetchControllerRef = useRef<AbortController | null>(null)
+  const hasFetchedStatus = useRef(false)
+  const isInitialMount = useRef(true)
 
   const userId = currentUserId || currentUser?.id
 
-  // Initialize state from post data
+  // Calculate initial states from props
+  const initialStates = useMemo(() => {
+    const liked = post.likes?.some(like => 
+      typeof like === 'string' ? like === userId : 
+      (like as User)._id === userId
+    )
+    const saved = post.saves?.some(save =>
+      typeof save === 'string' ? save === userId :
+      (save as User)._id === userId
+    )
+    const following = post.author.followers?.some(follower =>
+      typeof follower === 'string' ? follower === userId :
+      (follower as User)._id === userId
+    )
+    
+    return {
+      isLiked: !!liked,
+      isSaved: !!saved,
+      isFollowing: !!following,
+      likeCount: post.likes?.length || 0,
+      saveCount: post.saves?.length || 0,
+      commentCount: post.comments?.length || 0
+    }
+  }, [post.likes, post.saves, post.comments, post.author.followers, userId])
+
+  // Initialize status from batch data or props
   useEffect(() => {
-    if (userId) {
-      const liked = post.likes?.some(like => 
-        typeof like === 'string' ? like === userId : 
-        (like as User)._id === userId
-      )
-
-      const saved = post.saves?.some(save =>
-        typeof save === 'string' ? save === userId :
-        (save as User)._id === userId
-      )
-
-      const following = post.author.followers?.some(follower =>
-        typeof follower === 'string' ? follower === userId :
-        (follower as User)._id === userId
-      )
-
+    if (batchStatusData) {
+      // Use batch data if available
       setState(prev => ({
         ...prev,
-        isLiked: !!liked,
-        isSaved: !!saved,
-        isFollowing: !!following
+        isLiked: batchStatusData.likeStatuses[post._id] || false,
+        isSaved: batchStatusData.saveStatuses[post._id]?.saved || false,
+        isFollowing: batchStatusData.followStatuses[post.author._id] || false,
+        isLoadingStatus: false
       }))
+      hasFetchedStatus.current = true
+    } else if (!hasFetchedStatus.current) {
+      // Use initial state from props
+      setState(prev => ({
+        ...prev,
+        ...initialStates,
+        isLoadingStatus: false
+      }))
+      hasFetchedStatus.current = true
     }
-  }, [post, userId])
+  }, [batchStatusData, post._id, post.author._id, initialStates])
 
   // Close menus on outside click
   useEffect(() => {
@@ -272,7 +301,7 @@ export function PostCard({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Optimized action handlers with useCallback
+  // Optimized action handlers
   const handleLike = useCallback(async () => {
     if (actionLoading.like || !isSignedIn) {
       if (!isSignedIn) {
@@ -298,10 +327,15 @@ export function PostCard({
       } else {
         const response = await fetch(`/api/posts/${post._id}/like`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId })
         })
         
-        if (!response.ok) throw new Error('Like failed')
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || 'Like failed')
+        }
+        
         const data = await response.json()
         
         if (data.success) {
@@ -310,20 +344,29 @@ export function PostCard({
             isLiked: data.data.liked,
             likeCount: data.data.likesCount
           }))
+          
+          toast({ 
+            title: data.data.liked ? "Liked!" : "Like removed", 
+            description: data.data.liked ? "Post added to your likes" : "Post removed from your likes"
+          })
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       // Revert on error
       setState(prev => ({
         ...prev,
         isLiked: previousLiked,
         likeCount: previousLikeCount
       }))
-      toast({ title: "Failed to like post", variant: "destructive" })
+      toast({ 
+        title: "Failed to like post", 
+        description: error.message || "Please try again",
+        variant: "destructive" 
+      })
     } finally {
       setActionLoading(prev => ({ ...prev, like: false }))
     }
-  }, [actionLoading.like, isSignedIn, state.isLiked, state.likeCount, post._id, onLike, toast])
+  }, [actionLoading.like, isSignedIn, state.isLiked, state.likeCount, post._id, onLike, toast, userId])
 
   const handleSave = useCallback(async () => {
     if (actionLoading.save || !isSignedIn) {
@@ -350,31 +393,46 @@ export function PostCard({
       } else {
         const response = await fetch(`/api/posts/${post._id}/save`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId })
         })
         
-        if (!response.ok) throw new Error('Save failed')
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || 'Save failed')
+        }
+        
         const data = await response.json()
         
         if (data.success) {
           setState(prev => ({
             ...prev,
-            isSaved: data.data.saved
+            isSaved: data.data.saved,
+            saveCount: data.data.savedCount || state.saveCount
           }))
+          
+          toast({ 
+            title: data.data.saved ? "Saved!" : "Unsaved", 
+            description: data.data.saved ? "Post saved to your collection" : "Post removed from saved"
+          })
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       // Revert on error
       setState(prev => ({
         ...prev,
         isSaved: previousSaved,
         saveCount: previousSaveCount
       }))
-      toast({ title: "Failed to save post", variant: "destructive" })
+      toast({ 
+        title: "Failed to save post", 
+        description: error.message || "Please try again",
+        variant: "destructive" 
+      })
     } finally {
       setActionLoading(prev => ({ ...prev, save: false }))
     }
-  }, [actionLoading.save, isSignedIn, state.isSaved, state.saveCount, post._id, onSave, toast])
+  }, [actionLoading.save, isSignedIn, state.isSaved, state.saveCount, post._id, onSave, toast, userId])
 
   const handleFollow = useCallback(async () => {
     if (actionLoading.follow || !isSignedIn) {
@@ -396,30 +454,40 @@ export function PostCard({
       } else {
         const response = await fetch(`/api/users/${post.author._id}/follow`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ followerId: userId })
         })
         
-        if (!response.ok) throw new Error('Follow failed')
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || 'Follow failed')
+        }
+        
         const data = await response.json()
         
         if (data.success) {
           setState(prev => ({ ...prev, isFollowing: data.data.following }))
+          
           toast({
-            title: data.data.following ? "Following" : "Unfollowed",
+            title: data.data.following ? "Following!" : "Unfollowed",
             description: data.data.following 
               ? `You are now following ${post.author.firstName}`
               : `You unfollowed ${post.author.firstName}`
           })
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       // Revert on error
       setState(prev => ({ ...prev, isFollowing: previousFollowing }))
-      toast({ title: "Failed to follow user", variant: "destructive" })
+      toast({ 
+        title: "Failed to follow user", 
+        description: error.message || "Please try again",
+        variant: "destructive" 
+      })
     } finally {
       setActionLoading(prev => ({ ...prev, follow: false }))
     }
-  }, [actionLoading.follow, isSignedIn, state.isFollowing, post.author._id, post.author.firstName, onFollow, toast])
+  }, [actionLoading.follow, isSignedIn, state.isFollowing, post.author._id, post.author.firstName, onFollow, toast, userId])
 
   const handleCommentSubmit = useCallback(async () => {
     if (!state.commentText.trim() || actionLoading.comment || !isSignedIn) {
@@ -441,14 +509,19 @@ export function PostCard({
           commentCount: prev.commentCount + 1,
           showComments: true
         }))
+        toast({ title: "Comment added successfully" })
       } else {
         const response = await fetch(`/api/posts/${post._id}/comments`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text })
+          body: JSON.stringify({ text, userId })
         })
         
-        if (!response.ok) throw new Error('Comment failed')
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || 'Comment failed')
+        }
+        
         const data = await response.json()
         
         if (data.success) {
@@ -461,12 +534,16 @@ export function PostCard({
           toast({ title: "Comment added successfully" })
         }
       }
-    } catch (error) {
-      toast({ title: "Failed to add comment", variant: "destructive" })
+    } catch (error: any) {
+      toast({ 
+        title: "Failed to add comment", 
+        description: error.message || "Please try again",
+        variant: "destructive" 
+      })
     } finally {
       setActionLoading(prev => ({ ...prev, comment: false }))
     }
-  }, [state.commentText, actionLoading.comment, isSignedIn, post._id, onComment, toast])
+  }, [state.commentText, actionLoading.comment, isSignedIn, post._id, onComment, toast, userId])
 
   const handleShare = useCallback(async (method: 'link' | 'social' = 'link') => {
     setState(prev => ({ ...prev, showShareMenu: false }))
@@ -484,13 +561,16 @@ export function PostCard({
           url: `${window.location.origin}/posts/${post._id}`,
         })
         
-        // Track share
         if (onShare) {
           await onShare(post._id)
         }
       }
     } catch (error) {
-      toast({ title: "Failed to share", variant: "destructive" })
+      toast({ 
+        title: "Failed to share", 
+        description: "Please try again",
+        variant: "destructive" 
+      })
     }
   }, [post._id, post.author.firstName, post.author.lastName, post.caption, onShare, toast])
 
@@ -539,19 +619,28 @@ export function PostCard({
     try {
       const response = await fetch(`/api/posts/${post._id}/comments/${commentId}/like`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId })
       })
       
-      if (response.ok) {
-        const data = await response.json()
-        if (data.success) {
-          toast({ title: "Comment liked" })
-        }
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Like comment failed')
       }
-    } catch (error) {
-      toast({ title: "Failed to like comment", variant: "destructive" })
+      
+      const data = await response.json()
+      
+      if (data.success) {
+        toast({ title: data.data.liked ? "Comment liked!" : "Comment unliked" })
+      }
+    } catch (error: any) {
+      toast({ 
+        title: "Failed to like comment", 
+        description: error.message || "Please try again",
+        variant: "destructive" 
+      })
     }
-  }, [post._id, isSignedIn, toast])
+  }, [post._id, isSignedIn, toast, userId])
 
   const handleDeleteComment = useCallback(async (commentId: string) => {
     if (!isSignedIn) {
@@ -561,20 +650,62 @@ export function PostCard({
 
     try {
       const response = await fetch(`/api/posts/${post._id}/comments/${commentId}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId })
       })
       
-      if (response.ok) {
-        const data = await response.json()
-        if (data.success) {
-          setState(prev => ({ ...prev, commentCount: prev.commentCount - 1 }))
-          toast({ title: "Comment deleted" })
-        }
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Delete comment failed')
       }
-    } catch (error) {
-      toast({ title: "Failed to delete comment", variant: "destructive" })
+      
+      const data = await response.json()
+      
+      if (data.success) {
+        setState(prev => ({ ...prev, commentCount: prev.commentCount - 1 }))
+        toast({ title: "Comment deleted" })
+      }
+    } catch (error: any) {
+      toast({ 
+        title: "Failed to delete comment", 
+        description: error.message || "Please try again",
+        variant: "destructive" 
+      })
     }
-  }, [post._id, isSignedIn, toast])
+  }, [post._id, isSignedIn, toast, userId])
+
+  // Render loading skeleton
+  if (state.isLoadingStatus && viewMode === 'detailed') {
+    return (
+      <div className={cn("animate-pulse", className)}>
+        <Card className="border-2 border-slate-200/60 dark:border-slate-700/60">
+          <CardHeader className="pb-3">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-slate-200 dark:bg-slate-700 rounded-full" />
+              <div className="space-y-2">
+                <div className="h-4 w-32 bg-slate-200 dark:bg-slate-700 rounded" />
+                <div className="h-3 w-24 bg-slate-200 dark:bg-slate-700 rounded" />
+              </div>
+            </div>
+          </CardHeader>
+          <div className="aspect-square bg-slate-200 dark:bg-slate-700" />
+          <CardContent className="p-4 space-y-3">
+            <div className="flex space-x-1">
+              <div className="w-12 h-12 bg-slate-200 dark:bg-slate-700 rounded-2xl" />
+              <div className="w-12 h-12 bg-slate-200 dark:bg-slate-700 rounded-2xl" />
+              <div className="w-12 h-12 bg-slate-200 dark:bg-slate-700 rounded-2xl" />
+              <div className="ml-auto w-12 h-12 bg-slate-200 dark:bg-slate-700 rounded-2xl" />
+            </div>
+            <div className="space-y-2">
+              <div className="h-4 w-full bg-slate-200 dark:bg-slate-700 rounded" />
+              <div className="h-4 w-2/3 bg-slate-200 dark:bg-slate-700 rounded" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
   // TikTok-style vertical feed view
   if (viewMode === 'feed') {
@@ -1504,7 +1635,8 @@ export function PostCard({
   )
 }
 
-// Sub-components
+// Comments Sheet Component
+// Update the CommentsSheet component with safe user handling:
 function CommentsSheet({ 
   post, 
   onClose, 
@@ -1520,9 +1652,9 @@ function CommentsSheet({
 }: {
   post: Post
   onClose: () => void
-  onComment: () => void
-  onLikeComment: (commentId: string) => void
-  onDeleteComment: (commentId: string) => void
+  onComment: () => Promise<void>
+  onLikeComment: (commentId: string) => Promise<void>
+  onDeleteComment: (commentId: string) => Promise<void>
   commentText: string
   setCommentText: (text: string) => void
   loading: boolean
@@ -1530,6 +1662,163 @@ function CommentsSheet({
   isCommentLiked: (comment: Comment) => boolean
   currentUserId?: string
 }) {
+  // Get the current user from Clerk
+  const { user: clerkUser, isSignedIn } = useUser()
+  const router = useRouter()
+  
+  // Local state for optimistic updates
+  const [localComments, setLocalComments] = useState<Comment[]>(post.comments || [])
+  const [optimisticComment, setOptimisticComment] = useState<Comment | null>(null)
+  const [localLikeStates, setLocalLikeStates] = useState<Record<string, boolean>>({})
+  const [localLikeCounts, setLocalLikeCounts] = useState<Record<string, number>>({})
+
+  // Helper function to safely get user from comment
+  // In both CommentsSheet and CommentsSection components, update the getCommentUser function:
+
+const getCommentUser = (comment: Comment): User | null => {
+  if (!comment.user) return null
+  
+  if (typeof comment.user === 'string') {
+    // If user is just a string ID, return minimal user object
+    const userId = comment.user as string;
+    return {
+      _id: userId,
+      username: 'user_' + userId.slice(-6),
+      firstName: 'User',
+      lastName: '',
+      bio: '',
+      location: '',
+      website: '',
+      role: 'user',
+      interests: [],
+      skills: [],
+      isVerified: false,
+      followers: [],
+      following: [],
+      createdAt: new Date().toISOString()
+    }
+  }
+  
+  return comment.user as User
+}
+
+  // Handle comment submission with optimistic update
+  const handleCommentSubmit = async () => {
+    if (!commentText.trim() || loading || !isSignedIn) return
+    
+    const tempComment: Comment = {
+      _id: 'temp_' + Date.now(),
+      user: {
+        _id: clerkUser?.id || currentUserId || 'temp_user',
+        username: clerkUser?.username || 'you',
+        firstName: clerkUser?.firstName || 'You',
+        lastName: clerkUser?.lastName || '',
+        avatar: clerkUser?.imageUrl,
+        bio: '',
+        location: '',
+        website: '',
+        role: 'user',
+        interests: [],
+        skills: [],
+        isVerified: false,
+        followers: [],
+        following: [],
+        createdAt: new Date().toISOString()
+      },
+      text: commentText,
+      likes: [],
+      createdAt: new Date().toISOString()
+    }
+
+    // Optimistic update
+    setOptimisticComment(tempComment)
+    const previousText = commentText
+    setCommentText('')
+
+    try {
+      await onComment() // Call the parent's onComment function
+      // Clear optimistic comment after successful submission
+      setOptimisticComment(null)
+    } catch (error) {
+      // Revert on error
+      setOptimisticComment(null)
+      setCommentText(previousText)
+    }
+  }
+
+  // Handle like comment with optimistic update
+  const handleLikeCommentOptimistic = async (commentId: string) => {
+    if (!isSignedIn) {
+      router.push('/sign-in')
+      return
+    }
+
+    const previousLiked = localLikeStates[commentId] || false
+    const previousLikeCount = localLikeCounts[commentId] || 0
+
+    // Optimistic update
+    setLocalLikeStates(prev => ({
+      ...prev,
+      [commentId]: !previousLiked
+    }))
+    setLocalLikeCounts(prev => ({
+      ...prev,
+      [commentId]: !previousLiked ? previousLikeCount + 1 : previousLikeCount - 1
+    }))
+
+    try {
+      await onLikeComment(commentId)
+    } catch (error) {
+      // Revert on error
+      setLocalLikeStates(prev => ({
+        ...prev,
+        [commentId]: previousLiked
+      }))
+      setLocalLikeCounts(prev => ({
+        ...prev,
+        [commentId]: previousLikeCount
+      }))
+    }
+  }
+
+  // Handle delete comment with optimistic update
+  const handleDeleteCommentOptimistic = async (commentId: string) => {
+    const commentToDelete = localComments.find(c => c._id === commentId)
+    if (!commentToDelete) return
+
+    // Optimistic update - remove comment from local state
+    setLocalComments(prev => prev.filter(c => c._id !== commentId))
+
+    try {
+      await onDeleteComment(commentId)
+    } catch (error) {
+      // Revert on error
+      setLocalComments(prev => [...prev, commentToDelete])
+    }
+  }
+
+  // Update local comments when post comments change
+  useEffect(() => {
+    setLocalComments(post.comments || [])
+    
+    // Initialize local like states
+    const initialLikeStates: Record<string, boolean> = {}
+    const initialLikeCounts: Record<string, number> = {}
+    
+    post.comments?.forEach(comment => {
+      initialLikeStates[comment._id] = isCommentLiked(comment)
+      initialLikeCounts[comment._id] = comment.likes?.length || 0
+    })
+    
+    setLocalLikeStates(initialLikeStates)
+    setLocalLikeCounts(initialLikeCounts)
+  }, [post.comments, isCommentLiked])
+
+  // Combine actual comments with optimistic comment
+  const allComments = optimisticComment 
+    ? [optimisticComment, ...localComments] 
+    : localComments
+
   return (
     <motion.div
       initial={{ y: '100%' }}
@@ -1540,103 +1829,186 @@ function CommentsSheet({
       <div className="p-6 h-full flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xl font-bold text-slate-900 dark:text-white">
-            Comments ({post.comments?.length || 0})
-          </h3>
+          <div className="flex items-center space-x-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onClose}
+              className="rounded-2xl hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              <X className="w-5 h-5" />
+            </Button>
+            <h3 className="text-xl font-bold text-slate-900 dark:text-white">
+              Comments ({allComments.length})
+            </h3>
+          </div>
           <Button
-            variant="ghost"
-            size="icon"
+            variant="outline"
+            size="sm"
             onClick={onClose}
-            className="rounded-2xl hover:bg-slate-100 dark:hover:bg-slate-800"
+            className="rounded-2xl"
           >
-            <X className="w-5 h-5" />
+            Done
           </Button>
         </div>
 
         {/* Comments List */}
-        <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-          {post.comments?.map((comment) => (
-            <div key={comment._id} className="flex space-x-3 group">
-              <Avatar className="w-10 h-10 flex-shrink-0">
-                <AvatarImage src={comment.user.avatar} />
-                <AvatarFallback>
-                  {comment.user.firstName?.[0]}{comment.user.lastName?.[0]}
-                </AvatarFallback>
-              </Avatar>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center space-x-2 mb-1">
-                  <span className="font-semibold text-sm text-slate-900 dark:text-white">
-                    @{comment.user.username}
-                  </span>
-                  <span className="text-xs text-slate-500">
-                    {getTimeAgo(comment.createdAt)}
-                  </span>
-                </div>
-                <p className="text-slate-700 dark:text-slate-300 text-sm mb-2">
-                  {comment.text}
-                </p>
-                <div className="flex items-center space-x-4 text-xs text-slate-500">
-                  <button 
-                    onClick={() => onLikeComment(comment._id)}
-                    className={cn(
-                      "flex items-center space-x-1 transition-colors",
-                      isCommentLiked(comment) && "text-rose-500"
-                    )}
-                  >
-                    <ThumbsUp className={cn("w-3 h-3", isCommentLiked(comment) && "fill-current")} />
-                    <span>{comment.likes?.length || 0}</span>
-                  </button>
-                  <button className="hover:text-blue-500 transition-colors">
-                    Reply
-                  </button>
-                  {isCommentAuthor(comment.user._id) && (
-                    <button 
-                      onClick={() => onDeleteComment(comment._id)}
-                      className="text-red-500 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100"
-                    >
-                      Delete
-                    </button>
-                  )}
-                </div>
-              </div>
+        <div className="flex-1 overflow-y-auto space-y-4 pr-2 pb-4">
+          {allComments.length === 0 ? (
+            <div className="text-center py-12">
+              <MessageCircle className="w-16 h-16 text-slate-300 dark:text-slate-700 mx-auto mb-4" />
+              <h4 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-2">
+                No comments yet
+              </h4>
+              <p className="text-slate-500 dark:text-slate-400 max-w-sm mx-auto">
+                Be the first to share your thoughts on this design!
+              </p>
             </div>
-          ))}
+          ) : (
+            allComments.map((comment) => {
+              const user = getCommentUser(comment)
+              const userId = user?._id || ''
+              const isOptimistic = comment._id.startsWith('temp_')
+              const commentLiked = localLikeStates[comment._id] || false
+              const commentLikeCount = localLikeCounts[comment._id] || comment.likes?.length || 0
+              
+              return (
+                <div 
+                  key={comment._id} 
+                  className={cn(
+                    "flex space-x-3 group p-3 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors",
+                    isOptimistic && "opacity-70 animate-pulse bg-blue-50 dark:bg-blue-900/10"
+                  )}
+                >
+                  <Avatar className="w-10 h-10 flex-shrink-0">
+                    <AvatarImage src={user?.avatar} />
+                    <AvatarFallback className={cn(
+                      "bg-gradient-to-r text-white font-medium",
+                      isOptimistic 
+                        ? "from-blue-500 to-cyan-500" 
+                        : "from-slate-600 to-slate-700"
+                    )}>
+                      {user?.firstName?.[0]}{user?.lastName?.[0] || user?.username?.[0] || '?'}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center space-x-2 mb-1">
+                      <span className={cn(
+                        "font-semibold text-sm",
+                        isOptimistic 
+                          ? "text-blue-600 dark:text-blue-400" 
+                          : "text-slate-900 dark:text-white"
+                      )}>
+                        @{user?.username || 'user'}
+                      </span>
+                      {isOptimistic && (
+                        <span className="text-xs text-blue-600 bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 px-2 py-0.5 rounded-full">
+                          Sending...
+                        </span>
+                      )}
+                      <span className="text-xs text-slate-500">
+                        {getTimeAgo(comment.createdAt)}
+                      </span>
+                      {user?.isVerified && !isOptimistic && (
+                        <div className="w-3 h-3 bg-blue-500 rounded-full flex items-center justify-center">
+                          <Check className="w-2 h-2 text-white" />
+                        </div>
+                      )}
+                    </div>
+                    <p className={cn(
+                      "text-sm mb-2",
+                      isOptimistic 
+                        ? "text-slate-500 dark:text-slate-400 italic" 
+                        : "text-slate-700 dark:text-slate-300"
+                    )}>
+                      {comment.text}
+                    </p>
+                    {!isOptimistic && (
+                      <div className="flex items-center space-x-4 text-xs">
+                        <button 
+                          onClick={() => handleLikeCommentOptimistic(comment._id)}
+                          className={cn(
+                            "flex items-center space-x-1 transition-all hover:text-rose-500",
+                            commentLiked ? "text-rose-500" : "text-slate-500 hover:text-rose-500"
+                          )}
+                        >
+                          <ThumbsUp className={cn("w-3.5 h-3.5 transition-transform hover:scale-110", commentLiked && "fill-current")} />
+                          <span className="font-medium">{formatNumber(commentLikeCount)}</span>
+                        </button>
+                        <button className="text-slate-500 hover:text-blue-500 transition-colors">
+                          Reply
+                        </button>
+                        {isCommentAuthor(userId) && (
+                          <button 
+                            onClick={() => handleDeleteCommentOptimistic(comment._id)}
+                            className="text-red-500 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100 ml-auto"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })
+          )}
         </div>
 
         {/* Add Comment */}
-        <div className="flex space-x-3 pt-4 border-t border-slate-200 dark:border-slate-700">
-          <Avatar className="w-10 h-10 flex-shrink-0">
-            <AvatarImage src={currentUserId ? '/placeholder-avatar.png' : ''} />
-            <AvatarFallback>
-              {currentUserId ? 'CU' : '?'}
-            </AvatarFallback>
-          </Avatar>
-          <div className="flex-1 relative">
-            <Input
-              placeholder="Add a comment..."
-              value={commentText}
-              onChange={(e) => setCommentText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  onComment()
-                }
-              }}
-              className="pr-12"
-            />
-            <Button 
-              onClick={onComment}
-              disabled={!commentText.trim() || loading}
-              size="icon"
-              className="absolute right-1 top-1/2 transform -translate-y-1/2 w-8 h-8 rounded-xl"
-            >
-              {loading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Send className="w-4 h-4" />
-              )}
-            </Button>
-          </div>
+        <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
+          {!isSignedIn ? (
+            <div className="p-4 bg-gradient-to-r from-rose-50 to-pink-50 dark:from-rose-900/10 dark:to-pink-900/10 rounded-2xl text-center">
+              <p className="text-slate-700 dark:text-slate-300 mb-3">
+                Sign in to join the conversation
+              </p>
+              <Button
+                onClick={() => router.push('/sign-in')}
+                className="bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white rounded-2xl px-6"
+              >
+                Sign In
+              </Button>
+            </div>
+          ) : (
+            <div className="flex space-x-3">
+              <Avatar className="w-10 h-10 flex-shrink-0 border-2 border-white dark:border-slate-800 shadow-lg">
+                <AvatarImage 
+                  src={clerkUser?.imageUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${clerkUser?.id || 'default'}`} 
+                  alt={clerkUser?.username || 'Your avatar'}
+                />
+                <AvatarFallback className="bg-gradient-to-r from-rose-500 to-pink-500 text-white font-medium">
+                  {clerkUser?.firstName?.[0] || clerkUser?.username?.[0] || 'Y'}
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex-1 relative">
+                <Input
+                  placeholder="Add a comment..."
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      handleCommentSubmit()
+                    }
+                  }}
+                  className="pr-12 rounded-2xl border-2 border-slate-200 dark:border-slate-700 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20 shadow-sm"
+                  disabled={loading}
+                />
+                <Button 
+                  onClick={handleCommentSubmit}
+                  disabled={!commentText.trim() || loading}
+                  size="icon"
+                  className="absolute right-1 top-1/2 transform -translate-y-1/2 w-8 h-8 rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white shadow-lg shadow-rose-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                >
+                  {loading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </motion.div>
@@ -1656,9 +2028,9 @@ function CommentsSection({
   currentUserId
 }: {
   post: Post
-  onComment: () => void
-  onLikeComment: (commentId: string) => void
-  onDeleteComment: (commentId: string) => void
+  onComment: () => Promise<void>
+  onLikeComment: (commentId: string) => Promise<void>
+  onDeleteComment: (commentId: string) => Promise<void>
   commentText: string
   setCommentText: (text: string) => void
   loading: boolean
@@ -1666,6 +2038,156 @@ function CommentsSection({
   isCommentLiked: (comment: Comment) => boolean
   currentUserId?: string
 }) {
+  const { user: clerkUser, isSignedIn } = useUser()
+  const router = useRouter()
+  
+  // Local state for optimistic updates
+  const [localComments, setLocalComments] = useState<Comment[]>(post.comments?.slice(0, 5) || [])
+  const [optimisticComment, setOptimisticComment] = useState<Comment | null>(null)
+  const [localLikeStates, setLocalLikeStates] = useState<Record<string, boolean>>({})
+  const [localLikeCounts, setLocalLikeCounts] = useState<Record<string, number>>({})
+
+  // Helper function to safely get user from comment
+  // In both CommentsSheet and CommentsSection components, update the getCommentUser function:
+
+const getCommentUser = (comment: Comment): User | null => {
+  if (!comment.user) return null
+  
+  if (typeof comment.user === 'string') {
+    // If user is just a string ID, return minimal user object
+    const userId = comment.user as string;
+    return {
+      _id: userId,
+      username: 'user_' + userId.slice(-6),
+      firstName: 'User',
+      lastName: '',
+      bio: '',
+      location: '',
+      website: '',
+      role: 'user',
+      interests: [],
+      skills: [],
+      isVerified: false,
+      followers: [],
+      following: [],
+      createdAt: new Date().toISOString()
+    }
+  }
+  
+  return comment.user as User
+}
+
+  // Handle comment submission with optimistic update
+  const handleCommentSubmit = async () => {
+    if (!commentText.trim() || loading || !isSignedIn) return
+    
+    const tempComment: Comment = {
+      _id: 'temp_' + Date.now(),
+      user: {
+        _id: clerkUser?.id || currentUserId || 'temp_user',
+        username: clerkUser?.username || 'you',
+        firstName: clerkUser?.firstName || 'You',
+        lastName: clerkUser?.lastName || '',
+        avatar: clerkUser?.imageUrl,
+        bio: '',
+        location: '',
+        website: '',
+        role: 'user',
+        interests: [],
+        skills: [],
+        isVerified: false,
+        followers: [],
+        following: [],
+        createdAt: new Date().toISOString()
+      },
+      text: commentText,
+      likes: [],
+      createdAt: new Date().toISOString()
+    }
+
+    // Optimistic update
+    setOptimisticComment(tempComment)
+    const previousText = commentText
+    setCommentText('')
+
+    try {
+      await onComment()
+      setOptimisticComment(null)
+    } catch (error) {
+      setOptimisticComment(null)
+      setCommentText(previousText)
+    }
+  }
+
+  // Handle like comment with optimistic update
+  const handleLikeCommentOptimistic = async (commentId: string) => {
+    if (!isSignedIn) {
+      router.push('/sign-in')
+      return
+    }
+
+    const previousLiked = localLikeStates[commentId] || false
+    const previousLikeCount = localLikeCounts[commentId] || 0
+
+    setLocalLikeStates(prev => ({
+      ...prev,
+      [commentId]: !previousLiked
+    }))
+    setLocalLikeCounts(prev => ({
+      ...prev,
+      [commentId]: !previousLiked ? previousLikeCount + 1 : previousLikeCount - 1
+    }))
+
+    try {
+      await onLikeComment(commentId)
+    } catch (error) {
+      setLocalLikeStates(prev => ({
+        ...prev,
+        [commentId]: previousLiked
+      }))
+      setLocalLikeCounts(prev => ({
+        ...prev,
+        [commentId]: previousLikeCount
+      }))
+    }
+  }
+
+  // Handle delete comment with optimistic update
+  const handleDeleteCommentOptimistic = async (commentId: string) => {
+    const commentToDelete = localComments.find(c => c._id === commentId)
+    if (!commentToDelete) return
+
+    setLocalComments(prev => prev.filter(c => c._id !== commentId))
+
+    try {
+      await onDeleteComment(commentId)
+    } catch (error) {
+      setLocalComments(prev => [...prev, commentToDelete])
+    }
+  }
+
+  // Update local comments when post comments change
+  useEffect(() => {
+    const visibleComments = post.comments?.slice(0, 5) || []
+    setLocalComments(visibleComments)
+    
+    const initialLikeStates: Record<string, boolean> = {}
+    const initialLikeCounts: Record<string, number> = {}
+    
+    visibleComments.forEach(comment => {
+      initialLikeStates[comment._id] = isCommentLiked(comment)
+      initialLikeCounts[comment._id] = comment.likes?.length || 0
+    })
+    
+    setLocalLikeStates(initialLikeStates)
+    setLocalLikeCounts(initialLikeCounts)
+  }, [post.comments, isCommentLiked])
+
+  // Combine actual comments with optimistic comment
+  const allComments = optimisticComment 
+    ? [optimisticComment, ...localComments] 
+    : localComments
+
   return (
     <motion.div
       initial={{ opacity: 0, height: 0 }}
@@ -1673,93 +2195,168 @@ function CommentsSection({
       exit={{ opacity: 0, height: 0 }}
       className="overflow-hidden"
     >
+      {/* Comments List */}
       <div className="space-y-3 max-h-48 overflow-y-auto pr-2">
-        {post.comments?.slice(0, 5).map((comment) => (
-          <div key={comment._id} className="flex items-start space-x-3 group/comment">
-            <Avatar className="w-6 h-6 flex-shrink-0">
-              <AvatarImage src={comment.user.avatar} />
-              <AvatarFallback className="text-xs">
-                {comment.user.firstName?.[0]}{comment.user.lastName?.[0]}
-              </AvatarFallback>
-            </Avatar>
-
-            <div className="flex-1 min-w-0">
-              <div className="bg-slate-100 dark:bg-slate-700 rounded-2xl px-3 py-2 group-hover/comment:bg-slate-200 dark:group-hover/comment:bg-slate-600 transition-colors">
-                <div className="flex items-center space-x-2 mb-1">
-                  <p className="text-xs font-semibold text-slate-900 dark:text-white">
-                    {comment.user.username}
-                  </p>
-                  {comment.isEdited && (
-                    <span className="text-xs text-slate-500">(edited)</span>
-                  )}
-                </div>
-                <p className="text-sm text-slate-700 dark:text-slate-300">{comment.text}</p>
-              </div>
-              <div className="flex items-center space-x-4 mt-1 text-xs text-slate-500">
-                <span>{getTimeAgo(comment.createdAt)}</span>
-                <button 
-                  onClick={() => onLikeComment(comment._id)}
-                  className="hover:text-rose-500 transition-colors flex items-center space-x-1"
-                >
-                  <ThumbsUp className={cn("w-3 h-3", isCommentLiked(comment) && "fill-current")} />
-                  <span>{comment.likes?.length || 0}</span>
-                </button>
-                <button className="hover:text-blue-500 transition-colors">
-                  Reply
-                </button>
-                {isCommentAuthor(comment.user._id) && (
-                  <button 
-                    onClick={() => onDeleteComment(comment._id)}
-                    className="text-red-500 hover:text-red-600 transition-colors opacity-0 group-hover/comment:opacity-100"
-                  >
-                    Delete
-                  </button>
-                )}
-              </div>
-            </div>
+        {allComments.length === 0 ? (
+          <div className="text-center py-6">
+            <p className="text-slate-500 dark:text-slate-400 text-sm">
+              No comments yet. Be the first to comment!
+            </p>
           </div>
-        ))}
+        ) : (
+          allComments.map((comment) => {
+            const user = getCommentUser(comment)
+            const userId = user?._id || ''
+            const isOptimistic = comment._id.startsWith('temp_')
+            const commentLiked = localLikeStates[comment._id] || false
+            const commentLikeCount = localLikeCounts[comment._id] || comment.likes?.length || 0
+            
+            return (
+              <div 
+                key={comment._id} 
+                className={cn(
+                  "flex items-start space-x-3 group/comment",
+                  isOptimistic && "opacity-70 animate-pulse"
+                )}
+              >
+                <Avatar className="w-6 h-6 flex-shrink-0">
+                  <AvatarImage src={user?.avatar} />
+                  <AvatarFallback className={cn(
+                    "text-xs",
+                    isOptimistic 
+                      ? "bg-gradient-to-r from-blue-500 to-cyan-500 text-white" 
+                      : "bg-gradient-to-r from-slate-600 to-slate-700 text-white"
+                  )}>
+                    {user?.firstName?.[0]}{user?.lastName?.[0] || user?.username?.[0] || '?'}
+                  </AvatarFallback>
+                </Avatar>
+
+                <div className="flex-1 min-w-0">
+                  <div className={cn(
+                    "rounded-2xl px-3 py-2 transition-colors",
+                    isOptimistic 
+                      ? "bg-blue-50 dark:bg-blue-900/10" 
+                      : "bg-slate-100 dark:bg-slate-700 group-hover/comment:bg-slate-200 dark:group-hover/comment:bg-slate-600"
+                  )}>
+                    <div className="flex items-center space-x-2 mb-1">
+                      <p className={cn(
+                        "text-xs font-semibold",
+                        isOptimistic 
+                          ? "text-blue-600 dark:text-blue-400" 
+                          : "text-slate-900 dark:text-white"
+                      )}>
+                        {user?.username || 'user'}
+                      </p>
+                      {comment.isEdited && (
+                        <span className="text-xs text-slate-500">(edited)</span>
+                      )}
+                      {isOptimistic && (
+                        <span className="text-xs text-blue-600 bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 px-1.5 py-0.5 rounded-full">
+                          Sending...
+                        </span>
+                      )}
+                    </div>
+                    <p className={cn(
+                      "text-sm",
+                      isOptimistic 
+                        ? "text-slate-500 dark:text-slate-400 italic" 
+                        : "text-slate-700 dark:text-slate-300"
+                    )}>
+                      {comment.text}
+                    </p>
+                  </div>
+                  <div className="flex items-center space-x-3 mt-1 text-xs text-slate-500">
+                    <span className="text-slate-400 dark:text-slate-500">
+                      {getTimeAgo(comment.createdAt)}
+                    </span>
+                    {!isOptimistic && (
+                      <>
+                        <button 
+                          onClick={() => handleLikeCommentOptimistic(comment._id)}
+                          className={cn(
+                            "flex items-center space-x-1 transition-colors hover:text-rose-500",
+                            commentLiked ? "text-rose-500" : "text-slate-500 hover:text-rose-500"
+                          )}
+                        >
+                          <ThumbsUp className={cn("w-3 h-3", commentLiked && "fill-current")} />
+                          <span>{formatNumber(commentLikeCount)}</span>
+                        </button>
+                        <button className="hover:text-blue-500 transition-colors">
+                          Reply
+                        </button>
+                        {isCommentAuthor(userId) && (
+                          <button 
+                            onClick={() => handleDeleteCommentOptimistic(comment._id)}
+                            className="text-red-500 hover:text-red-600 transition-colors opacity-0 group-hover/comment:opacity-100 ml-auto"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })
+        )}
       </div>
 
       {/* Add Comment */}
       <div className="flex items-center space-x-2 mt-3">
         <Avatar className="w-8 h-8 flex-shrink-0">
-          <AvatarImage src={currentUserId ? '/placeholder-avatar.png' : ''} />
-          <AvatarFallback className="text-xs">
-            {currentUserId ? 'CU' : '?'}
+          <AvatarImage 
+            src={clerkUser?.imageUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${clerkUser?.id || 'default'}`} 
+            alt={clerkUser?.username || 'Your avatar'}
+          />
+          <AvatarFallback className="text-xs bg-gradient-to-r from-rose-500 to-pink-500 text-white font-medium">
+            {clerkUser?.firstName?.[0] || clerkUser?.username?.[0] || 'Y'}
           </AvatarFallback>
         </Avatar>
         <div className="flex-1 relative">
           <Input
-            placeholder="Add a comment..."
+            placeholder={isSignedIn ? "Add a comment..." : "Sign in to comment"}
             value={commentText}
-            onChange={(e) => setCommentText(e.target.value)}
+            onChange={(e) => isSignedIn && setCommentText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+              if (isSignedIn && e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
-                onComment()
+                handleCommentSubmit()
               }
             }}
-            className="rounded-2xl pr-12"
+            className="rounded-2xl pr-12 border-2 border-slate-200 dark:border-slate-700 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20"
+            disabled={!isSignedIn || loading}
+            onClick={() => !isSignedIn && router.push('/sign-in')}
           />
-          <Button
-            onClick={onComment}
-            disabled={!commentText.trim() || loading}
-            size="icon"
-            className="absolute right-1 top-1/2 transform -translate-y-1/2 w-8 h-8 rounded-xl"
-          >
-            {loading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Send className="w-4 h-4" />
-            )}
-          </Button>
+          {isSignedIn ? (
+            <Button
+              onClick={handleCommentSubmit}
+              disabled={!commentText.trim() || loading}
+              size="icon"
+              className="absolute right-1 top-1/2 transform -translate-y-1/2 w-8 h-8 rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white shadow-lg shadow-rose-500/25 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+            </Button>
+          ) : (
+            <Button
+              onClick={() => router.push('/sign-in')}
+              size="icon"
+              className="absolute right-1 top-1/2 transform -translate-y-1/2 w-8 h-8 rounded-xl bg-gradient-to-r from-slate-500 to-slate-700 hover:from-slate-600 hover:to-slate-800 text-white shadow-lg"
+            >
+              <LogIn className="w-4 h-4" />
+            </Button>
+          )}
         </div>
       </div>
     </motion.div>
   )
 }
 
+// Options Menu Component
 function OptionsMenu({
   post,
   currentUserId,
@@ -1847,6 +2444,7 @@ function OptionsMenu({
   )
 }
 
+// Share Menu Component
 function ShareMenu({
   onShare,
   onClose,
@@ -1881,6 +2479,7 @@ function ShareMenu({
   )
 }
 
+// Engagement Stats Modal Component
 function EngagementStatsModal({
   post,
   likeCount,
@@ -1961,6 +2560,7 @@ function EngagementStatsModal({
   )
 }
 
+// Delete Confirmation Modal Component
 function DeleteConfirmationModal({
   post,
   onDelete,

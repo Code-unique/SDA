@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import { PostCard } from '@/components/posts/post-card'
@@ -26,28 +26,27 @@ import {
   Video,
   Crown,
   Leaf,
-  Minus,
   ShoppingBag,
   Filter,
   RotateCcw,
   ChevronDown,
   ChevronUp,
-  Palette,
   Shirt,
-  Gem,
   Flower2,
   ScanSearch,
   Rocket,
-  Loader2,
-  Heart,
-  MessageCircle,
-  Eye,
-  BarChart3
+  Loader2
 } from 'lucide-react'
-import { Post, ApiResponse, PaginatedResponse } from '@/types/post'
+import { Post } from '@/types/post'
 import { useUser } from '@clerk/nextjs'
 
 type ViewMode = 'grid' | 'list' | 'detailed'
+
+interface BatchStatusData {
+  likeStatuses: Record<string, boolean>
+  saveStatuses: Record<string, { saved: boolean; savedAt?: string }>
+  followStatuses: Record<string, boolean>
+}
 
 export default function ExplorePage() {
   const { user: currentUser, isSignedIn } = useUser()
@@ -64,6 +63,11 @@ export default function ExplorePage() {
   const [hasMore, setHasMore] = useState(true)
   const [page, setPage] = useState(1)
   const [isScrolled, setIsScrolled] = useState(false)
+  const [batchStatusData, setBatchStatusData] = useState<BatchStatusData>({
+    likeStatuses: {},
+    saveStatuses: {},
+    followStatuses: {}
+  })
 
   const { ref, inView } = useInView()
   const headerRef = useRef<HTMLDivElement>(null)
@@ -71,7 +75,7 @@ export default function ExplorePage() {
   const headerOpacity = useTransform(scrollY, [0, 100], [1, 0.95])
   const headerBlur = useTransform(scrollY, [0, 100], [0, 4])
 
-  // Enhanced categories with rich data
+  // Categories with rich data
   const categories = [
     { 
       id: 'all', 
@@ -129,7 +133,7 @@ export default function ExplorePage() {
     }
   ]
 
-  // Enhanced filters
+  // Filters
   const filters = [
     { id: 'featured', name: 'Featured', icon: Star, description: 'Curated featured content', color: 'text-yellow-500' },
     { id: 'trending', name: 'Trending', icon: Flame, description: 'Popular right now', color: 'text-orange-500' },
@@ -141,84 +145,107 @@ export default function ExplorePage() {
     { id: 'pro', name: 'Pro Designers', icon: Crown, description: 'From verified professionals', color: 'text-amber-500' },
   ]
 
-  const loadPosts = async (pageNum: number = 1, append: boolean = false) => {
-  if (loadingMore) return
-
-  if (pageNum === 1) {
-    setLoading(true)
-  } else {
-    setLoadingMore(true)
-  }
-
-  try {
-    const params = new URLSearchParams({
-      page: pageNum.toString(),
-      limit: '12',
-      sort: sortBy,
-      ...(searchQuery && { search: searchQuery }),
-      ...(selectedCategory !== 'all' && { category: selectedCategory }),
-      ...(selectedFilters.length > 0 && { filters: selectedFilters.join(',') })
-    })
-
-    console.log('🔄 Loading posts with params:', Object.fromEntries(params))
-    const response = await fetch(`/api/posts?${params}`)
+  // Fetch batch statuses
+  const fetchBatchStatuses = useCallback(async (postIds: string[], userIds: string[]) => {
+    if (postIds.length === 0 && userIds.length === 0) return
     
-    console.log('📡 Response status:', response.status, response.statusText)
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
-    }
-
-    const data = await response.json()
-    console.log('📦 API Response:', data)
-
-    // FIX: Use the actual API response structure
-    if (!data.success || !data.posts) {
-      console.warn('❌ API returned no posts', {
-        success: data.success,
-        posts: data.posts
+    try {
+      const response = await fetch('/api/batch-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          postIds: postIds.filter(id => id && typeof id === 'string'),
+          userIds: userIds.filter(id => id && typeof id === 'string')
+        })
       })
-      setPosts(prev => append ? prev : [])
-      setHasMore(false)
-      return
+      
+      if (response.ok) {
+        const data = await response.json()
+        if (data.success && data.data) {
+          setBatchStatusData(data.data)
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching batch statuses:', error)
     }
+  }, [])
 
-    // FIX: Use data.posts instead of data.data.items
-    console.log('✅ Posts received:', {
-      postsCount: data.posts.length,
-      hasNext: data.pagination?.hasNext,
-      postsSample: data.posts.slice(0, 2)
-    })
+  // Load posts
+  const loadPosts = useCallback(async (pageNum: number = 1, append: boolean = false) => {
+    if (loadingMore) return
 
-    if (append) {
-      setPosts(prev => [...prev, ...(data.posts || [])])
+    if (pageNum === 1) {
+      setLoading(true)
     } else {
-      setPosts(data.posts || [])
+      setLoadingMore(true)
     }
-    
-    setHasMore(data.pagination?.hasNext || false)
-    setPage(pageNum)
 
-  } catch (error) {
-    console.error('❌ Error loading posts:', error)
-    setPosts([])
-    setHasMore(false)
-  } finally {
-    setLoading(false)
-    setLoadingMore(false)
-  }
-}
+    try {
+      const params = new URLSearchParams({
+        page: pageNum.toString(),
+        limit: '12',
+        sort: sortBy,
+        ...(searchQuery && { search: searchQuery }),
+        ...(selectedCategory !== 'all' && { category: selectedCategory }),
+        ...(selectedFilters.length > 0 && { filters: selectedFilters.join(',') })
+      })
 
+      const response = await fetch(`/api/posts?${params}`)
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const data = await response.json()
+
+      if (!data.success || !data.posts) {
+        setPosts(prev => append ? prev : [])
+        setHasMore(false)
+        return
+      }
+
+      // Extract post IDs and user IDs for batch status
+      const postIds = data.posts.map((post: Post) => post._id)
+      const userIds = [...new Set(data.posts.map((post: Post) => post.author._id))]
+      
+      // Fetch statuses in batch
+      if (isSignedIn) {
+        // Update line 213 in app/explore/page.tsx:
+fetchBatchStatuses(postIds, userIds as string[])
+      }
+
+      if (append) {
+        setPosts(prev => [...prev, ...(data.posts || [])])
+      } else {
+        setPosts(data.posts || [])
+      }
+      
+      setHasMore(data.pagination?.hasNext || false)
+      setPage(pageNum)
+
+    } catch (error) {
+      console.error('❌ Error loading posts:', error)
+      setPosts([])
+      setHasMore(false)
+    } finally {
+      setLoading(false)
+      setLoadingMore(false)
+    }
+  }, [searchQuery, selectedCategory, selectedFilters, sortBy, loadingMore, isSignedIn, fetchBatchStatuses])
+
+  // Initial load
   useEffect(() => {
     loadPosts(1)
-  }, [searchQuery, selectedCategory, selectedFilters, sortBy])
+  }, [loadPosts])
 
+  // Load more when in view
   useEffect(() => {
     if (inView && hasMore && !loadingMore) {
       loadPosts(page + 1, true)
     }
-  }, [inView, hasMore, loadingMore, page])
+  }, [inView, hasMore, loadingMore, page, loadPosts])
 
+  // Scroll handler
   useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 50)
@@ -227,22 +254,22 @@ export default function ExplorePage() {
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
-  const toggleFilter = (filterId: string) => {
+  const toggleFilter = useCallback((filterId: string) => {
     setSelectedFilters(prev =>
       prev.includes(filterId)
         ? prev.filter(id => id !== filterId)
         : [...prev, filterId]
     )
-  }
+  }, [])
 
-  const clearAllFilters = () => {
+  const clearAllFilters = useCallback(() => {
     setSearchQuery('')
     setSelectedCategory('all')
     setSelectedFilters([])
-  }
+  }, [])
 
   // Action handlers
-  const handleLike = async (postId: string) => {
+  const handleLike = useCallback(async (postId: string) => {
     try {
       const response = await fetch(`/api/posts/${postId}/like`, {
         method: 'POST',
@@ -253,9 +280,9 @@ export default function ExplorePage() {
       console.error('Error liking post:', error)
       throw error
     }
-  }
+  }, [])
 
-  const handleSave = async (postId: string) => {
+  const handleSave = useCallback(async (postId: string) => {
     try {
       const response = await fetch(`/api/posts/${postId}/save`, {
         method: 'POST',
@@ -266,9 +293,9 @@ export default function ExplorePage() {
       console.error('Error saving post:', error)
       throw error
     }
-  }
+  }, [])
 
-  const handleComment = async (postId: string, text: string) => {
+  const handleComment = useCallback(async (postId: string, text: string) => {
     try {
       const response = await fetch(`/api/posts/${postId}/comments`, {
         method: 'POST',
@@ -280,9 +307,9 @@ export default function ExplorePage() {
       console.error('Error adding comment:', error)
       throw error
     }
-  }
+  }, [])
 
-  const handleFollow = async (userId: string) => {
+  const handleFollow = useCallback(async (userId: string) => {
     try {
       const response = await fetch(`/api/users/${userId}/follow`, {
         method: 'POST',
@@ -293,9 +320,9 @@ export default function ExplorePage() {
       console.error('Error following user:', error)
       throw error
     }
-  }
+  }, [])
 
-  const handleShare = async (postId: string) => {
+  const handleShare = useCallback(async (postId: string) => {
     try {
       const response = await fetch(`/api/posts/${postId}/share`, {
         method: 'POST',
@@ -306,11 +333,11 @@ export default function ExplorePage() {
       console.error('Error sharing post:', error)
       throw error
     }
-  }
+  }, [])
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-rose-50/30 to-purple-50/20 dark:from-slate-900 dark:via-rose-900/10 dark:to-purple-900/10">
-      {/* Enhanced Sticky Header */}
+      {/* Sticky Header */}
       <motion.div
         ref={headerRef}
         style={{
@@ -400,7 +427,7 @@ export default function ExplorePage() {
                   Discover inspiring fashion creations from our global community of talented designers
                 </p>
                 
-                {/* Enhanced Search Bar */}
+                {/* Search Bar */}
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -435,7 +462,7 @@ export default function ExplorePage() {
           </motion.button>
         </div>
 
-        {/* Enhanced Controls */}
+        {/* Controls */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -491,13 +518,6 @@ export default function ExplorePage() {
                       >
                         {category.count}
                       </Badge>
-                      
-                      {/* Animated shine effect */}
-                      <div className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-1000 ${
-                        selectedCategory === category.id ? 'opacity-100' : ''
-                      }`}>
-                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -skew-x-12 transform translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
-                      </div>
                     </motion.button>
                   )
                 })}
@@ -699,6 +719,7 @@ export default function ExplorePage() {
           <PostsGrid 
             posts={posts} 
             viewMode={viewMode}
+            batchStatusData={batchStatusData}
             currentUserId={currentUser?.id}
             onLike={handleLike}
             onSave={handleSave}
@@ -740,7 +761,7 @@ export default function ExplorePage() {
   )
 }
 
-// Sub-components
+// Loading Grid Component
 function LoadingGrid() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
@@ -772,7 +793,8 @@ function LoadingGrid() {
   )
 }
 
-function PostsGrid({ posts, viewMode, ...props }: any) {
+// Posts Grid Component
+function PostsGrid({ posts, viewMode, batchStatusData, ...props }: any) {
   return (
     <motion.div
       initial="hidden"
@@ -814,6 +836,7 @@ function PostsGrid({ posts, viewMode, ...props }: any) {
             <PostCard
               post={post}
               viewMode={viewMode}
+              batchStatusData={batchStatusData}
               {...props}
             />
           </motion.div>
@@ -823,6 +846,7 @@ function PostsGrid({ posts, viewMode, ...props }: any) {
   )
 }
 
+// Empty State Component
 function EmptyState({ searchQuery, selectedCategory, selectedFilters, onClearFilters, onRefresh }: any) {
   return (
     <motion.div

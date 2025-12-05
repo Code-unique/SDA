@@ -10,9 +10,15 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    console.log('Fetching post ID:', id);
+    
     if (!id || id.length !== 24) {
-      return NextResponse.json<ApiResponse>(
-        { success: false, error: 'Valid post ID is required' },
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Valid post ID is required',
+          data: null 
+        },
         { status: 400 }
       );
     }
@@ -20,28 +26,41 @@ export async function GET(
     await connectToDatabase();
 
     const post = await Post.findById(id)
-      .populate('author', 'username firstName lastName avatar isVerified isPro followers following badges')
-      .populate('comments.user', 'username firstName lastName avatar isVerified isPro');
+      .populate('author', 'username firstName lastName avatar isVerified isPro followers following badges bio banner')
+      .populate({
+        path: 'comments.user',
+        select: 'username firstName lastName avatar isVerified isPro'
+      })
+      .populate('likes', '_id')
+      .populate('saves', '_id')
+      .lean();
 
     if (!post) {
-      return NextResponse.json<ApiResponse>(
-        { success: false, error: 'Post not found' },
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Post not found',
+          data: null 
+        },
         { status: 404 }
       );
     }
 
     // Increment view count
-    post.views = (post.views || 0) + 1;
-    await post.save();
+    await Post.findByIdAndUpdate(id, { $inc: { views: 1 } });
 
-    return NextResponse.json<ApiResponse>({
+    return NextResponse.json({
       success: true,
       data: post
     });
   } catch (error) {
     console.error('Error fetching post:', error);
-    return NextResponse.json<ApiResponse>(
-      { success: false, error: 'Internal server error' },
+    return NextResponse.json(
+      { 
+        success: false, 
+        error: 'Internal server error',
+        data: null 
+      },
       { status: 500 }
     );
   }
