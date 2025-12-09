@@ -11,34 +11,44 @@ import { Textarea } from '@/components/ui/textarea'
 import { PaymentModal } from '@/components/payment/PaymentModal'
 import { 
   Star, 
-  Users, 
   Clock, 
   PlayCircle, 
   BookOpen, 
   ChevronDown,
-  ChevronUp,
   Heart,
   Share2,
-  Bookmark,
   Download,
   Award,
-  Shield,
-  Globe,
-  Sparkles,
-  Crown,
   CheckCircle,
   Loader2,
   MessageCircle,
   ArrowLeft,
   ArrowRight,
   Video,
-  Zap,
-  Check,
-  CreditCard,
-  Smartphone,
-  BookCheck,
   Play,
-  TrendingUp
+  Users,
+  Check,
+  Calendar,
+  FileText,
+  Menu,
+  X,
+  Bookmark,
+  GraduationCap,
+  Target,
+  Zap,
+  Shield,
+  TrendingUp,
+  BookCheck,
+  Eye,
+  Clock4,
+  ChevronRight,
+  ExternalLink,
+  Globe,
+  UserCheck,
+  Medal,
+  Crown,
+  Rocket,
+  Sparkles
 } from 'lucide-react'
 
 interface S3Asset {
@@ -89,6 +99,7 @@ interface Course {
     bio?: string
     rating?: number
     totalStudents?: number
+    expertise?: string[]
   }
   price: number
   isFree: boolean
@@ -122,15 +133,6 @@ interface Course {
   }>
   createdAt: string
   updatedAt: string
-  aiFeatures?: {
-    hasAIAssistant: boolean
-    hasPersonalizedLearning: boolean
-    hasSmartRecommendations: boolean
-    hasProgressTracking: boolean
-    hasPersonalizedFeedback: boolean
-    estimatedCompletion?: string
-    difficultyAdjustment?: boolean
-  }
   completionRate?: number
   similarCourses?: Course[]
 }
@@ -158,7 +160,7 @@ export default function CourseDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isEnrolling, setIsEnrolling] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'curriculum' | 'reviews' | 'instructor'>('overview')
   const [expandedModules, setExpandedModules] = useState<Set<number>>(new Set([0]))
   const [newRating, setNewRating] = useState({ rating: 5, review: '' })
   const [isSubmittingRating, setIsSubmittingRating] = useState(false)
@@ -168,126 +170,114 @@ export default function CourseDetailPage() {
   const [completedLessons, setCompletedLessons] = useState<Set<string>>(new Set())
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showEnrollmentSuccess, setShowEnrollmentSuccess] = useState(false)
-  const [progressLoading, setProgressLoading] = useState(false)
+  const [showMobileCurriculum, setShowMobileCurriculum] = useState(false)
+  const [isBookmarked, setIsBookmarked] = useState(false)
 
   const slug = params.slug as string
 
   const fetchCourseData = async () => {
-  try {
-    setLoading(true)
-    setError(null)
+    try {
+      setLoading(true)
+      setError(null)
 
-    console.log('Fetching course with slug:', slug)
+      const [courseResponse, progressResponse] = await Promise.all([
+        fetch(`/api/courses/${slug}`),
+        fetch(`/api/courses/${slug}/progress`)
+      ])
 
-    const [courseResponse, progressResponse] = await Promise.all([
-      fetch(`/api/courses/${slug}`),
-      fetch(`/api/courses/${slug}/progress`)
-    ])
+      if (!courseResponse.ok) {
+        throw new Error(`Failed to load course`)
+      }
 
-    if (!courseResponse.ok) {
-      const errorData = await courseResponse.json().catch(() => ({}))
-      throw new Error(errorData.error || `API returned ${courseResponse.status}`)
-    }
-
-    const data = await courseResponse.json()
-    
-    const processedCourse: Course = {
-      ...data,
-      thumbnail: data.thumbnail ? {
-        key: data.thumbnail.key || data.thumbnail.public_id,
-        url: data.thumbnail.url || data.thumbnail.secure_url,
-        size: data.thumbnail.size || data.thumbnail.bytes,
-        type: data.thumbnail.type || 'image',
-        width: data.thumbnail.width,
-        height: data.thumbnail.height
-      } : {
-        key: 'default',
-        url: '/default-thumbnail.jpg',
-        size: 0,
-        type: 'image'
-      },
-      previewVideo: data.previewVideo ? {
-        key: data.previewVideo.key || data.previewVideo.public_id,
-        url: data.previewVideo.url || data.previewVideo.secure_url,
-        size: data.previewVideo.size || data.previewVideo.bytes,
-        type: data.previewVideo.type || 'video',
-        duration: data.previewVideo.duration
-      } : undefined,
-      modules: data.modules?.map((module: any) => ({
-        ...module,
-        lessons: module.lessons?.map((lesson: any) => ({
-          ...lesson,
-          video: lesson.video ? {
-            key: lesson.video.key || lesson.video.public_id,
-            url: lesson.video.url || lesson.video.secure_url,
-            size: lesson.video.size || lesson.video.bytes,
-            type: lesson.video.type || 'video',
-            duration: lesson.video.duration
-          } : undefined
+      const data = await courseResponse.json()
+      
+      const processedCourse: Course = {
+        ...data,
+        thumbnail: data.thumbnail ? {
+          key: data.thumbnail.key || data.thumbnail.public_id,
+          url: data.thumbnail.url || data.thumbnail.secure_url,
+          size: data.thumbnail.size || data.thumbnail.bytes,
+          type: data.thumbnail.type || 'image',
+          width: data.thumbnail.width,
+          height: data.thumbnail.height
+        } : {
+          key: 'default',
+          url: '/placeholder-course.jpg',
+          size: 0,
+          type: 'image'
+        },
+        previewVideo: data.previewVideo ? {
+          key: data.previewVideo.key || data.previewVideo.public_id,
+          url: data.previewVideo.url || data.previewVideo.secure_url,
+          size: data.previewVideo.size || data.previewVideo.bytes,
+          type: data.previewVideo.type || 'video',
+          duration: data.previewVideo.duration
+        } : undefined,
+        modules: data.modules?.map((module: any) => ({
+          ...module,
+          lessons: module.lessons?.map((lesson: any) => ({
+            ...lesson,
+            video: lesson.video ? {
+              key: lesson.video.key || lesson.video.public_id,
+              url: lesson.video.url || lesson.video.secure_url,
+              size: lesson.video.size || lesson.video.bytes,
+              type: lesson.video.type || 'video',
+              duration: lesson.video.duration
+            } : undefined
+          })) || []
         })) || []
-      })) || []
-    }
-
-    setCourse(processedCourse)
-
-    // Handle progress response
-    console.log('Progress response status:', progressResponse.status)
-    
-    if (progressResponse.ok) {
-      const progressData = await progressResponse.json()
-      console.log('Progress data received:', progressData)
-      
-      // Create user progress object with enrolled flag
-      const userProgressData: UserProgress = {
-        _id: progressData._id || `temp-${processedCourse._id}`,
-        courseId: progressData.courseId || processedCourse._id,
-        userId: progressData.userId || 'current-user',
-        enrolled: true, // User is enrolled if we got progress data
-        progress: progressData.progress || 0,
-        completed: progressData.completed || false,
-        completedLessons: progressData.completedLessons || [],
-        currentLesson: progressData.currentLesson || null,
-        timeSpent: progressData.timeSpent || 0,
-        lastAccessed: progressData.lastAccessed ? new Date(progressData.lastAccessed) : new Date()
       }
-      
-      console.log('Setting user progress:', userProgressData)
-      setUserProgress(userProgressData)
-      setCompletedLessons(new Set(userProgressData.completedLessons))
-      
-      // Set active lesson
-      if (userProgressData.currentLesson) {
-        const lesson = findLessonById(processedCourse, userProgressData.currentLesson)
-        if (lesson) {
-          setActiveLesson(lesson)
+
+      setCourse(processedCourse)
+
+      if (progressResponse.ok) {
+        const progressData = await progressResponse.json()
+        
+        const userProgressData: UserProgress = {
+          _id: progressData._id || `temp-${processedCourse._id}`,
+          courseId: progressData.courseId || processedCourse._id,
+          userId: progressData.userId || 'current-user',
+          enrolled: true,
+          progress: progressData.progress || 0,
+          completed: progressData.completed || false,
+          completedLessons: progressData.completedLessons || [],
+          currentLesson: progressData.currentLesson || null,
+          timeSpent: progressData.timeSpent || 0,
+          lastAccessed: progressData.lastAccessed ? new Date(progressData.lastAccessed) : new Date()
         }
-      } else if (processedCourse.modules[0]?.lessons[0]) {
-        setActiveLesson(processedCourse.modules[0].lessons[0])
+        
+        setUserProgress(userProgressData)
+        setCompletedLessons(new Set(userProgressData.completedLessons))
+        
+        if (userProgressData.currentLesson) {
+          const lesson = findLessonById(processedCourse, userProgressData.currentLesson)
+          if (lesson) {
+            setActiveLesson(lesson)
+          }
+        } else if (processedCourse.modules[0]?.lessons[0]) {
+          setActiveLesson(processedCourse.modules[0].lessons[0])
+        }
+      } else {
+        setUserProgress(null)
+        setCompletedLessons(new Set())
+        
+        if (processedCourse.modules[0]?.lessons[0]) {
+          setActiveLesson(processedCourse.modules[0].lessons[0])
+        }
       }
-    } else {
-      // User is not enrolled - set userProgress to null
-      console.log('User is not enrolled or progress not found. Status:', progressResponse.status)
-      setUserProgress(null)
-      setCompletedLessons(new Set())
       
-      // Still set active lesson for preview purposes
-      if (processedCourse.modules[0]?.lessons[0]) {
-        setActiveLesson(processedCourse.modules[0].lessons[0])
-      }
+    } catch (err: any) {
+      console.error('Error fetching course:', err)
+      setError(err.message || 'Failed to load course')
+      toast({
+        title: 'Error',
+        description: 'Failed to load course details',
+        variant: 'destructive',
+      })
+    } finally {
+      setLoading(false)
     }
-    
-  } catch (err: any) {
-    console.error('Error fetching course:', err)
-    setError(err.message || 'Failed to load course')
-    toast({
-      title: 'Error',
-      description: err.message || 'Failed to load course',
-      variant: 'destructive',
-    })
-  } finally {
-    setLoading(false)
   }
-}
 
   const findLessonById = (courseData: Course, lessonId: string): Lesson | null => {
     for (const module of courseData.modules) {
@@ -306,141 +296,78 @@ export default function CourseDetailPage() {
     }
   }, [slug])
 
-  // FIXED: Enrollment function - matches the working implementation
   const enrollInCourse = async () => {
-  if (!course || isEnrolling) return
-  
-  setIsEnrolling(course._id)
-  setError(null)
-  
-  try {
-    const response = await fetch(`/api/courses/${course._id}/enroll`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      }
-    })
-
-    const result = await response.json()
-    console.log('Enrollment response:', { status: response.status, result })
-
-    // Handle payment required
-    if (response.status === 402 && result.requiresPayment) {
-      setShowPaymentModal(true)
-      setIsEnrolling(null)
-      return
-    }
-
-    if (response.ok) {
-      if (result.enrolled) {
-        // Successfully enrolled
-        setCourse(prev => prev ? {
-          ...prev,
-          totalStudents: result.course?.totalStudents || prev.totalStudents + 1,
-          instructor: result.course?.instructor || prev.instructor
-        } : null)
-        
-        // Create user progress object
-        const newProgress: UserProgress = {
-          _id: result.progress?._id || `temp-${course._id}`,
-          courseId: course._id,
-          userId: 'current-user',
-          enrolled: true, // Explicitly set enrolled to true
-          progress: result.progress?.progress || 0,
-          completed: result.progress?.completed || false,
-          completedLessons: result.progress?.completedLessons || [],
-          currentLesson: result.progress?.currentLesson || course.modules[0]?.lessons[0]?._id || null,
-          timeSpent: result.progress?.timeSpent || 0,
-          lastAccessed: new Date()
-        }
-        
-        setUserProgress(newProgress)
-        setCompletedLessons(new Set(newProgress.completedLessons))
-        
-        toast({
-          title: 'Successfully Enrolled!',
-          description: 'You can now start learning immediately',
-          variant: 'default',
-        })
-
-        setShowEnrollmentSuccess(true)
-        
-        if (course.modules[0]?.lessons[0]) {
-          setActiveLesson(course.modules[0].lessons[0])
-          setTimeout(() => setIsLearningMode(true), 1500)
-        }
-      } 
-      else if (result.alreadyEnrolled) {
-        toast({
-          title: 'Already Enrolled!',
-          description: 'You are already enrolled in this course',
-        })
-        
-        // User is already enrolled, update progress
-        const updatedProgress: UserProgress = {
-          _id: result.progress?._id || `temp-${course._id}`,
-          courseId: course._id,
-          userId: 'current-user',
-          enrolled: true, // Explicitly set enrolled to true
-          progress: result.progress?.progress || 0,
-          completed: result.progress?.completed || false,
-          completedLessons: result.progress?.completedLessons || [],
-          currentLesson: result.progress?.currentLesson || null,
-          timeSpent: result.progress?.timeSpent || 0,
-          lastAccessed: new Date()
-        }
-        
-        setUserProgress(updatedProgress)
-        setCompletedLessons(new Set(updatedProgress.completedLessons))
-        
-        if (result.progress?.currentLesson) {
-          const currentLesson = findLessonById(course, result.progress.currentLesson)
-          if (currentLesson) {
-            setActiveLesson(currentLesson)
-          }
-        }
-      }
-      else {
-        throw new Error('Unexpected response from server')
-      }
-    } else {
-      throw new Error(result.error || `Failed to enroll (${response.status})`)
-    }
-
-  } catch (err: any) {
-    console.error('Error enrolling:', err)
+    if (!course || isEnrolling) return
     
-    if (err.message && !err.message.includes('402')) {
-      if (err.message.includes('Unauthorized')) {
-        toast({
-          title: 'Login Required',
-          description: 'Please log in to enroll in courses',
-          variant: 'destructive',
-        })
-      } else if (err.message.includes('not found')) {
-        toast({
-          title: 'Course Not Available',
-          description: 'This course is no longer available',
-          variant: 'destructive',
-        })
-      } else {
-        toast({
-          title: 'Enrollment Failed',
-          description: err.message || 'Failed to enroll in course. Please try again.',
-          variant: 'destructive',
-        })
+    setIsEnrolling(course._id)
+    setError(null)
+    
+    try {
+      const response = await fetch(`/api/courses/${course._id}/enroll`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      })
+
+      const result = await response.json()
+
+      if (response.status === 402 && result.requiresPayment) {
+        setShowPaymentModal(true)
+        setIsEnrolling(null)
+        return
       }
+
+      if (response.ok) {
+        if (result.enrolled || result.alreadyEnrolled) {
+          const newProgress: UserProgress = {
+            _id: result.progress?._id || `temp-${course._id}`,
+            courseId: course._id,
+            userId: 'current-user',
+            enrolled: true,
+            progress: result.progress?.progress || 0,
+            completed: result.progress?.completed || false,
+            completedLessons: result.progress?.completedLessons || [],
+            currentLesson: result.progress?.currentLesson || course.modules[0]?.lessons[0]?._id || null,
+            timeSpent: result.progress?.timeSpent || 0,
+            lastAccessed: new Date()
+          }
+          
+          setUserProgress(newProgress)
+          setCompletedLessons(new Set(newProgress.completedLessons))
+          
+          toast({
+            title: '🎉 Welcome to the Course!',
+            description: 'Your learning journey begins now. Enjoy!',
+            variant: 'default',
+          })
+
+          setShowEnrollmentSuccess(true)
+          setTimeout(() => setShowEnrollmentSuccess(false), 3000)
+        } else {
+          throw new Error('Unexpected response from server')
+        }
+      } else {
+        throw new Error(result.error || 'Failed to enroll')
+      }
+
+    } catch (err: any) {
+      console.error('Error enrolling:', err)
+      
+      toast({
+        title: 'Enrollment Failed',
+        description: 'Please try again or contact support',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsEnrolling(null)
     }
-  } finally {
-    setIsEnrolling(null)
   }
-}
 
   const handlePaymentSuccess = (courseId: string) => {
     setShowPaymentModal(false)
     setShowEnrollmentSuccess(true)
     
-    // Update user progress after payment
     setUserProgress({
       _id: `temp-${courseId}`,
       courseId,
@@ -454,22 +381,13 @@ export default function CourseDetailPage() {
       lastAccessed: new Date()
     })
     
-    // Refresh course data
     fetchCourseData()
     
     toast({
-      title: '🎉 Enrollment Successful!',
-      description: 'Payment completed and you have been enrolled in the course',
+      title: '🎉 Payment Successful!',
+      description: 'Welcome aboard! Let\'s start learning.',
       variant: 'default',
     })
-    
-    setTimeout(() => {
-      setShowEnrollmentSuccess(false)
-      if (course?.modules[0]?.lessons[0]) {
-        setActiveLesson(course.modules[0].lessons[0])
-        setIsLearningMode(true)
-      }
-    }, 2000)
   }
 
   const updateProgress = async (lessonId: string, completed: boolean = false, isCurrent: boolean = true) => {
@@ -497,19 +415,10 @@ export default function CourseDetailPage() {
         
         if (completed) {
           toast({
-            title: '🎉 Progress Updated!',
-            description: 'Lesson marked as completed. Keep up the great work!',
+            title: '✨ Great Work!',
+            description: 'Lesson completed successfully!',
             variant: 'default'
           })
-
-          if (updatedProgress.completed) {
-            toast({
-              title: '🏆 Course Completed!',
-              description: `Congratulations! You've completed "${course.title}"!`,
-              variant: 'default',
-              duration: 5000
-            })
-          }
         }
       } else {
         throw new Error('Failed to update progress')
@@ -625,8 +534,8 @@ export default function CourseDetailPage() {
         setCourse(result.course)
         setNewRating({ rating: 5, review: '' })
         toast({
-          title: '⭐ Rating Submitted!',
-          description: 'Thank you for your feedback! Your review helps other students.',
+          title: '⭐ Thank You!',
+          description: 'Your review has been submitted.',
           variant: 'default',
         })
       } else {
@@ -634,11 +543,9 @@ export default function CourseDetailPage() {
       }
     } catch (err: any) {
       console.error('Error submitting rating:', err)
-      const errorMessage = err.message || 'Failed to submit rating'
-      setError(errorMessage)
       toast({
-        title: 'Rating Failed',
-        description: errorMessage,
+        title: 'Error',
+        description: 'Failed to submit review',
         variant: 'destructive',
       })
     } finally {
@@ -681,112 +588,104 @@ export default function CourseDetailPage() {
     return (completedInModule / module.lessons.length) * 100
   }
 
-  // FIXED: Enrollment Button component with proper states
-  // Replace the EnrollmentButton component in your course detail page with this:
-
-// Replace the EnrollmentButton component with this simplified version:
-
-const EnrollmentButton = () => {
-  console.log('EnrollmentButton - Current state:', {
-    userProgress: !!userProgress,
-    enrolled: userProgress?.enrolled,
-    progress: userProgress?.progress,
-    completed: userProgress?.completed,
-    isEnrolling
-  })
-
-  // User is NOT enrolled
-  if (!userProgress || userProgress.enrolled === false) {
-    console.log('Showing ENROLL button - user not enrolled')
-    return (
-      <Button
-        onClick={enrollInCourse}
-        disabled={!!isEnrolling}
-        variant="default"
-        className="w-full rounded-2xl mb-4 relative overflow-hidden group bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 shadow-lg shadow-rose-500/25 transition-all duration-200 transform hover:scale-105"
-        size="lg"
-      >
-        {isEnrolling === course?._id ? (
-          <>
-            <Loader2 className="w-5 h-5 animate-spin mr-2" />
-            Enrolling...
-          </>
-        ) : (
-          <>
-            <BookCheck className="w-5 h-5 mr-2" />
-            {course?.isFree ? 'Enroll for Free' : `Enroll Now - $${course?.price}`}
-          </>
-        )}
-        
-        {showEnrollmentSuccess && (
-          <div className="absolute inset-0 bg-green-500 animate-pulse rounded-2xl flex items-center justify-center">
-            <div className="flex items-center text-white">
-              <CheckCircle className="w-5 h-5 mr-2" />
-              Enrolled Successfully!
-            </div>
+  // Stunning Enrollment Button
+  const EnrollmentButton = () => {
+    if (!userProgress || userProgress.enrolled === false) {
+      return (
+        <Button
+          onClick={enrollInCourse}
+          disabled={!!isEnrolling}
+          className="group w-full h-12 text-sm font-semibold relative overflow-hidden bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-300"
+        >
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700" />
+          
+          <div className="relative flex items-center justify-center gap-2">
+            {isEnrolling === course?._id ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Enrolling...</span>
+              </>
+            ) : (
+              <>
+                <GraduationCap className="w-4 h-4" />
+                <span>{course?.isFree ? 'Try Sample Lesson' : `Enroll Now - $${course?.price}`}</span>
+              </>
+            )}
           </div>
-        )}
-      </Button>
-    )
-  }
+        </Button>
+      )
+    }
 
-  // User IS enrolled
-  console.log('User is enrolled, showing START/CONTINUE button')
-  
-  // User completed the course
-  if (userProgress.completed) {
+    if (userProgress.completed) {
+      return (
+        <Button
+          onClick={() => router.push(`/certificates/${course?._id}`)}
+          className="w-full h-12 text-sm font-semibold bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white rounded-xl shadow-sm"
+        >
+          <Award className="w-4 h-4 mr-2" />
+          View Certificate
+        </Button>
+      )
+    }
+
+    const hasProgress = userProgress.progress > 0
+    
     return (
       <Button
-        onClick={() => router.push(`/certificates/${course?._id}`)}
-        variant="default"
-        className="w-full rounded-2xl mb-4 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 shadow-lg shadow-green-500/25"
-        size="lg"
+        onClick={() => setIsLearningMode(true)}
+        className="w-full h-12 text-sm font-semibold bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-xl shadow-sm"
       >
-        <Award className="w-5 h-5 mr-2" />
-        View Certificate
+        <Play className="w-4 h-4 mr-2" />
+        {hasProgress ? 'Continue' : 'Start'}
       </Button>
     )
   }
 
-  // User enrolled but hasn't started or is in progress
-  const hasProgress = userProgress.progress > 0
-  console.log('Has progress:', hasProgress, 'Progress:', userProgress.progress)
-  
-  return (
-    <Button
-      onClick={() => setIsLearningMode(true)}
-      variant="default"
-      className="w-full rounded-2xl mb-4 relative overflow-hidden group bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 shadow-lg shadow-rose-500/25"
-      size="lg"
-    >
-      <div className="flex items-center">
-        {hasProgress ? (
-          <Play className="w-5 h-5 mr-2" />
-        ) : (
-          <PlayCircle className="w-5 h-5 mr-2" />
-        )}
-        {hasProgress ? 'Continue Learning' : 'Start Learning'}
-      </div>
-      {hasProgress && !userProgress.completed && (
-        <div className="absolute bottom-0 left-0 right-0 h-1 bg-rose-700/30">
-          <div 
-            className="h-full bg-rose-100 transition-all duration-1000"
-            style={{ width: `${userProgress.progress * 100}%` }}
-          />
+  // Compact Feature Cards for mobile
+  const FeatureCard = ({ icon: Icon, title, description, color }: {
+    icon: any
+    title: string
+    description: string
+    color: 'blue' | 'green' | 'purple' | 'amber'
+  }) => {
+    const colors = {
+      blue: 'from-blue-50 to-blue-100 border-blue-100',
+      green: 'from-green-50 to-green-100 border-green-100',
+      purple: 'from-purple-50 to-purple-100 border-purple-100',
+      amber: 'from-amber-50 to-amber-100 border-amber-100'
+    }
+
+    const iconColors = {
+      blue: 'text-blue-600',
+      green: 'text-green-600',
+      purple: 'text-purple-600',
+      amber: 'text-amber-600'
+    }
+
+    return (
+      <div className={`p-3 rounded-lg bg-gradient-to-br ${colors[color]} border`}>
+        <div className="flex items-center gap-2 mb-2">
+          <div className={`p-1.5 rounded-md ${color === 'blue' ? 'bg-blue-100' : color === 'green' ? 'bg-green-100' : color === 'purple' ? 'bg-purple-100' : 'bg-amber-100'}`}>
+            <Icon className={`w-3.5 h-3.5 ${iconColors[color]}`} />
+          </div>
+          <h4 className="font-semibold text-gray-900 text-sm">{title}</h4>
         </div>
-      )}
-    </Button>
-  )
-}
+        <p className="text-xs text-gray-600 leading-tight">{description}</p>
+      </div>
+    )
+  }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
-        <div className="container mx-auto px-6 py-8">
-          <div className="flex justify-center items-center min-h-96">
+      <div className="min-h-screen bg-gray-50">
+        <div className="container mx-auto px-4 py-8">
+          <div className="flex justify-center items-center min-h-[60vh]">
             <div className="text-center">
-              <Loader2 className="w-12 h-12 animate-spin text-rose-600 mx-auto mb-4" />
-              <p className="text-slate-600 dark:text-slate-400">Loading course...</p>
+              <div className="relative">
+                <div className="w-12 h-12 border-3 border-blue-200 rounded-full"></div>
+                <div className="w-12 h-12 border-3 border-blue-600 border-t-transparent rounded-full animate-spin absolute top-0"></div>
+              </div>
+              <p className="mt-4 text-sm text-gray-600">Loading course...</p>
             </div>
           </div>
         </div>
@@ -796,19 +695,33 @@ const EnrollmentButton = () => {
 
   if (error || !course) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
-        <div className="container mx-auto px-6 py-8">
+      <div className="min-h-screen bg-gray-50">
+        <div className="container mx-auto px-4 py-8">
           <div className="text-center py-12">
-            <BookOpen className="w-16 h-16 text-slate-300 dark:text-slate-600 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold text-slate-600 dark:text-slate-400 mb-2">
-              {error ? 'Error Loading Course' : 'Course Not Found'}
+            <div className="w-14 h-14 bg-gray-100 rounded-xl flex items-center justify-center mx-auto mb-4">
+              <BookOpen className="w-7 h-7 text-gray-400" />
+            </div>
+            <h2 className="text-lg font-bold text-gray-900 mb-2">
+              Course Not Available
             </h2>
-            <p className="text-slate-500 dark:text-slate-500 mb-6">
-              {error || 'The course you are looking for does not exist.'}
+            <p className="text-sm text-gray-600 mb-6 max-w-xs mx-auto">
+              This course is currently not available or may have been updated.
             </p>
-            <Button onClick={fetchCourseData} className="rounded-2xl bg-rose-600 hover:bg-rose-700">
-              Try Again
-            </Button>
+            <div className="flex flex-col gap-2">
+              <Button 
+                onClick={fetchCourseData} 
+                className="px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm"
+              >
+                Try Again
+              </Button>
+              <Button 
+                onClick={() => router.push('/courses')}
+                variant="outline"
+                className="px-5 py-2.5 rounded-lg text-sm"
+              >
+                Browse Courses
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -820,946 +733,829 @@ const EnrollmentButton = () => {
     const previousLesson = getPreviousLesson()
 
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
-        {/* Header */}
-        <div className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
-          <div className="container mx-auto px-6 py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
-                <Button
-                  variant="ghost"
-                  onClick={() => setIsLearningMode(false)}
-                  className="rounded-xl"
-                >
-                  <ArrowLeft className="w-4 h-4 mr-2" />
-                  Back to Course
-                </Button>
-                <div>
-                  <h1 className="text-xl font-bold">{course.title}</h1>
-                  <p className="text-slate-600 dark:text-slate-400 text-sm">
-                    by {course.instructor.firstName} {course.instructor.lastName}
-                  </p>
-                </div>
-              </div>
-              
-              {/* Progress */}
-              <div className="flex items-center space-x-4">
-                <div className="text-right">
-                  <p className="text-sm font-medium">Overall Progress</p>
-                  <p className="text-2xl font-bold text-rose-600">
-                    {userProgress ? Math.round(userProgress.progress * 100) : 0}%
-                  </p>
-                </div>
-                <div className="w-32">
-                  <Progress 
-                    value={userProgress ? userProgress.progress * 100 : 0} 
-                    className="h-3 rounded-full"
+      <div className="min-h-screen bg-gray-50">
+        <div className="sticky top-0 z-50 bg-white border-b">
+          <div className="px-4 py-3 flex items-center justify-between">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsLearningMode(false)}
+              className="p-1.5"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </Button>
+            <div className="flex-1 mx-3 min-w-0">
+              <h1 className="text-xs font-semibold text-gray-900 truncate">{course.title}</h1>
+              <div className="flex items-center gap-1.5 mt-1">
+                <div className="w-12 h-1 bg-gray-200 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-blue-600 transition-all duration-500"
+                    style={{ width: `${Math.round((userProgress?.progress || 0) * 100)}%` }}
                   />
                 </div>
+                <span className="text-xs font-semibold text-blue-600">
+                  {Math.round((userProgress?.progress || 0) * 100)}%
+                </span>
               </div>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowMobileCurriculum(!showMobileCurriculum)}
+              className="p-1.5"
+            >
+              <Menu className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="container px-4 py-4">
+          <div className="space-y-4">
+            <div className="bg-black rounded-lg overflow-hidden">
+              {activeLesson.video ? (
+                <video
+                  src={activeLesson.video.url}
+                  controls
+                  className="w-full aspect-video"
+                  playsInline
+                />
+              ) : (
+                <div className="aspect-video flex items-center justify-center bg-gray-900">
+                  <div className="text-center">
+                    <div className="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center mx-auto mb-3">
+                      <PlayCircle className="w-6 h-6 text-white/60" />
+                    </div>
+                    <p className="text-white/80 text-sm">Video loading...</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-lg border p-4">
+              <div className="mb-4">
+                <div className="flex items-center gap-1.5 mb-3">
+                  <Badge className="bg-blue-100 text-blue-700 border-0 text-xs px-2 py-0.5">
+                    Lesson {course.modules.flatMap(m => m.lessons).findIndex(l => l._id === activeLesson._id) + 1}
+                  </Badge>
+                  {activeLesson.isPreview && (
+                    <Badge className="bg-amber-100 text-amber-700 border-0 text-xs px-2 py-0.5">
+                      <Eye className="w-2.5 h-2.5 mr-1" />
+                      Preview
+                    </Badge>
+                  )}
+                </div>
+                
+                <h1 className="text-lg font-bold text-gray-900 mb-2">
+                  {activeLesson.title}
+                </h1>
+                
+                <p className="text-sm text-gray-600">
+                  {activeLesson.description}
+                </p>
+              </div>
+              
+              <div className="flex items-center justify-between pt-3 border-t">
+                <div className="flex items-center gap-4 text-gray-500">
+                  <div className="flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5" />
+                    <span className="text-sm">{formatDuration(activeLesson.duration)}</span>
+                  </div>
+                </div>
+                
+                <Button
+                  onClick={() => handleLessonComplete(activeLesson._id)}
+                  disabled={updatingProgress === activeLesson._id || completedLessons.has(activeLesson._id)}
+                  className={`rounded-lg text-sm px-3 py-1.5 h-8 ${
+                    completedLessons.has(activeLesson._id) 
+                      ? 'bg-green-600 hover:bg-green-700' 
+                      : 'bg-blue-600 hover:bg-blue-700'
+                  }`}
+                >
+                  {updatingProgress === activeLesson._id ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : completedLessons.has(activeLesson._id) ? (
+                    'Completed'
+                  ) : (
+                    'Mark Complete'
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            {activeLesson.resources && activeLesson.resources.length > 0 && (
+              <div className="bg-white rounded-lg border p-4">
+                <h3 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-blue-600" />
+                  Lesson Resources
+                </h3>
+                
+                <div className="space-y-2">
+                  {activeLesson.resources.map((resource, index) => (
+                    <div
+                      key={index}
+                      className="p-3 bg-gray-50 rounded border hover:border-blue-300 transition-colors cursor-pointer"
+                      onClick={() => window.open(resource.url, '_blank')}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 bg-blue-100 rounded">
+                            <Download className="w-3 h-3 text-blue-600" />
+                          </div>
+                          <div>
+                            <p className="font-medium text-gray-900 text-sm">
+                              {resource.title}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {resource.type.toUpperCase()}
+                            </p>
+                          </div>
+                        </div>
+                        <ExternalLink className="w-3 h-3 text-gray-400" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => navigateToLesson('prev')}
+                disabled={!previousLesson}
+                className="flex-1 rounded-lg text-sm py-2"
+              >
+                <ArrowLeft className="w-3.5 h-3.5 mr-1.5" />
+                Previous
+              </Button>
+
+              <Button
+                onClick={() => navigateToLesson('next')}
+                disabled={!nextLesson}
+                className="flex-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm py-2"
+              >
+                Next
+                <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
+              </Button>
             </div>
           </div>
         </div>
 
-        <div className="container mx-auto px-6 py-8">
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-            {/* Sidebar - Course Content */}
-            <div className="lg:col-span-1">
-              <Card className="rounded-2xl sticky top-24">
-                <CardHeader>
-                  <CardTitle>Course Content</CardTitle>
-                  <CardDescription>
-                    {course.totalLessons} lessons • {formatDuration(course.totalDuration)}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <div className="max-h-[calc(100vh-200px)] overflow-y-auto">
-                    {course.modules.map((module, moduleIndex) => (
-                      <div key={module._id} className="border-b border-slate-200 dark:border-slate-700 last:border-b-0">
-                        <div className="p-4 bg-slate-50 dark:bg-slate-800/50">
-                          <div className="flex items-center justify-between mb-2">
-                            <h3 className="font-semibold">
-                              {moduleIndex + 1}. {module.title}
-                            </h3>
-                            <Badge variant="secondary" className="rounded-lg">
-                              {module.lessons.length} lessons
-                            </Badge>
-                          </div>
-                          <Progress 
-                            value={calculateModuleProgress(module)} 
-                            className="h-2 rounded-full"
-                          />
+        {showMobileCurriculum && (
+          <div className="fixed inset-0 z-50 bg-white animate-in slide-in-from-right">
+            <div className="sticky top-0 bg-white border-b p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <BookOpen className="w-4 h-4 text-blue-600" />
+                  <h2 className="text-base font-semibold text-gray-900">Course Content</h2>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowMobileCurriculum(false)}
+                  className="p-1.5"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="h-[calc(100vh-64px)] overflow-y-auto p-4">
+              {course.modules.map((module, moduleIndex) => (
+                <div key={module._id} className="mb-3">
+                  <div 
+                    className="p-3 bg-gray-50 rounded border cursor-pointer hover:border-blue-300 transition-colors"
+                    onClick={() => toggleModule(moduleIndex)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 bg-blue-100 rounded flex items-center justify-center">
+                          <span className="font-semibold text-blue-700 text-xs">{moduleIndex + 1}</span>
                         </div>
+                        <div>
+                          <h3 className="font-medium text-gray-900 text-sm">{module.title}</h3>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {module.lessons.length} lessons
+                          </p>
+                        </div>
+                      </div>
+                      <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${expandedModules.has(moduleIndex) ? 'rotate-180' : ''}`} />
+                    </div>
+                  </div>
+                  
+                  {expandedModules.has(moduleIndex) && (
+                    <div className="mt-1.5 space-y-1.5 animate-in fade-in">
+                      {module.lessons.map((lesson, lessonIndex) => {
+                        const isCompleted = completedLessons.has(lesson._id)
+                        const isActive = activeLesson?._id === lesson._id
                         
-                        <div className="space-y-1 p-2">
-                          {module.lessons.map((lesson, lessonIndex) => {
-                            const isCompleted = completedLessons.has(lesson._id)
-                            const isActive = activeLesson?._id === lesson._id
-                            
-                            return (
-                              <div
-                                key={lesson._id}
-                                className={`p-3 rounded-xl cursor-pointer transition-all ${
-                                  isActive
-                                    ? 'bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800'
-                                    : 'hover:bg-slate-50 dark:hover:bg-slate-800'
-                                }`}
-                                onClick={() => handleLessonSelect(lesson)}
-                              >
-                                <div className="flex items-center space-x-3">
-                                  <div className="flex-shrink-0">
-                                    {isCompleted ? (
-                                      <CheckCircle className="w-5 h-5 text-green-500" />
-                                    ) : (
-                                      <PlayCircle className="w-5 h-5 text-slate-400" />
-                                    )}
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <p className={`text-sm font-medium ${
-                                      isActive ? 'text-rose-600' : 'text-slate-700 dark:text-slate-300'
-                                    }`}>
-                                      {lessonIndex + 1}. {lesson.title}
-                                    </p>
-                                    <div className="flex items-center space-x-2 mt-1">
-                                      <Clock className="w-3 h-3 text-slate-400" />
-                                      <span className="text-xs text-slate-500">
-                                        {formatDuration(lesson.duration)}
-                                      </span>
-                                      {lesson.isPreview && (
-                                        <Badge variant="outline" className="text-xs">
-                                          Preview
-                                        </Badge>
-                                      )}
-                                    </div>
+                        return (
+                          <div
+                            key={lesson._id}
+                            className={`p-3 rounded border cursor-pointer transition-colors ${
+                              isActive 
+                                ? 'bg-blue-600 text-white border-blue-600' 
+                                : isCompleted
+                                ? 'bg-green-50 border-green-200'
+                                : 'bg-white border-gray-200 hover:border-blue-300'
+                            }`}
+                            onClick={() => {
+                              handleLessonSelect(lesson)
+                              setShowMobileCurriculum(false)
+                            }}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className={`w-5 h-5 rounded flex items-center justify-center ${
+                                  isActive ? 'bg-white/20' : isCompleted ? 'bg-green-100' : 'bg-gray-100'
+                                }`}>
+                                  {isCompleted ? (
+                                    <Check className={`w-2.5 h-2.5 ${isActive ? 'text-white' : 'text-green-600'}`} />
+                                  ) : (
+                                    <PlayCircle className={`w-2.5 h-2.5 ${isActive ? 'text-white' : 'text-gray-500'}`} />
+                                  )}
+                                </div>
+                                <div className="flex-1">
+                                  <p className={`font-medium text-sm ${isActive ? 'text-white' : 'text-gray-900'}`}>
+                                    {lessonIndex + 1}. {lesson.title}
+                                  </p>
+                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                    <Clock className={`w-2.5 h-2.5 ${isActive ? 'text-white/80' : 'text-gray-400'}`} />
+                                    <span className={`text-xs ${isActive ? 'text-white/80' : 'text-gray-500'}`}>
+                                      {formatDuration(lesson.duration)}
+                                    </span>
                                   </div>
                                 </div>
                               </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Main Content - Video Player & Lesson Details */}
-            <div className="lg:col-span-3">
-              <div className="space-y-6">
-                {/* Video Player */}
-                <Card className="rounded-2xl overflow-hidden">
-                  {activeLesson.video ? (
-                    <div className="w-full h-[400px] lg:h-[500px] bg-black flex items-center justify-center">
-                      <video
-                        src={activeLesson.video.url}
-                        controls
-                        className="w-full h-full"
-                      />
-                    </div>
-                  ) : (
-                    <div className="h-[400px] lg:h-[500px] bg-slate-200 dark:bg-slate-700 flex items-center justify-center">
-                      <div className="text-center">
-                        <PlayCircle className="w-16 h-16 text-slate-400 mx-auto mb-4" />
-                        <p className="text-slate-600 dark:text-slate-400">No video available for this lesson</p>
-                      </div>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
-                  
-                  <CardHeader>
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <CardTitle className="text-2xl mb-2">{activeLesson.title}</CardTitle>
-                        <CardDescription className="text-lg">
-                          {activeLesson.description}
-                        </CardDescription>
-                      </div>
-                      <div className="flex space-x-2 ml-4">
-                        <Button
-                          variant={completedLessons.has(activeLesson._id) ? "default" : "outline"}
-                          onClick={() => handleLessonComplete(activeLesson._id)}
-                          disabled={updatingProgress === activeLesson._id || completedLessons.has(activeLesson._id)}
-                          className="rounded-xl"
-                        >
-                          {updatingProgress === activeLesson._id ? (
-                            <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                          ) : completedLessons.has(activeLesson._id) ? (
-                            <CheckCircle className="w-4 h-4 mr-2" />
-                          ) : (
-                            <CheckCircle className="w-4 h-4 mr-2" />
-                          )}
-                          {completedLessons.has(activeLesson._id) ? 'Completed' : 'Mark Complete'}
-                        </Button>
-                        
-                        <Button variant="outline" size="icon" className="rounded-xl">
-                          <Bookmark className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center space-x-4 text-sm text-slate-600 dark:text-slate-400">
-                      <div className="flex items-center space-x-1">
-                        <Clock className="w-4 h-4" />
-                        <span>{formatDuration(activeLesson.duration)}</span>
-                      </div>
-                      {activeLesson.isPreview && (
-                        <Badge variant="secondary">Preview</Badge>
-                      )}
-                    </div>
-                  </CardHeader>
-                </Card>
-
-                {/* Lesson Resources */}
-                {activeLesson.resources && activeLesson.resources.length > 0 && (
-                  <Card className="rounded-2xl">
-                    <CardHeader>
-                      <CardTitle className="flex items-center">
-                        <Download className="w-5 h-5 mr-2" />
-                        Lesson Resources
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        {activeLesson.resources.map((resource, index) => (
-                          <div
-                            key={index}
-                            className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800"
-                          >
-                            <div className="flex items-center space-x-3">
-                              <div className="w-8 h-8 bg-rose-100 dark:bg-rose-900/30 rounded-lg flex items-center justify-center">
-                                <Download className="w-4 h-4 text-rose-600" />
-                              </div>
-                              <div>
-                                <p className="font-medium">{resource.title}</p>
-                                <p className="text-sm text-slate-500 capitalize">{resource.type}</p>
-                              </div>
-                            </div>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => window.open(resource.url, '_blank')}
-                              className="rounded-lg"
-                            >
-                              Download
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Navigation */}
-                <div className="flex justify-between items-center">
-                  <Button
-                    variant="outline"
-                    onClick={() => navigateToLesson('prev')}
-                    disabled={!previousLesson}
-                    className="rounded-2xl"
-                  >
-                    <ArrowLeft className="w-4 h-4 mr-2" />
-                    Previous
-                  </Button>
-
-                  <div className="flex items-center space-x-2">
-                    <Button
-                      variant="outline"
-                      onClick={() => setIsLearningMode(false)}
-                      className="rounded-2xl"
-                    >
-                      <BookOpen className="w-4 h-4 mr-2" />
-                      Course Overview
-                    </Button>
-                    
-                    <Button
-                      onClick={() => handleLessonComplete(activeLesson._id)}
-                      disabled={updatingProgress === activeLesson._id || completedLessons.has(activeLesson._id)}
-                      variant={completedLessons.has(activeLesson._id) ? "default" : "default"}
-                      className="rounded-2xl bg-rose-600 hover:bg-rose-700"
-                    >
-                      {completedLessons.has(activeLesson._id) ? (
-                        <>
-                          <CheckCircle className="w-4 h-4 mr-2" />
-                          Completed
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle className="w-4 h-4 mr-2" />
-                          Mark Complete
-                        </>
-                      )}
-                    </Button>
-                  </div>
-
-                  <Button
-                    onClick={() => navigateToLesson('next')}
-                    disabled={!nextLesson}
-                    variant="default"
-                    className="rounded-2xl bg-rose-600 hover:bg-rose-700"
-                  >
-                    Next Lesson
-                    <ArrowRight className="w-4 h-4 ml-2" />
-                  </Button>
                 </div>
-              </div>
+              ))}
             </div>
           </div>
-        </div>
+        )}
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
+    <div className="min-h-screen bg-gray-50">
+      {/* Mobile Header */}
+      <div className="sticky top-0 z-50 bg-white border-b">
+        <div className="px-4 py-3 flex items-center justify-between">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => router.back()}
+            className="p-1.5"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </Button>
+          <h1 className="text-sm font-semibold text-gray-900 truncate max-w-[140px]">
+            {course.title}
+          </h1>
+          <div className="flex items-center gap-0">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="p-1.5"
+              onClick={() => setIsBookmarked(!isBookmarked)}
+            >
+              <Heart className={`w-4 h-4 ${isBookmarked ? 'fill-red-500 text-red-500' : 'text-gray-500'}`} />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Preview Video Section - Moved to TOP */}
+      {course.previewVideo && (
+        <div className="bg-white border-b">
+          <div className="px-4 py-4">
+            <h2 className="text-base font-semibold text-gray-900 mb-3">Course Preview</h2>
+            <div className="rounded-lg overflow-hidden bg-black">
+              <video
+                src={course.previewVideo.url}
+                className="w-full aspect-video"
+                controls
+                playsInline
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Course Header */}
-      <div className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
-        <div className="container mx-auto px-6 py-8">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Course Info */}
-            <div className="lg:col-span-2">
-              <div className="flex items-center space-x-2 mb-4">
-                <Badge variant="secondary" className="rounded-lg">
-                  {course.category}
-                </Badge>
-                {course.isFeatured && (
-                  <Badge variant="default" className="rounded-lg bg-rose-500 text-white">
-                    <Crown className="w-3 h-3 mr-1" />
-                    Featured
-                  </Badge>
-                )}
-                {course.aiFeatures?.hasAIAssistant && (
-                  <Badge variant="secondary" className="rounded-lg bg-blue-500 text-white">
-                    <Sparkles className="w-3 h-3 mr-1" />
-                    AI Powered
-                  </Badge>
-                )}
-              </div>
+      <div className="bg-white px-4 py-6 border-b">
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-1.5">
+            <Badge className="bg-blue-100 text-blue-700 border-0 text-xs px-2 py-0.5">
+              {course.category}
+            </Badge>
+            <Badge className="bg-gray-100 text-gray-700 border-0 text-xs px-2 py-0.5">
+              {course.level.charAt(0).toUpperCase() + course.level.slice(1)} Level
+            </Badge>
+          </div>
 
-              <h1 className="text-4xl font-serif font-bold mb-4">{course.title}</h1>
-              <p className="text-xl text-slate-600 dark:text-slate-400 mb-6">
-                {course.shortDescription}
-              </p>
+          <h1 className="text-2xl font-bold text-gray-900 leading-tight">
+            {course.title}
+          </h1>
+          
+          <p className="text-gray-600 text-sm leading-relaxed">
+            {course.shortDescription}
+          </p>
 
-              {/* Course Stats */}
-              <div className="flex flex-wrap items-center gap-6 mb-6">
-                <div className="flex items-center space-x-1">
-                  <Star className="w-5 h-5 fill-yellow-400 text-yellow-400" />
-                  <span className="font-semibold">{course.averageRating.toFixed(1)}</span>
-                  <span className="text-slate-500">({course.totalReviews} reviews)</span>
-                </div>
-                <div className="flex items-center space-x-1">
-                  <Users className="w-5 h-5 text-slate-400" />
-                  <span>{course.totalStudents} students</span>
-                </div>
-                <div className="flex items-center space-x-1">
-                  <Clock className="w-5 h-5 text-slate-400" />
-                  <span>{formatDuration(course.totalDuration)}</span>
-                </div>
-                <div className="flex items-center space-x-1">
-                  <BookOpen className="w-5 h-5 text-slate-400" />
-                  <span>{course.totalLessons} lessons</span>
+          <div className="flex items-center justify-between py-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-10 h-10 rounded-lg overflow-hidden bg-gradient-to-br from-blue-100 to-purple-100">
+                  <img
+                    src={course.instructor.avatar || '/placeholder-avatar.jpg'}
+                    alt={course.instructor.username}
+                    className="w-full h-full object-cover"
+                  />
                 </div>
               </div>
-
-              {/* Instructor */}
-              <div className="flex items-center space-x-3 mb-6">
-                <img
-                  src={course.instructor.avatar || '/default-avatar.png'}
-                  alt={course.instructor.username}
-                  className="w-12 h-12 rounded-full"
-                  onError={(e) => {
-                    const target = e.target as HTMLImageElement
-                    target.src = '/default-avatar.png'
-                  }}
-                />
-                <div>
-                  <p className="font-semibold">
-                    {course.instructor.firstName} {course.instructor.lastName}
-                  </p>
-                  <p className="text-slate-600 dark:text-slate-400 text-sm">
-                    Instructor
-                  </p>
+              <div>
+                <p className="font-semibold text-gray-900 text-sm">
+                  {course.instructor.firstName} {course.instructor.lastName}
+                </p>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                  <span className="text-xs font-medium text-gray-900">{course.instructor.rating?.toFixed(1) || '4.8'}</span>
+                  <span className="text-xs text-gray-500">• Instructor</span>
                 </div>
               </div>
             </div>
+          </div>
 
-            {/* Enrollment Card */}
-            <div className="lg:col-span-1">
-              <Card className="rounded-2xl sticky top-24">
-                <CardContent className="p-6">
-                  {/* Course Thumbnail */}
-                  <div className="mb-4 rounded-xl overflow-hidden">
-                    <img
-                      src={course.thumbnail.url}
-                      alt={course.title}
-                      className="w-full h-48 object-cover"
-                      onError={(e) => {
-                        const target = e.target as HTMLImageElement
-                        target.src = '/default-thumbnail.jpg'
-                      }}
-                    />
-                  </div>
-
-                  {/* Price */}
-                  <div className="text-3xl font-bold text-rose-600 mb-4">
-                    {course.isFree ? 'Free' : `$${course.price}`}
-                  </div>
-
-                  {/* Enrollment Button */}
-                  <EnrollmentButton />
-
-                  {/* Progress for enrolled users */}
-                  {userProgress?.enrolled && (
-                    <div className="mb-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium">Your Progress</span>
-                        <span className="text-sm font-bold text-rose-600">
-                          {Math.round(userProgress.progress * 100)}%
-                        </span>
-                      </div>
-                      <Progress value={userProgress.progress * 100} className="h-2" />
-                      {userProgress.progress > 0 && userProgress.progress < 1 && (
-                        <div className="flex items-center space-x-2 mt-2">
-                          <TrendingUp className="w-4 h-4 text-green-500" />
-                          <span className="text-xs text-green-600">
-                            In Progress - {Math.round(userProgress.progress * 100)}% complete
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Preview Video Section */}
-                  {course.previewVideo && (
-                    <div className="mb-4">
-                      <div className="flex items-center space-x-2 mb-3">
-                        <Video className="w-4 h-4 text-rose-500" />
-                        <span className="font-semibold text-sm">Preview this course</span>
-                      </div>
-                      <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700">
-                        <div className="h-32 bg-black flex items-center justify-center">
-                          <video
-                            src={course.previewVideo.url}
-                            controls
-                            className="w-full h-full"
-                          />
-                        </div>
-                      </div>
-                      <p className="text-xs text-slate-500 mt-2 text-center">
-                        Watch a free preview of this course
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Course Stats */}
-                  <div className="grid grid-cols-3 gap-4 py-4 border-y border-slate-200 dark:border-slate-700 mb-4">
-                    <div className="text-center">
-                      <div className="flex items-center justify-center space-x-1 mb-1">
-                        <BookOpen className="w-4 h-4 text-slate-400" />
-                        <span className="font-bold text-lg">{course.totalLessons}</span>
-                      </div>
-                      <span className="text-xs text-slate-500">Lessons</span>
-                    </div>
-                    <div className="text-center">
-                      <div className="flex items-center justify-center space-x-1 mb-1">
-                        <Clock className="w-4 h-4 text-slate-400" />
-                        <span className="font-bold text-lg">{formatDuration(course.totalDuration)}</span>
-                      </div>
-                      <span className="text-xs text-slate-500">Duration</span>
-                    </div>
-                    <div className="text-center">
-                      <div className="flex items-center justify-center space-x-1 mb-1">
-                        <Users className="w-4 h-4 text-slate-400" />
-                        <span className="font-bold text-lg">{course.totalStudents}</span>
-                      </div>
-                      <span className="text-xs text-slate-500">Students</span>
-                    </div>
-                  </div>
-
-                  {/* Guarantee */}
-                  <div className="text-center text-sm text-slate-500 mb-4">
-                    <Shield className="w-4 h-4 inline mr-1" />
-                    30-day money-back guarantee
-                  </div>
-
-                  {/* Quick Actions */}
-                  <div className="flex space-x-2 mb-4">
-                    <Button variant="outline" className="flex-1 rounded-xl">
-                      <Heart className="w-4 h-4 mr-2" />
-                      Wishlist
-                    </Button>
-                    <Button variant="outline" className="flex-1 rounded-xl">
-                      <Share2 className="w-4 h-4 mr-2" />
-                      Share
-                    </Button>
-                  </div>
-
-                  {/* Course Features */}
-                  <div className="mb-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl">
-                    <h4 className="font-semibold mb-3 flex items-center">
-                      <CheckCircle className="w-4 h-4 mr-2 text-green-500" />
-                      This course includes:
-                    </h4>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex items-center">
-                        <CheckCircle className="w-3 h-3 text-green-500 mr-2 flex-shrink-0" />
-                        <span>Lifetime access</span>
-                      </div>
-                      <div className="flex items-center">
-                        <CheckCircle className="w-3 h-3 text-green-500 mr-2 flex-shrink-0" />
-                        <span>Certificate of completion</span>
-                      </div>
-                      <div className="flex items-center">
-                        <CheckCircle className="w-3 h-3 text-green-500 mr-2 flex-shrink-0" />
-                        <span>Downloadable resources</span>
-                      </div>
-                      {course.aiFeatures?.hasAIAssistant && (
-                        <div className="flex items-center">
-                          <CheckCircle className="w-3 h-3 text-green-500 mr-2 flex-shrink-0" />
-                          <span>AI Learning Assistant</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* AI Features */}
-                  {course.aiFeatures && (
-                    <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
-                      <h4 className="font-semibold mb-2 flex items-center">
-                        <Sparkles className="w-4 h-4 mr-2 text-blue-500" />
-                        AI Enhanced Learning
-                      </h4>
-                      <div className="space-y-1 text-sm">
-                        {course.aiFeatures.hasAIAssistant && (
-                          <div className="flex items-center">
-                            <div className="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
-                            <span>Smart AI Assistant</span>
-                          </div>
-                        )}
-                        {course.aiFeatures.hasPersonalizedLearning && (
-                          <div className="flex items-center">
-                            <div className="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
-                            <span>Personalized Learning Path</span>
-                          </div>
-                        )}
-                        {course.aiFeatures.hasProgressTracking && (
-                          <div className="flex items-center">
-                            <div className="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
-                            <span>Advanced Progress Tracking</span>
-                          </div>
-                        )}
-                        {course.aiFeatures.hasSmartRecommendations && (
-                          <div className="flex items-center">
-                            <div className="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
-                            <span>Smart Recommendations</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+          <div className="grid grid-cols-3 gap-3 py-3 border-y">
+            <div className="text-center">
+              <div className="flex items-center justify-center gap-1.5 mb-1">
+                <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                <span className="font-bold text-gray-900">{course.averageRating.toFixed(1)}</span>
+              </div>
+              <p className="text-xs text-gray-500">Rating</p>
+            </div>
+            
+            <div className="text-center">
+              <div className="flex items-center justify-center gap-1.5 mb-1">
+                <BookOpen className="w-4 h-4 text-blue-600" />
+                <span className="font-bold text-gray-900">{course.totalLessons}</span>
+              </div>
+              <p className="text-xs text-gray-500">Lessons</p>
+            </div>
+            
+            <div className="text-center">
+              <div className="flex items-center justify-center gap-1.5 mb-1">
+                <Users className="w-4 h-4 text-emerald-600" />
+                <span className="font-bold text-gray-900">{course.totalStudents}</span>
+              </div>
+              <p className="text-xs text-gray-500">Students</p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Course Content */}
-      <div className="container mx-auto px-6 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Main Content */}
-          <div className="lg:col-span-2">
-            {/* Navigation Tabs */}
-            <div className="flex border-b border-slate-200 dark:border-slate-700 mb-8">
-              {['overview', 'curriculum', 'reviews', 'instructor'].map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-2 font-medium capitalize border-b-2 transition-colors ${
-                    activeTab === tab
-                      ? 'border-rose-500 text-rose-600'
-                      : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                  }`}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
+      {/* Tab Navigation */}
+      <div className="sticky top-[60px] z-40 bg-white border-b">
+        <div className="flex overflow-x-auto px-4 -mb-px">
+          {[
+            { id: 'overview', label: 'Overview', icon: BookOpen },
+            { id: 'curriculum', label: 'Curriculum', icon: GraduationCap },
+            { id: 'reviews', label: 'Reviews', icon: Star },
+            { id: 'instructor', label: 'Instructor', icon: UserCheck }
+          ].map((tab) => {
+            const Icon = tab.icon
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`flex items-center gap-1.5 px-4 py-3 font-medium border-b-2 whitespace-nowrap text-sm ${
+                  activeTab === tab.id
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {tab.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
 
-            {/* Tab Content */}
-            {activeTab === 'overview' && (
-              <div className="space-y-8">
-                {/* Course Description */}
+      {/* Main Content */}
+      <div className="px-4 py-6">
+        <div className="space-y-6">
+          {activeTab === 'overview' && (
+            <>
+              <div className="space-y-4">
                 <div>
-                  <h3 className="text-2xl font-bold mb-4">About This Course</h3>
-                  <p className="text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-line">
+                  <h3 className="text-lg font-bold text-gray-900 mb-3">About This Course</h3>
+                  <p className="text-gray-700 text-sm leading-relaxed whitespace-pre-line">
                     {course.description}
                   </p>
                 </div>
 
-                {/* Learning Outcomes */}
                 <div>
-                  <h3 className="text-2xl font-bold mb-4">What You'll Learn</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <h3 className="text-lg font-bold text-gray-900 mb-3">What You'll Learn</h3>
+                  <div className="space-y-2">
                     {course.learningOutcomes.map((outcome, index) => (
-                      <div key={index} className="flex items-center space-x-3">
-                        <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0" />
-                        <span>{outcome}</span>
+                      <div key={index} className="flex items-start gap-2 p-2.5 bg-gray-50 rounded-lg">
+                        <Check className="w-3.5 h-3.5 text-green-600 flex-shrink-0 mt-0.5" />
+                        <span className="font-medium text-gray-900 text-sm">{outcome}</span>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                {/* Requirements */}
                 <div>
-                  <h3 className="text-2xl font-bold mb-4">Requirements</h3>
-                  <ul className="list-disc list-inside space-y-2 text-slate-700 dark:text-slate-300">
+                  <h3 className="text-lg font-bold text-gray-900 mb-3">Requirements</h3>
+                  <div className="space-y-2">
                     {course.requirements.map((requirement, index) => (
-                      <li key={index}>{requirement}</li>
+                      <div key={index} className="flex items-center gap-2 p-2.5 bg-gray-50 rounded-lg">
+                        <div className="w-5 h-5 bg-blue-100 rounded flex items-center justify-center">
+                          <span className="font-medium text-blue-700 text-xs">{index + 1}</span>
+                        </div>
+                        <span className="font-medium text-gray-900 text-sm">{requirement}</span>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                 </div>
               </div>
-            )}
+            </>
+          )}
 
-            {activeTab === 'curriculum' && (
-              <div className="space-y-4">
-                <h3 className="text-2xl font-bold mb-6">Course Content</h3>
-                {course.modules.map((module, moduleIndex) => (
-                  <Card key={module._id || moduleIndex} className="rounded-2xl">
-                    <CardHeader 
-                      className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-                      onClick={() => toggleModule(moduleIndex)}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <CardTitle className="flex items-center space-x-3">
-                            <span className="w-8 h-8 bg-rose-100 dark:bg-rose-900/30 rounded-lg flex items-center justify-center text-rose-600 font-bold text-sm">
-                              {moduleIndex + 1}
-                            </span>
-                            <span>{module.title}</span>
-                          </CardTitle>
-                          <CardDescription className="mt-2">
-                            {module.description}
-                          </CardDescription>
-                        </div>
-                        <div className="flex items-center space-x-4">
-                          <span className="text-sm text-slate-500">
-                            {module.lessons.length} lessons • {formatDuration(module.lessons.reduce((total, lesson) => total + lesson.duration, 0))}
-                          </span>
-                          {expandedModules.has(moduleIndex) ? (
-                            <ChevronUp className="w-5 h-5 text-slate-400" />
-                          ) : (
-                            <ChevronDown className="w-5 h-5 text-slate-400" />
-                          )}
-                        </div>
-                      </div>
-                    </CardHeader>
-                    {expandedModules.has(moduleIndex) && (
-                      <CardContent className="pt-0">
-                        <div className="space-y-2">
-                          {module.lessons.map((lesson, lessonIndex) => (
-                            <div
-                              key={lesson._id || lessonIndex}
-                              className="flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-slate-800"
-                            >
-                              <div className="flex items-center space-x-3">
-                                <PlayCircle className="w-5 h-5 text-slate-400" />
-                                <div>
-                                  <p className="font-medium">{lesson.title}</p>
-                                  <p className="text-sm text-slate-500">
-                                    {formatDuration(lesson.duration)}
-                                    {lesson.isPreview && (
-                                      <Badge variant="outline" className="ml-2 text-xs">
-                                        Preview
-                                      </Badge>
-                                    )}
-                                  </p>
-                                </div>
-                              </div>
-                              {userProgress?.enrolled && (
-                                <div className="flex items-center space-x-2">
-                                  {completedLessons.has(lesson._id) && (
-                                    <CheckCircle className="w-4 h-4 text-green-500" />
-                                  )}
-                                  <Button 
-                                    variant="outline" 
-                                    size="sm" 
-                                    className="rounded-lg"
-                                    onClick={() => {
-                                      setActiveLesson(lesson)
-                                      setIsLearningMode(true)
-                                      updateProgress(lesson._id, false, true)
-                                    }}
-                                  >
-                                    {completedLessons.has(lesson._id) ? 'Review' : 'Start'}
-                                  </Button>
-                                </div>
-                              )}
-                              {lesson.isPreview && lesson.video && !userProgress?.enrolled && (
-                                <Button 
-                                  variant="outline" 
-                                  size="sm" 
-                                  className="rounded-lg"
-                                  onClick={() => handlePreviewLesson(lesson)}
-                                >
-                                  Preview
-                                </Button>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </CardContent>
-                    )}
-                  </Card>
-                ))}
-              </div>
-            )}
-
-            {activeTab === 'reviews' && (
-              <div className="space-y-8">
-                {/* Rating Summary */}
-                <div className="flex items-start space-x-8">
-                  <div className="text-center">
-                    <div className="text-5xl font-bold text-rose-600 mb-2">
-                      {course.averageRating.toFixed(1)}
-                    </div>
-                    <div className="flex items-center justify-center mb-1">
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <Star
-                          key={star}
-                          className={`w-5 h-5 ${
-                            star <= Math.floor(course.averageRating)
-                              ? 'fill-yellow-400 text-yellow-400'
-                              : 'text-slate-300'
-                          }`}
-                        />
-                      ))}
-                    </div>
-                    <p className="text-slate-500">
-                      {course.totalReviews} reviews
+          {activeTab === 'curriculum' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">Course Curriculum</h3>
+                  <p className="text-gray-600 text-sm mt-0.5">
+                    {course.totalLessons} lessons
+                  </p>
+                </div>
+                {userProgress?.enrolled && (
+                  <div className="text-right">
+                    <p className="text-xs text-gray-500">Progress</p>
+                    <p className="text-base font-bold text-blue-600">
+                      {Math.round(userProgress.progress * 100)}%
                     </p>
-                  </div>
-
-                  {/* Add Review */}
-                  <div className="flex-1">
-                    <h4 className="font-semibold mb-4">Add Your Review</h4>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Rating</label>
-                        <div className="flex space-x-1">
-                          {[1, 2, 3, 4, 5].map((star) => (
-                            <button
-                              key={star}
-                              type="button"
-                              onClick={() => setNewRating(prev => ({ ...prev, rating: star }))}
-                              className="p-1"
-                            >
-                              <Star
-                                className={`w-6 h-6 ${
-                                  star <= newRating.rating
-                                    ? 'fill-yellow-400 text-yellow-400'
-                                    : 'text-slate-300'
-                                }`}
-                              />
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Review</label>
-                        <Textarea
-                          value={newRating.review}
-                          onChange={(e) => setNewRating(prev => ({ ...prev, review: e.target.value }))}
-                          placeholder="Share your experience with this course..."
-                          className="rounded-xl min-h-[100px]"
-                        />
-                      </div>
-                      <Button
-                        onClick={submitRating}
-                        disabled={isSubmittingRating || !newRating.rating}
-                        className="rounded-xl bg-rose-600 hover:bg-rose-700"
-                      >
-                        {isSubmittingRating ? (
-                          <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                        ) : (
-                          <MessageCircle className="w-4 h-4 mr-2" />
-                        )}
-                        Submit Review
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Reviews List */}
-                <div className="space-y-6">
-                  {course.ratings.map((rating) => (
-                    <Card key={rating._id} className="rounded-2xl">
-                      <CardContent className="p-6">
-                        <div className="flex items-start space-x-4">
-                          <img
-                            src={rating.user.avatar || '/default-avatar.png'}
-                            alt={rating.user.username}
-                            className="w-10 h-10 rounded-full"
-                            onError={(e) => {
-                              const target = e.target as HTMLImageElement
-                              target.src = '/default-avatar.png'
-                            }}
-                          />
-                          <div className="flex-1">
-                            <div className="flex items-center justify-between mb-2">
-                              <div>
-                                <p className="font-semibold">
-                                  {rating.user.firstName} {rating.user.lastName}
-                                </p>
-                                <div className="flex items-center space-x-1">
-                                  {[1, 2, 3, 4, 5].map((star) => (
-                                    <Star
-                                      key={star}
-                                      className={`w-4 h-4 ${
-                                        star <= rating.rating
-                                          ? 'fill-yellow-400 text-yellow-400'
-                                          : 'text-slate-300'
-                                      }`}
-                                    />
-                                  ))}
-                                </div>
-                              </div>
-                              <span className="text-sm text-slate-500">
-                                {new Date(rating.createdAt).toLocaleDateString()}
-                              </span>
-                            </div>
-                            {rating.review && (
-                              <p className="text-slate-700 dark:text-slate-300">
-                                {rating.review}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'instructor' && course.instructor && (
-              <div className="space-y-6">
-                <div className="flex items-start space-x-6">
-                  <img
-                    src={course.instructor.avatar || '/default-avatar.png'}
-                    alt={course.instructor.username}
-                    className="w-20 h-20 rounded-full"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement
-                      target.src = '/default-avatar.png'
-                    }}
-                  />
-                  <div>
-                    <h3 className="text-2xl font-bold mb-2">
-                      {course.instructor.firstName} {course.instructor.lastName}
-                    </h3>
-                    <p className="text-slate-600 dark:text-slate-400 mb-4">
-                      {course.instructor.bio || 'Experienced instructor passionate about teaching.'}
-                    </p>
-                    <div className="flex items-center space-x-4 text-sm">
-                      <div className="flex items-center space-x-1">
-                        <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                        <span>{course.instructor.rating?.toFixed(1) || '4.8'}</span>
-                      </div>
-                      <div className="flex items-center space-x-1">
-                        <Users className="w-4 h-4 text-slate-400" />
-                        <span>{course.instructor.totalStudents || '1,000+'}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Sidebar */}
-          <div className="lg:col-span-1 space-y-6">
-            {/* Course Features */}
-            <Card className="rounded-2xl">
-              <CardHeader>
-                <CardTitle>This Course Includes</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex items-center space-x-3">
-                  <Clock className="w-5 h-5 text-rose-500" />
-                  <span>{formatDuration(course.totalDuration)} on-demand video</span>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <BookOpen className="w-5 h-5 text-rose-500" />
-                  <span>{course.totalLessons} lessons</span>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <Download className="w-5 h-5 text-rose-500" />
-                  <span>Downloadable resources</span>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <Award className="w-5 h-5 text-rose-500" />
-                  <span>Certificate of completion</span>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <Globe className="w-5 h-5 text-rose-500" />
-                  <span>Full lifetime access</span>
-                </div>
-                {course.aiFeatures?.hasAIAssistant && (
-                  <div className="flex items-center space-x-3">
-                    <Sparkles className="w-5 h-5 text-rose-500" />
-                    <span>AI Learning Assistant</span>
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </div>
 
-            {/* Similar Courses */}
-            {course.similarCourses && course.similarCourses.length > 0 && (
-              <Card className="rounded-2xl">
-                <CardHeader>
-                  <CardTitle>Similar Courses</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {course.similarCourses.map((similarCourse) => (
-                    <div
-                      key={similarCourse._id}
-                      className="flex items-center space-x-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                      onClick={() => router.push(`/courses/${similarCourse.slug}`)}
-                    >
-                      <img
-                        src={similarCourse.thumbnail.url}
-                        alt={similarCourse.title}
-                        className="w-12 h-12 rounded-lg object-cover"
-                        onError={(e) => {
-                          const target = e.target as HTMLImageElement
-                          target.src = '/default-thumbnail.jpg'
-                        }}
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-sm line-clamp-2">{similarCourse.title}</p>
-                        <p className="text-xs text-slate-500">
-                          {similarCourse.instructor.firstName} {similarCourse.instructor.lastName}
-                        </p>
-                        <div className="flex items-center space-x-2 mt-1">
-                          <span className="text-xs font-bold text-rose-600">
-                            {similarCourse.isFree ? 'Free' : `$${similarCourse.price}`}
-                          </span>
-                          <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />
-                          <span className="text-xs">{similarCourse.averageRating.toFixed(1)}</span>
+              <div className="space-y-3">
+                {course.modules.map((module, moduleIndex) => {
+                  const moduleProgress = calculateModuleProgress(module)
+                  
+                  return (
+                    <div key={module._id} className="bg-white rounded-lg border overflow-hidden">
+                      <div 
+                        className="p-3 cursor-pointer hover:bg-gray-50 transition-colors"
+                        onClick={() => toggleModule(moduleIndex)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 bg-blue-100 rounded flex items-center justify-center">
+                              <span className="font-bold text-blue-700 text-sm">{moduleIndex + 1}</span>
+                            </div>
+                            <div className="flex-1">
+                              <h4 className="font-bold text-gray-900 text-sm">{module.title}</h4>
+                              <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
+                                <span>{module.lessons.length} lessons</span>
+                              </div>
+                            </div>
+                          </div>
+                          <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${expandedModules.has(moduleIndex) ? 'rotate-180' : ''}`} />
                         </div>
                       </div>
+                      
+                      {expandedModules.has(moduleIndex) && (
+                        <div className="px-3 pb-3 animate-in fade-in">
+                          <div className="space-y-1.5">
+                            {module.lessons.map((lesson, lessonIndex) => {
+                              const isCompleted = completedLessons.has(lesson._id)
+                              
+                              return (
+                                <div
+                                  key={lesson._id}
+                                  className="p-2.5 bg-gray-50 rounded border"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <div className={`w-6 h-6 rounded flex items-center justify-center ${
+                                        isCompleted ? 'bg-green-100' : 'bg-blue-100'
+                                      }`}>
+                                        {isCompleted ? (
+                                          <Check className="w-3 h-3 text-green-600" />
+                                        ) : (
+                                          <PlayCircle className="w-3 h-3 text-blue-600" />
+                                        )}
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="font-medium text-gray-900 text-sm truncate">
+                                          {lessonIndex + 1}. {lesson.title}
+                                        </p>
+                                        <div className="flex items-center gap-2 mt-0.5">
+                                          <div className="flex items-center gap-1 text-xs text-gray-500">
+                                            <Clock className="w-2.5 h-2.5" />
+                                            <span>{formatDuration(lesson.duration)}</span>
+                                          </div>
+                                          {lesson.isPreview && (
+                                            <Badge className="bg-amber-100 text-amber-700 text-xs px-1.5 py-0">
+                                              Preview
+                                            </Badge>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    
+                                    {userProgress?.enrolled ? (
+                                      <Button 
+                                        onClick={() => {
+                                          setActiveLesson(lesson)
+                                          setIsLearningMode(true)
+                                        }}
+                                        className={`rounded text-xs px-2 py-1 h-6 ${
+                                          isCompleted 
+                                            ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+                                            : 'bg-blue-600 hover:bg-blue-700 text-white'
+                                        }`}
+                                      >
+                                        {isCompleted ? 'Review' : 'Start'}
+                                      </Button>
+                                    ) : lesson.isPreview && lesson.video ? (
+                                      <Button 
+                                        onClick={() => handlePreviewLesson(lesson)}
+                                        className="rounded bg-amber-100 text-amber-700 hover:bg-amber-200 text-xs px-2 py-1 h-6"
+                                      >
+                                        Preview
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'reviews' && (
+            <div className="space-y-6">
+              <div className="bg-white rounded-lg border p-4">
+                <div className="text-center mb-4">
+                  <div className="text-3xl font-bold text-gray-900 mb-1">
+                    {course.averageRating.toFixed(1)}
+                  </div>
+                  <div className="flex items-center justify-center mb-2">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <Star
+                        key={star}
+                        className={`w-4 h-4 ${
+                          star <= Math.floor(course.averageRating)
+                            ? 'fill-amber-400 text-amber-400'
+                            : 'text-gray-300'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <p className="text-gray-600 text-sm">
+                    Based on {course.totalReviews} reviews
+                  </p>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Your Rating</label>
+                    <div className="flex gap-0.5">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <button
+                          key={star}
+                          type="button"
+                          onClick={() => setNewRating(prev => ({ ...prev, rating: star }))}
+                          className="p-1"
+                        >
+                          <Star
+                            className={`w-5 h-5 ${
+                              star <= newRating.rating
+                                ? 'fill-amber-400 text-amber-400'
+                                : 'text-gray-300'
+                            }`}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Your Review</label>
+                    <Textarea
+                      value={newRating.review}
+                      onChange={(e) => setNewRating(prev => ({ ...prev, review: e.target.value }))}
+                      placeholder="Share your experience..."
+                      className="min-h-[80px] rounded-lg text-sm"
+                    />
+                  </div>
+                  <Button
+                    onClick={submitRating}
+                    disabled={isSubmittingRating || !newRating.rating}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm py-2"
+                  >
+                    {isSubmittingRating ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
+                        Submitting...
+                      </>
+                    ) : (
+                      'Submit Review'
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {course.ratings.map((rating) => (
+                  <div key={rating._id} className="bg-white rounded-lg border p-3">
+                    <div className="flex items-start gap-3">
+                      <div className="w-8 h-8 bg-gradient-to-br from-blue-100 to-purple-100 rounded flex items-center justify-center flex-shrink-0">
+                        <span className="font-bold text-blue-700 text-xs">
+                          {rating.user.firstName.charAt(0)}
+                        </span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-col mb-2">
+                          <p className="font-bold text-gray-900 text-sm">
+                            {rating.user.firstName} {rating.user.lastName}
+                          </p>
+                          <div className="flex items-center gap-0.5 mt-0.5">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <Star
+                                key={star}
+                                className={`w-3 h-3 ${
+                                  star <= rating.rating
+                                    ? 'fill-amber-400 text-amber-400'
+                                    : 'text-gray-300'
+                                }`}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                        {rating.review && (
+                          <p className="text-gray-700 text-sm">{rating.review}</p>
+                        )}
+                        <span className="text-xs text-gray-500 mt-1.5 block">
+                          {new Date(rating.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'instructor' && course.instructor && (
+            <div className="space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="w-12 h-12 rounded-lg overflow-hidden bg-gradient-to-br from-blue-100 to-purple-100">
+                  <img
+                    src={course.instructor.avatar || '/placeholder-avatar.jpg'}
+                    alt={course.instructor.username}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">
+                    {course.instructor.firstName} {course.instructor.lastName}
+                  </h3>
+                  <p className="text-gray-600 text-sm mt-0.5">
+                    Expert Instructor
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="font-bold text-gray-900 mb-2">About Instructor</h4>
+                <p className="text-gray-700 text-sm leading-relaxed">
+                  {course.instructor.bio || 'Expert instructor with years of experience in the field, dedicated to helping students achieve their goals.'}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="p-2.5 bg-blue-50 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                    <div>
+                      <p className="font-bold text-gray-900">
+                        {course.instructor.rating?.toFixed(1) || '4.8'}
+                      </p>
+                      <p className="text-xs text-gray-500">Rating</p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="p-2.5 bg-green-50 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <Users className="w-3.5 h-3.5 text-green-600" />
+                    <div>
+                      <p className="font-bold text-gray-900">
+                        {course.instructor.totalStudents?.toLocaleString() || '1,000+'}
+                      </p>
+                      <p className="text-xs text-gray-500">Students</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="font-bold text-gray-900 mb-2">Expertise</h4>
+                <div className="flex flex-wrap gap-1.5">
+                  {(course.instructor.expertise || [
+                    'Industry Best Practices',
+                    'Practical Application',
+                    'Career Development'
+                  ]).map((expertise, index) => (
+                    <Badge 
+                      key={index}
+                      className="bg-blue-100 text-blue-700 border-0 text-xs px-2 py-0.5"
+                    >
+                      {expertise}
+                    </Badge>
                   ))}
-                </CardContent>
-              </Card>
-            )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Features Section */}
+      <div className="px-4 py-6 bg-gray-50 border-t">
+        <h3 className="text-lg font-bold text-gray-900 mb-4">Course Features</h3>
+        <div className="grid grid-cols-2 gap-3">
+          <FeatureCard
+            icon={Shield}
+            title="5-Year Access"
+            description="Extended access to all materials"
+            color="blue"
+          />
+          
+          <FeatureCard
+            icon={Award}
+            title="Certificate"
+            description="Earn upon completion"
+            color="green"
+          />
+          
+          <FeatureCard
+            icon={Download}
+            title="Resources"
+            description="Downloadable content"
+            color="purple"
+          />
+          
+          <FeatureCard
+            icon={Clock}
+            title="Self-Paced"
+            description="Learn at your own speed"
+            color="amber"
+          />
+        </div>
+      </div>
+
+      {/* Mobile Enrollment Footer */}
+      <div className="sticky bottom-0 z-40 bg-white border-t shadow-lg">
+        <div className="p-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-xl font-bold text-gray-900">
+                {userProgress?.enrolled ? 'Already Enrolled' : course.isFree ? 'Complimentary' : `$${course.price}`}
+              </div>
+              {!userProgress?.enrolled && !course.isFree && (
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <p className="text-gray-500 line-through text-sm">${course.price * 2}</p>
+                  <Badge className="bg-green-100 text-green-700 text-xs">
+                    50% OFF
+                  </Badge>
+                </div>
+              )}
+            </div>
+            <div className="flex-shrink-0 w-36">
+              <EnrollmentButton />
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Payment Modal */}
       {course && (
         <PaymentModal
           course={course}

@@ -219,9 +219,9 @@ export default function CoursesPage() {
       { name: 'Fashion Marketing', icon: Zap }
     ],
     levels: [
-      { name: 'beginner', icon: Rocket, color: 'from-green-500 to-emerald-500' },
-      { name: 'intermediate', icon: Target, color: 'from-yellow-500 to-orange-500' },
-      { name: 'advanced', icon: Lightning, color: 'from-red-500 to-pink-500' }
+      { name: 'beginner', icon: Rocket, color: 'bg-green-100 text-green-800 border-green-200' },
+      { name: 'intermediate', icon: Target, color: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
+      { name: 'advanced', icon: Lightning, color: 'bg-red-100 text-red-800 border-red-200' }
     ],
     durations: ['0-2 hours', '2-5 hours', '5-10 hours', '10-20 hours', '20+ hours'],
     features: [
@@ -586,24 +586,17 @@ const enrollInCourse = async (course: Course) => {
     
     if (isLoading) {
       return (
-        <Button 
-          variant="outline"
-          size="sm" 
-          className="rounded-xl border-slate-200 dark:border-slate-700"
-          disabled
-        >
-          <Loader2 className="w-3 h-3 animate-spin mr-1" />
-          Loading...
-        </Button>
+        <div className="flex items-center justify-center px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-800">
+          <Loader2 className="w-4 h-4 animate-spin text-gray-500" />
+        </div>
       )
     }
 
     if (!isEnrolled) {
       return (
         <Button 
-          variant="default"
           size="sm" 
-          className="rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 shadow-lg shadow-rose-500/25 transition-all duration-200 transform hover:scale-105"
+          className="rounded-lg bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition-all shadow-sm hover:shadow"
           onClick={(e) => {
             e.stopPropagation()
             enrollInCourse(course)
@@ -611,59 +604,43 @@ const enrollInCourse = async (course: Course) => {
           disabled={isEnrolling === course._id}
         >
           {isEnrolling === course._id ? (
-            <Loader2 className="w-3 h-3 animate-spin mr-1" />
-          ) : (
-            <BookCheck className="w-3 h-3 mr-1" />
-          )}
-          {isEnrolling === course._id ? 'Enrolling...' : 'Enroll Now'}
+            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+          ) : null}
+          {course.isFree ? 'Enroll Free' : `Enroll $${course.price}`}
         </Button>
       )
     }
 
     if (progress?.completed) {
       return (
-        <div className="flex flex-col space-y-2">
-          <div className="flex items-center space-x-1 text-xs text-green-600 bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded-full">
-            <CheckCircle className="w-3 h-3" />
-            <span>Completed</span>
-          </div>
-          <Button 
-            variant="outline"
-            size="sm" 
-            className="rounded-xl border-green-200 text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20 transition-all duration-200"
-            onClick={(e) => {
-              e.stopPropagation()
-              viewCourseDetails(course)
-            }}
-          >
-            <BookOpen className="w-3 h-3 mr-1" />
-            View Course
-          </Button>
+        <div className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+          <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
+          <span className="text-sm font-medium text-green-700 dark:text-green-300">Completed</span>
         </div>
       )
     }
 
     if (progress?.progress && progress.progress > 0) {
       return (
-        <div className="flex flex-col space-y-2 w-full">
-          <div className="flex justify-between items-center text-xs">
-            <span className="text-slate-600 dark:text-slate-400">{Math.round(progress.progress * 100)}% complete</span>
-            <span className="text-rose-600 font-medium bg-rose-50 dark:bg-rose-900/20 px-2 py-1 rounded-full">In Progress</span>
+        <div className="w-full">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-sm text-gray-600 dark:text-gray-400">{Math.round(progress.progress * 100)}%</span>
           </div>
-          <div className="relative">
-            <Progress value={progress.progress * 100} className="h-2 bg-slate-200 dark:bg-slate-700" />
-            <div className="absolute inset-0 bg-gradient-to-r from-rose-600 to-pink-600 rounded-full opacity-20"></div>
+          <div className="relative h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mb-2">
+            <div 
+              className="absolute h-full bg-black dark:bg-white rounded-full transition-all duration-500"
+              style={{ width: `${progress.progress * 100}%` }}
+            />
           </div>
           <Button 
-            variant="default"
             size="sm" 
-            className="rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 shadow-lg shadow-rose-500/25 transition-all duration-200 transform hover:scale-105"
+            className="rounded-lg bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 w-full transition-all shadow-sm hover:shadow"
             onClick={(e) => {
               e.stopPropagation()
               continueLearning(course)
             }}
           >
-            <Play className="w-3 h-3 mr-1" />
+            <Play className="w-4 h-4 mr-2" />
             Continue
           </Button>
         </div>
@@ -672,15 +649,14 @@ const enrollInCourse = async (course: Course) => {
 
     return (
       <Button 
-        variant="default"
         size="sm" 
-        className="rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 shadow-lg shadow-blue-500/25 transition-all duration-200 transform hover:scale-105"
+        className="rounded-lg bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition-all shadow-sm hover:shadow w-full"
         onClick={(e) => {
           e.stopPropagation()
           continueLearning(course)
         }}
       >
-        <Play className="w-3 h-3 mr-1" />
+        <Play className="w-4 h-4 mr-2" />
         Start Learning
       </Button>
     )
@@ -938,57 +914,34 @@ const enrollInCourse = async (course: Course) => {
   const getLevelColor = (level: string) => {
     switch (level) {
       case 'beginner':
-        return 'from-green-500 to-emerald-500'
+        return 'bg-green-100 text-green-800 border-green-200'
       case 'intermediate':
-        return 'from-yellow-500 to-orange-500'
+        return 'bg-yellow-100 text-yellow-800 border-yellow-200'
       case 'advanced':
-        return 'from-red-500 to-pink-500'
+        return 'bg-red-100 text-red-800 border-red-200'
       default:
-        return 'from-slate-500 to-slate-600'
+        return 'bg-gray-100 text-gray-800 border-gray-200'
     }
   }
 
-  // Get AI feature icon
-  const getAIFeatureIcon = (feature: string) => {
-    switch (feature) {
-      case 'hasAIAssistant':
-        return <Brain className="w-3 h-3" />
-      case 'hasPersonalizedLearning':
-        return <Target className="w-3 h-3" />
-      case 'hasSmartRecommendations':
-        return <Sparkles className="w-3 h-3" />
-      case 'hasProgressTracking':
-        return <BarChart3 className="w-3 h-3" />
-      default:
-        return <Sparkles className="w-3 h-3" />
-    }
-  }
-
-  // Enhanced Course Skeleton with better design
+  // Course Skeleton
   const CourseSkeleton = () => (
-    <Card className="rounded-2xl overflow-hidden animate-pulse border-0 bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 shadow-lg">
-      <div className="h-48 bg-gradient-to-br from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-600 relative">
-        <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent"></div>
-      </div>
-      <CardHeader className="pb-3">
-        <div className="h-6 bg-slate-200 dark:bg-slate-700 rounded-lg mb-3 w-4/5"></div>
-        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-3/4"></div>
+    <Card className="rounded-xl overflow-hidden animate-pulse border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+      <div className="h-44 bg-gray-200 dark:bg-gray-800"></div>
+      <CardHeader className="pb-4 px-5">
+        <div className="h-5 bg-gray-200 dark:bg-gray-800 rounded mb-3 w-4/5"></div>
+        <div className="h-4 bg-gray-200 dark:bg-gray-800 rounded w-3/4"></div>
       </CardHeader>
-      <CardContent className="pb-6">
-        <div className="flex justify-between mb-4">
-          <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-16"></div>
-          <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-20"></div>
-          <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-12"></div>
-        </div>
+      <CardContent className="pb-5 px-5">
         <div className="flex justify-between items-center">
-          <div className="h-6 bg-slate-200 dark:bg-slate-700 rounded w-20"></div>
-          <div className="h-8 bg-slate-200 dark:bg-slate-700 rounded-xl w-24"></div>
+          <div className="h-6 bg-gray-200 dark:bg-gray-800 rounded w-20"></div>
+          <div className="h-9 bg-gray-200 dark:bg-gray-800 rounded-lg w-24"></div>
         </div>
       </CardContent>
     </Card>
   )
 
-  // Enhanced Quick View Modal
+  // Quick View Modal
   const QuickViewModal = ({ course, onClose }: { course: Course, onClose: () => void }) => {
     const progress = userProgress[course._id]
     const isEnrolled = isUserEnrolled(course._id)
@@ -996,256 +949,135 @@ const enrollInCourse = async (course: Course) => {
     
     return (
       <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-        <div className="bg-white dark:bg-slate-800 rounded-3xl max-w-4xl w-full max-h-[90vh] overflow-y-auto border border-slate-200/50 dark:border-slate-700/50 shadow-2xl">
+        <div className="bg-white dark:bg-gray-900 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-gray-200 dark:border-gray-800 shadow-2xl">
           <div className="relative">
             <img
               src={course.thumbnail.url}
               alt={course.title}
-              className="w-full h-64 object-cover rounded-t-3xl"
+              className="w-full h-56 object-cover rounded-t-xl"
             />
             <button
               onClick={onClose}
-              className="absolute top-4 right-4 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm rounded-full p-2 hover:bg-white dark:hover:bg-slate-700 transition-all duration-200 shadow-lg hover:shadow-xl"
+              className="absolute top-4 right-4 bg-white dark:bg-gray-900 rounded-lg p-2 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors shadow-lg"
             >
               <X className="w-5 h-5" />
             </button>
             
-            {/* Enhanced Badges */}
+            {/* Badges */}
             <div className="absolute top-4 left-4 flex flex-wrap gap-2">
-              {course.isFeatured && (
-                <Badge className="rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-white backdrop-blur-sm border-0 shadow-lg">
-                  <Crown className="w-3 h-3 mr-1" />
-                  Featured
-                </Badge>
-              )}
+              <Badge className={`rounded-lg ${getLevelColor(course.level)} border`}>
+                {course.level}
+              </Badge>
               {course.isFree && (
-                <Badge className="rounded-full bg-gradient-to-r from-green-500 to-emerald-500 text-white backdrop-blur-sm border-0 shadow-lg">
+                <Badge className="rounded-lg bg-green-500 text-white border-0">
                   Free
-                </Badge>
-              )}
-              {course.aiFeatures && (
-                <Badge className="rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 text-white backdrop-blur-sm border-0 shadow-lg">
-                  <Sparkles className="w-3 h-3 mr-1" />
-                  AI Enhanced
-                </Badge>
-              )}
-              {isEnrolled && !isLoading && (
-                <Badge className={`rounded-full backdrop-blur-sm border-0 shadow-lg ${
-                  progress?.completed 
-                    ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white'
-                    : 'bg-gradient-to-r from-blue-500 to-cyan-500 text-white'
-                }`}>
-                  {progress?.completed ? 'Completed' : 'Enrolled'}
                 </Badge>
               )}
             </div>
           </div>
           
-          <div className="p-8">
-            <div className="flex items-start justify-between mb-6">
+          <div className="p-6">
+            <div className="flex items-start justify-between mb-4">
               <div className="flex-1">
-                <h2 className="text-3xl font-bold mb-3 bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
+                <h2 className="text-2xl font-bold mb-3">
                   {course.title}
                 </h2>
-                <p className="text-slate-600 dark:text-slate-400 text-lg leading-relaxed">{course.shortDescription}</p>
+                <p className="text-gray-600 dark:text-gray-400">{course.shortDescription}</p>
               </div>
-              <span className="text-4xl font-bold bg-gradient-to-r from-rose-600 to-pink-600 bg-clip-text text-transparent ml-6">
+              <span className="text-2xl font-bold text-black dark:text-white ml-4">
                 {course.isFree ? 'Free' : `$${course.price}`}
               </span>
             </div>
 
-            {/* Enhanced Enrollment Status */}
-            {isEnrolled && !isLoading && (
-              <div className="mb-6 p-6 bg-gradient-to-r from-slate-50 to-blue-50/30 dark:from-slate-800/50 dark:to-blue-900/20 rounded-2xl border border-slate-200/50 dark:border-slate-700/50">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-semibold flex items-center text-lg">
-                      {progress?.completed ? (
-                        <>
-                          <CheckCircle className="w-6 h-6 text-green-500 mr-3" />
-                          <span className="bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent">
-                            Course Completed
-                          </span>
-                        </>
-                      ) : progress?.progress && progress.progress > 0 ? (
-                        <>
-                          <TrendingUp className="w-6 h-6 text-blue-500 mr-3" />
-                          <span className="bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
-                            In Progress - {Math.round(progress.progress * 100)}% Complete
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <BookCheck className="w-6 h-6 text-blue-500 mr-3" />
-                          <span className="bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
-                            Enrolled - Ready to Start
-                          </span>
-                        </>
-                      )}
-                    </h4>
-                    {progress?.lastAccessed && (
-                      <p className="text-sm text-slate-600 dark:text-slate-400 mt-2">
-                        Last accessed: {new Date(progress.lastAccessed).toLocaleDateString()}
-                      </p>
-                    )}
-                  </div>
-                  {progress?.progress && progress.progress > 0 && !progress.completed && (
-                    <div className="w-40">
-                      <div className="relative">
-                        <Progress value={progress.progress * 100} className="h-3 bg-slate-200 dark:bg-slate-700" />
-                        <div className="absolute inset-0 bg-gradient-to-r from-rose-600 to-pink-600 rounded-full opacity-20"></div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Enhanced Instructor Info */}
-            <div className="flex items-center space-x-4 mb-6 p-5 bg-gradient-to-r from-slate-50 to-rose-50/30 dark:from-slate-800/50 dark:to-rose-900/20 rounded-2xl border border-slate-200/50 dark:border-slate-700/50">
+            {/* Instructor Info */}
+            <div className="flex items-center space-x-3 mb-6 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
               <img
                 src={course.instructor.avatar || '/default-avatar.png'}
                 alt={course.instructor.username}
-                className="w-14 h-14 rounded-2xl border-4 border-white dark:border-slate-700 shadow-lg"
+                className="w-10 h-10 rounded-lg"
                 onError={(e) => {
                   const target = e.target as HTMLImageElement
                   target.src = '/default-avatar.png'
                 }}
               />
               <div>
-                <p className="font-bold text-lg">
+                <p className="font-medium">
                   {course.instructor.firstName} {course.instructor.lastName}
                 </p>
-                <p className="text-sm text-slate-600 dark:text-slate-400">
-                  Expert Instructor • {course.instructor.totalStudents || 0}+ students
+                <p className="text-sm text-gray-500">
+                  {course.instructor.totalStudents || 0}+ students
                 </p>
               </div>
             </div>
 
-            {/* Enhanced Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-              {[
-                { icon: Clock, value: formatDuration(course.totalDuration), label: 'Duration' },
-                { icon: BookOpen, value: course.totalLessons, label: 'Lessons' },
-                { icon: Users, value: course.totalStudents, label: 'Students' },
-                { icon: Star, value: course.averageRating || 'New', label: 'Rating' }
-              ].map((stat, index) => (
-                <div key={index} className="text-center p-4 bg-gradient-to-br from-slate-50 to-blue-50/30 dark:from-slate-800/50 dark:to-blue-900/20 rounded-2xl border border-slate-200/50 dark:border-slate-700/50 group hover:shadow-lg transition-all duration-200">
-                  <stat.icon className="w-8 h-8 text-rose-500 mx-auto mb-3 group-hover:scale-110 transition-transform" />
-                  <div className="text-lg font-bold text-slate-900 dark:text-slate-100">{stat.value}</div>
-                  <div className="text-sm text-slate-500">{stat.label}</div>
+            {/* Stats */}
+            <div className="grid grid-cols-3 gap-4 mb-6">
+              <div className="text-center p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                <div className="text-lg font-bold text-black dark:text-white">{course.totalLessons}</div>
+                <div className="text-sm text-gray-500">Lessons</div>
+              </div>
+              <div className="text-center p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                <div className="flex items-center justify-center text-lg font-bold text-black dark:text-white">
+                  <Star className="w-4 h-4 fill-yellow-400 text-yellow-400 mr-1" />
+                  {course.averageRating > 0 ? course.averageRating.toFixed(1) : 'New'}
                 </div>
-              ))}
+                <div className="text-sm text-gray-500">Rating</div>
+              </div>
+              <div className="text-center p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                <div className="text-lg font-bold text-black dark:text-white">{formatDuration(course.totalDuration)}</div>
+                <div className="text-sm text-gray-500">Duration</div>
+              </div>
             </div>
 
-            {/* Enhanced AI Features */}
-            {course.aiFeatures && (
-              <div className="mb-8 p-6 bg-gradient-to-br from-blue-50 to-cyan-50/30 dark:from-blue-900/20 dark:to-cyan-900/10 rounded-2xl border border-blue-200/50 dark:border-blue-800/50">
-                <h4 className="font-semibold mb-4 flex items-center text-xl">
-                  <Sparkles className="w-5 h-5 mr-3 text-blue-500" />
-                  <span className="bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
-                    AI Enhanced Features
-                  </span>
-                </h4>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  {Object.entries(course.aiFeatures).map(([key, value]) => 
-                    value && (
-                      <div key={key} className="flex items-center space-x-3 p-2 rounded-xl bg-white/50 dark:bg-slate-800/50">
-                        <div className="w-3 h-3 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full"></div>
-                        <span className="text-slate-700 dark:text-slate-300 capitalize">
-                          {key.replace('has', '').replace(/([A-Z])/g, ' $1').trim()}
-                        </span>
-                      </div>
-                    )
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Enhanced Action Buttons */}
-            <div className="flex gap-4">
+            {/* Action Buttons */}
+            <div className="space-y-3">
               {isLoading ? (
-                <Button 
-                  variant="outline" 
-                  className="rounded-2xl border-slate-200 dark:border-slate-700"
-                  size="lg"
-                  disabled
-                >
-                  <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                  Loading...
-                </Button>
+                <div className="flex items-center justify-center px-4 py-3 rounded-lg bg-gray-100 dark:bg-gray-800">
+                  <Loader2 className="w-5 h-5 animate-spin text-gray-500" />
+                </div>
               ) : isEnrolled ? (
                 progress?.completed ? (
-                  <>
-                    <Button 
-                      onClick={() => {
-                        onClose()
-                        viewCourseDetails(course)
-                      }}
-                      variant="outline" 
-                      className="rounded-2xl border-slate-200 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-700"
-                      size="lg"
-                    >
-                      <BookOpen className="w-5 h-5 mr-2" />
-                      View Course
-                    </Button>
-                    <Button 
-                      onClick={() => {
-                        onClose()
-                        viewCourseDetails(course)
-                      }}
-                      variant="default" 
-                      className="rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 shadow-lg shadow-amber-500/25"
-                      size="lg"
-                    >
-                      <Award className="w-5 h-5 mr-2" />
-                      View Certificate
-                    </Button>
-                  </>
+                  <div className="flex items-center justify-center space-x-2 px-4 py-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+                    <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
+                    <span className="font-medium text-green-700 dark:text-green-300">Course Completed</span>
+                  </div>
                 ) : (
                   <Button 
                     onClick={() => {
                       onClose()
                       continueLearning(course)
                     }}
-                    variant="default" 
-                    className="rounded-2xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 shadow-lg shadow-rose-500/25 transition-all duration-200 transform hover:scale-105"
-                    size="lg"
+                    className="w-full rounded-lg bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 py-3 text-base"
                   >
                     <Play className="w-5 h-5 mr-2" />
                     {progress?.progress && progress.progress > 0 ? 'Continue Learning' : 'Start Learning'}
                   </Button>
                 )
               ) : (
-                <>
-                  <Button 
-                    variant="default"
-                    size="lg" 
-                    className="rounded-2xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 shadow-lg shadow-rose-500/25 transition-all duration-200 transform hover:scale-105"
-                    onClick={() => enrollInCourse(course)}
-                    disabled={isEnrolling === course._id}
-                  >
-                    {isEnrolling === course._id ? (
-                      <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                    ) : (
-                      <BookCheck className="w-5 h-5 mr-2" />
-                    )}
-                    {isEnrolling === course._id ? 'Enrolling...' : 'Enroll Now'}
-                  </Button>
-                  <Button 
-                    onClick={() => {
-                      onClose()
-                      viewCourseDetails(course)
-                    }}
-                    variant="outline" 
-                    className="rounded-2xl border-slate-200 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-700"
-                    size="lg"
-                  >
-                    <ArrowRight className="w-5 h-5 mr-2" />
-                    View Details
-                  </Button>
-                </>
+                <Button 
+                  className="w-full rounded-lg bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 py-3 text-base"
+                  onClick={() => enrollInCourse(course)}
+                  disabled={isEnrolling === course._id}
+                >
+                  {isEnrolling === course._id ? (
+                    <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                  ) : (
+                    <BookCheck className="w-5 h-5 mr-2" />
+                  )}
+                  {isEnrolling === course._id ? 'Enrolling...' : course.isFree ? 'Enroll Free' : `Enroll for $${course.price}`}
+                </Button>
               )}
+              <Button 
+                onClick={() => {
+                  onClose()
+                  viewCourseDetails(course)
+                }}
+                variant="outline" 
+                className="w-full rounded-lg border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 py-3 text-base"
+              >
+                <BookOpen className="w-5 h-5 mr-2" />
+                View Full Details
+              </Button>
             </div>
           </div>
         </div>
@@ -1253,58 +1085,44 @@ const enrollInCourse = async (course: Course) => {
     )
   }
 
-  // Enhanced Filters Sidebar Component
+  // Filters Sidebar Component
   const FiltersSidebar = () => (
-    <Card className="rounded-3xl border border-slate-200/50 dark:border-slate-700/50 shadow-2xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-xl lg:sticky lg:top-24">
-      <CardHeader className="pb-6">
+    <Card className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 lg:sticky lg:top-6">
+      <CardHeader className="pb-4">
         <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center text-xl">
-            <Filter className="w-6 h-6 mr-3 text-rose-500" />
+          <CardTitle className="flex items-center text-lg">
+            <Filter className="w-5 h-5 mr-2 text-gray-600 dark:text-gray-400" />
             Filters
             {activeFiltersCount > 0 && (
-              <Badge className="ml-2 bg-rose-500 text-white rounded-full px-2 py-1 text-xs">
+              <Badge className="ml-2 bg-black text-white dark:bg-white dark:text-black rounded-full px-2 py-0.5 text-xs">
                 {activeFiltersCount}
               </Badge>
             )}
           </CardTitle>
-          <div className="flex items-center gap-2">
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={clearFilters}
-              className="rounded-2xl hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-900/20 transition-all duration-200"
-            >
-              Clear All
-            </Button>
-            {/* Mobile close button */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setMobileFiltersOpen(false)}
-              className="rounded-2xl lg:hidden"
-            >
-              <X className="w-4 h-4" />
-            </Button>
-          </div>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={clearFilters}
+            className="rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-sm"
+          >
+            Clear all
+          </Button>
         </div>
       </CardHeader>
-      <CardContent className="space-y-8 max-h-[calc(100vh-200px)] overflow-y-auto custom-scrollbar">
+      <CardContent className="space-y-6">
         {/* Sort Filter */}
         <div>
-          <h4 className="font-medium mb-4 flex items-center text-slate-700 dark:text-slate-300">
-            <TrendingUp className="w-5 h-5 mr-3 text-slate-400" />
-            Sort By
+          <h4 className="font-medium mb-3 text-sm text-gray-700 dark:text-gray-300">
+            Sort by
           </h4>
           <select
             value={filters.sort}
             onChange={(e) => setFilters(prev => ({ ...prev, sort: e.target.value as any }))}
-            className="w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-base focus:ring-2 focus:ring-rose-500 focus:border-transparent transition-all duration-200"
+            className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm focus:ring-2 focus:ring-black dark:focus:ring-white focus:border-transparent"
           >
             <option value="popular">Most Popular</option>
-            <option value="trending">Trending</option>
             <option value="newest">Newest</option>
             <option value="rating">Highest Rated</option>
-            <option value="duration">Longest</option>
             <option value="price-low">Price: Low to High</option>
             <option value="price-high">Price: High to Low</option>
           </select>
@@ -1312,27 +1130,25 @@ const enrollInCourse = async (course: Course) => {
 
         {/* Price Filter */}
         <div>
-          <h4 className="font-medium mb-4 flex items-center text-slate-700 dark:text-slate-300">
-            <Award className="w-5 h-5 mr-3 text-slate-400" />
+          <h4 className="font-medium mb-3 text-sm text-gray-700 dark:text-gray-300">
             Price
           </h4>
-          <div className="space-y-3">
+          <div className="space-y-2">
             {[
               { value: 'all', label: 'All Courses' },
               { value: 'free', label: 'Free Only' },
               { value: 'paid', label: 'Paid Only' }
             ].map((price) => (
-              <label key={price.value} className="flex items-center space-x-4 cursor-pointer group p-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all duration-200">
-                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
-                  filters.price === price.value 
-                    ? 'border-rose-500 bg-rose-500 shadow-lg shadow-rose-500/25' 
-                    : 'border-slate-300 group-hover:border-rose-300 dark:border-slate-600'
-                }`}>
-                  {filters.price === price.value && (
-                    <div className="w-2 h-2 bg-white rounded-full"></div>
-                  )}
-                </div>
-                <span className="group-hover:text-rose-600 transition-colors font-medium">{price.label}</span>
+              <label key={price.value} className="flex items-center space-x-3 cursor-pointer group">
+                <input
+                  type="radio"
+                  name="price"
+                  value={price.value}
+                  checked={filters.price === price.value}
+                  onChange={() => setFilters(prev => ({ ...prev, price: price.value as any }))}
+                  className="w-4 h-4 text-black dark:text-white border-gray-300 dark:border-gray-600"
+                />
+                <span className="text-sm">{price.label}</span>
               </label>
             ))}
           </div>
@@ -1340,22 +1156,21 @@ const enrollInCourse = async (course: Course) => {
 
         {/* Level Filter */}
         <div>
-          <h4 className="font-medium mb-4 flex items-center text-slate-700 dark:text-slate-300">
-            <Target className="w-5 h-5 mr-3 text-slate-400" />
+          <h4 className="font-medium mb-3 text-sm text-gray-700 dark:text-gray-300">
             Level
           </h4>
-          <div className="space-y-3">
+          <div className="space-y-2">
             {filterOptions.levels.map((level) => (
-              <label key={level.name} className="flex items-center space-x-4 cursor-pointer group p-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all duration-200">
+              <label key={level.name} className="flex items-center space-x-3 cursor-pointer group">
                 <input
                   type="checkbox"
                   checked={filters.level.includes(level.name)}
                   onChange={() => toggleFilter('level', level.name)}
-                  className="w-5 h-5 text-rose-500 rounded focus:ring-rose-500 transition-all duration-200"
+                  className="w-4 h-4 text-black dark:text-white rounded border-gray-300 dark:border-gray-600"
                 />
-                <div className={`px-3 py-1 rounded-full text-xs font-medium bg-gradient-to-r ${level.color} text-white`}>
-                  {level.name}
-                </div>
+                <span className={`px-3 py-1.5 rounded text-xs font-medium ${level.color} border`}>
+                  {level.name.charAt(0).toUpperCase() + level.name.slice(1)}
+                </span>
               </label>
             ))}
           </div>
@@ -1363,72 +1178,20 @@ const enrollInCourse = async (course: Course) => {
 
         {/* Category Filter */}
         <div>
-          <h4 className="font-medium mb-4 flex items-center text-slate-700 dark:text-slate-300">
-            <BookOpen className="w-5 h-5 mr-3 text-slate-400" />
+          <h4 className="font-medium mb-3 text-sm text-gray-700 dark:text-gray-300">
             Category
           </h4>
-          <div className="space-y-3">
-            {filterOptions.categories.map((category) => (
-              <label key={category.name} className="flex items-center space-x-4 cursor-pointer group p-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all duration-200">
+          <div className="space-y-2">
+            {filterOptions.categories.slice(0, 5).map((category) => (
+              <label key={category.name} className="flex items-center space-x-3 cursor-pointer group">
                 <input
                   type="checkbox"
                   checked={filters.category.includes(category.name)}
                   onChange={() => toggleFilter('category', category.name)}
-                  className="w-5 h-5 text-rose-500 rounded focus:ring-rose-500 transition-all duration-200"
+                  className="w-4 h-4 text-black dark:text-white rounded border-gray-300 dark:border-gray-600"
                 />
-                <div className="flex items-center space-x-2">
-                  <category.icon className="w-4 h-4 text-slate-400 group-hover:text-rose-500 transition-colors" />
-                  <span className="group-hover:text-rose-600 transition-colors font-medium">{category.name}</span>
-                </div>
+                <span className="text-sm">{category.name}</span>
               </label>
-            ))}
-          </div>
-        </div>
-
-        {/* Features Filter */}
-        <div>
-          <h4 className="font-medium mb-4 flex items-center text-slate-700 dark:text-slate-300">
-            <Sparkles className="w-5 h-5 mr-3 text-slate-400" />
-            Features
-          </h4>
-          <div className="space-y-3">
-            {filterOptions.features.map((feature) => (
-              <label key={feature.name} className="flex items-center space-x-4 cursor-pointer group p-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all duration-200">
-                <input
-                  type="checkbox"
-                  checked={filters.features.includes(feature.name)}
-                  onChange={() => toggleFilter('features', feature.name)}
-                  className="w-5 h-5 text-rose-500 rounded focus:ring-rose-500 transition-all duration-200"
-                />
-                <div className="flex items-center space-x-2">
-                  <feature.icon className="w-4 h-4 text-slate-400 group-hover:text-rose-500 transition-colors" />
-                  <span className="group-hover:text-rose-600 transition-colors font-medium">{feature.name}</span>
-                </div>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        {/* Rating Filter */}
-        <div>
-          <h4 className="font-medium mb-4 flex items-center text-slate-700 dark:text-slate-300">
-            <Star className="w-5 h-5 mr-3 text-slate-400" />
-            Minimum Rating
-          </h4>
-          <div className="flex flex-wrap gap-2">
-            {[4, 3, 2, 1, 0].map((rating) => (
-              <button
-                key={rating}
-                onClick={() => setFilters(prev => ({ ...prev, rating }))}
-                className={`flex items-center space-x-2 px-4 py-3 rounded-2xl transition-all duration-200 ${
-                  filters.rating === rating 
-                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-lg shadow-amber-500/25' 
-                    : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-900/20'
-                }`}
-              >
-                <Star className={`w-5 h-5 ${filters.rating === rating ? 'fill-white' : 'fill-yellow-400 text-yellow-400'}`} />
-                <span className="font-medium">{rating === 0 ? 'All' : `${rating}+`}</span>
-              </button>
             ))}
           </div>
         </div>
@@ -1437,166 +1200,39 @@ const enrollInCourse = async (course: Course) => {
   )
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-rose-50/30 dark:from-slate-900 dark:via-blue-900/10 dark:to-rose-900/10">
-      {/* Enhanced Header with Animated Gradient */}
-      <div className="bg-gradient-to-br from-rose-500 via-purple-600 to-blue-600 text-white relative overflow-hidden">
-        {/* Animated Background Elements */}
-        <div className="absolute inset-0 opacity-10">
-          <div className="absolute top-10 left-10 w-20 h-20 bg-white rounded-full blur-xl animate-pulse"></div>
-          <div className="absolute top-40 right-20 w-32 h-32 bg-purple-300 rounded-full blur-2xl animate-bounce"></div>
-          <div className="absolute bottom-20 left-1/3 w-24 h-24 bg-blue-300 rounded-full blur-xl animate-pulse delay-1000"></div>
-        </div>
-        
-        <div className="container mx-auto px-6 py-20 relative">
-          <div className="text-center max-w-4xl mx-auto">
-            <div className="flex items-center justify-center mb-6">
-              <Sparkles className="w-10 h-10 mr-4 animate-pulse text-rose-200" />
-              <h1 className="text-6xl font-serif font-bold bg-gradient-to-r from-white to-rose-100 bg-clip-text text-transparent">
-                Master Fashion Design
-              </h1>
-              <Zap className="w-10 h-10 ml-4 animate-pulse text-rose-200" />
-            </div>
-            <p className="text-xl opacity-90 mb-10 max-w-2xl mx-auto leading-relaxed">
-              Learn from world-class instructors with AI-powered personalized learning experiences. Transform your creativity into career success.
+    <div className="min-h-screen bg-gray-50 dark:bg-black">
+      {/* Main Content */}
+      <div className="container mx-auto px-4 py-8">
+        {/* Header Section */}
+        <div className="mb-10">
+          <div className="text-center mb-8">
+            <h1 className="text-3xl md:text-4xl font-bold mb-3">
+              Fashion Design Courses
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
+              Master your craft with expert-led courses in fashion design, pattern making, and more
             </p>
-            
-            {/* Enhanced Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
-              {[
-                { value: stats.totalCourses, label: 'Courses', icon: BookOpen },
-                { value: stats.featuredCourses, label: 'Featured', icon: Crown },
-                { value: stats.freeCourses, label: 'Free', icon: Award },
-                { value: stats.totalEnrollments, label: 'Enrollments', icon: Users }
-              ].map((stat, index) => (
-                <div key={index} className="text-center backdrop-blur-sm bg-white/10 rounded-3xl p-6 border border-white/20 hover:bg-white/20 transition-all duration-300 hover:scale-105">
-                  <stat.icon className="w-10 h-10 mx-auto mb-3 opacity-90" />
-                  <div className="text-4xl font-bold">{stat.value}+</div>
-                  <div className="text-rose-100 text-sm font-medium">{stat.label}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Enhanced Search Bar */}
-            <div className="max-w-3xl mx-auto">
-              <div className="relative">
-                <Search className="absolute left-6 top-1/2 transform -translate-y-1/2 text-slate-300 w-6 h-6" />
-                <Input
-                  type="text"
-                  placeholder="Search for courses, instructors, or topics..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-16 pr-40 py-6 rounded-3xl border-0 bg-white/20 backdrop-blur-sm text-white placeholder-slate-200 text-xl focus:bg-white/30 transition-all duration-300 shadow-2xl"
-                />
-                <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex space-x-3">
-                  <Button 
-                    variant="secondary" 
-                    size="lg" 
-                    className="rounded-2xl bg-white/20 backdrop-blur-sm text-white hover:bg-white/30 border-0 font-semibold relative"
-                    onClick={() => setMobileFiltersOpen(!mobileFiltersOpen)}
-                  >
-                    <SlidersHorizontal className="w-5 h-5 mr-2" />
-                    Filters
-                    {activeFiltersCount > 0 && (
-                      <span className="absolute -top-2 -right-2 bg-rose-500 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center">
-                        {activeFiltersCount}
-                      </span>
-                    )}
-                  </Button>
-                  <Button 
-                    variant="default" 
-                    size="lg" 
-                    className="rounded-2xl bg-white text-rose-600 hover:bg-rose-50 font-semibold shadow-2xl shadow-rose-500/25"
-                  >
-                    <Sparkles className="w-5 h-5 mr-2" />
-                    AI Search
-                  </Button>
-                </div>
-              </div>
+          </div>
+          
+          {/* Search Bar */}
+          <div className="max-w-2xl mx-auto">
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <Input
+                type="text"
+                placeholder="Search for courses, topics, or instructors..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-12 pr-4 py-3 rounded-xl border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-base shadow-sm focus:shadow-md transition-shadow"
+              />
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Main Content */}
-      <div className="container mx-auto px-6 py-12">
         <div className="flex flex-col lg:flex-row gap-8">
-          {/* Enhanced Filters Sidebar - Desktop */}
-          <div className="hidden lg:block lg:w-80 space-y-8">
+          {/* Filters Sidebar - Desktop */}
+          <div className="hidden lg:block lg:w-64 space-y-6">
             <FiltersSidebar />
-            
-            {/* Enhanced AI Recommendations */}
-            {recommendations.length > 0 && (
-              <Card className="rounded-3xl border border-blue-200/50 dark:border-blue-800/50 shadow-2xl bg-gradient-to-br from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 backdrop-blur-xl">
-                <CardHeader>
-                  <CardTitle className="flex items-center text-blue-600 dark:text-blue-400 text-xl">
-                    <Brain className="w-6 h-6 mr-3" />
-                    AI Picks For You
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {recommendations.slice(0, 3).map((course) => (
-                    <div 
-                      key={course._id}
-                      className="flex items-center space-x-4 p-4 rounded-2xl bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm cursor-pointer hover:bg-white dark:hover:bg-slate-700 transition-all duration-300 hover:scale-105 border border-white/20 shadow-lg"
-                      onClick={() => setSelectedCourse(course)}
-                    >
-                      <img
-                        src={course.thumbnail.url}
-                        alt={course.title}
-                        className="w-14 h-14 rounded-xl object-cover border-2 border-white shadow-md"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm line-clamp-2 text-slate-800 dark:text-slate-200">{course.title}</p>
-                        <div className="flex items-center space-x-2 mt-2">
-                          <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />
-                          <span className="text-xs text-slate-600 dark:text-slate-400">
-                            {course.averageRating || 'New'}
-                          </span>
-                          <span className="text-xs text-slate-500">•</span>
-                          <span className="text-xs text-slate-500">{formatDuration(course.totalDuration)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Enhanced Trending Courses */}
-            {trendingCourses.length > 0 && (
-              <Card className="rounded-3xl border border-rose-200/50 dark:border-rose-800/50 shadow-2xl bg-gradient-to-br from-rose-50 to-orange-50 dark:from-rose-900/20 dark:to-orange-900/20 backdrop-blur-xl">
-                <CardHeader>
-                  <CardTitle className="flex items-center text-rose-600 dark:text-rose-400 text-xl">
-                    <Flame className="w-6 h-6 mr-3" />
-                    Trending Now
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {trendingCourses.slice(0, 3).map((course) => (
-                    <div 
-                      key={course._id}
-                      className="flex items-center space-x-4 p-4 rounded-2xl bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm cursor-pointer hover:bg-white dark:hover:bg-slate-700 transition-all duration-300 hover:scale-105 border border-white/20 shadow-lg"
-                      onClick={() => setSelectedCourse(course)}
-                    >
-                      <img
-                        src={course.thumbnail.url}
-                        alt={course.title}
-                        className="w-14 h-14 rounded-xl object-cover border-2 border-white shadow-md"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm line-clamp-2 text-slate-800 dark:text-slate-200">{course.title}</p>
-                        <div className="flex items-center space-x-2 mt-2">
-                          <Users className="w-3 h-3 text-rose-500" />
-                          <span className="text-xs text-slate-600 dark:text-slate-400">
-                            {course.totalStudents} enrolled
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-            )}
           </div>
 
           {/* Mobile Filters Overlay */}
@@ -1604,135 +1240,70 @@ const enrollInCourse = async (course: Course) => {
             <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 lg:hidden">
               <div 
                 ref={filtersRef}
-                className="absolute left-0 top-0 h-full w-80 max-w-[90vw] bg-white dark:bg-slate-800 shadow-2xl overflow-y-auto"
+                className="absolute left-0 top-0 h-full w-80 max-w-[90vw] bg-white dark:bg-gray-900 shadow-xl overflow-y-auto"
               >
                 <FiltersSidebar />
               </div>
             </div>
           )}
 
-          {/* Enhanced Courses Grid */}
+          {/* Courses Grid */}
           <div className="flex-1">
-            {/* Enhanced Controls */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 mb-10">
+            {/* Controls */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
               <div>
-                <h2 className="text-4xl font-bold bg-gradient-to-r from-slate-800 to-slate-600 dark:from-white dark:to-slate-300 bg-clip-text text-transparent mb-2">
-                  {searchQuery ? `Search Results for "${searchQuery}"` : 'All Courses'}
+                <h2 className="text-xl font-semibold mb-1">
+                  {searchQuery ? `Search results for "${searchQuery}"` : 'All Courses'}
                 </h2>
-                <p className="text-slate-600 dark:text-slate-400 flex items-center text-lg">
-                  <span>{sortedCourses.length} courses found</span>
-                  {streaming && (
-                    <span className="flex items-center ml-3 text-rose-500 bg-rose-50 dark:bg-rose-900/20 px-3 py-1 rounded-full">
-                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                      Loading more...
-                    </span>
-                  )}
+                <p className="text-gray-500 text-sm">
+                  {sortedCourses.length} courses
                 </p>
               </div>
               
-              <div className="flex items-center space-x-4">
-                {/* View Toggle */}
-                <div className="flex bg-slate-100 dark:bg-slate-800 rounded-2xl p-1 border border-slate-200 dark:border-slate-700">
-                  <Button
-                    variant={viewMode === 'grid' ? 'default' : 'ghost'}
-                    size="sm"
-                    onClick={() => setViewMode('grid')}
-                    className="rounded-xl"
-                  >
-                    <Grid className="w-5 h-5" />
-                  </Button>
-                  <Button
-                    variant={viewMode === 'list' ? 'default' : 'ghost'}
-                    size="sm"
-                    onClick={() => setViewMode('list')}
-                    className="rounded-xl"
-                  >
-                    <List className="w-5 h-5" />
-                  </Button>
-                </div>
-
+              <div className="flex items-center space-x-3">
                 {/* Mobile Filters Button */}
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => setMobileFiltersOpen(true)}
-                  className="rounded-2xl border-slate-200 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-700 lg:hidden relative"
+                  className="rounded-lg border-gray-300 dark:border-gray-700 lg:hidden"
                 >
                   <Filter className="w-4 h-4 mr-2" />
                   Filters
                   {activeFiltersCount > 0 && (
-                    <span className="absolute -top-2 -right-2 bg-rose-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center">
+                    <span className="ml-2 bg-black text-white dark:bg-white dark:text-black rounded-full w-5 h-5 text-xs flex items-center justify-center">
                       {activeFiltersCount}
                     </span>
                   )}
                 </Button>
 
-                {/* Refresh Button */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => fetchCourses(1, false)}
-                  disabled={loading}
-                  className="rounded-2xl border-slate-200 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-700"
-                >
-                  <RotateCw className={`w-5 h-5 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                  Refresh
-                </Button>
+                {/* View Toggle */}
+                <div className="flex bg-gray-100 dark:bg-gray-900 rounded-lg p-1">
+                  <Button
+                    variant={viewMode === 'grid' ? 'default' : 'ghost'}
+                    size="sm"
+                    onClick={() => setViewMode('grid')}
+                    className="rounded-md h-9 px-3"
+                  >
+                    <Grid className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant={viewMode === 'list' ? 'default' : 'ghost'}
+                    size="sm"
+                    onClick={() => setViewMode('list')}
+                    className="rounded-md h-9 px-3"
+                  >
+                    <List className="w-4 h-4" />
+                  </Button>
+                </div>
               </div>
             </div>
 
-            {/* Active Filters Display */}
-            {activeFiltersCount > 0 && (
-              <div className="flex flex-wrap gap-2 mb-6">
-                {filters.category.map(category => (
-                  <Badge key={category} variant="secondary" className="rounded-full">
-                    {category}
-                    <button 
-                      onClick={() => toggleFilter('category', category)}
-                      className="ml-1 hover:text-rose-500"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </Badge>
-                ))}
-                {filters.level.map(level => (
-                  <Badge key={level} variant="secondary" className="rounded-full">
-                    {level}
-                    <button 
-                      onClick={() => toggleFilter('level', level)}
-                      className="ml-1 hover:text-rose-500"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </Badge>
-                ))}
-                {filters.features.map(feature => (
-                  <Badge key={feature} variant="secondary" className="rounded-full">
-                    {feature}
-                    <button 
-                      onClick={() => toggleFilter('features', feature)}
-                      className="ml-1 hover:text-rose-500"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </Badge>
-                ))}
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={clearFilters}
-                  className="rounded-full text-rose-600 hover:text-rose-700 hover:bg-rose-50"
-                >
-                  Clear All
-                </Button>
-              </div>
-            )}
-
-            {/* Enhanced Courses Grid/List */}
+            {/* Courses Grid */}
             {loading && courses.length === 0 ? (
-              <div className={`grid gap-8 ${
+              <div className={`grid gap-6 ${
                 viewMode === 'grid' 
-                  ? 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3' 
+                  ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' 
                   : 'grid-cols-1'
               }`}>
                 {Array.from({ length: 6 }).map((_, index) => (
@@ -1740,230 +1311,113 @@ const enrollInCourse = async (course: Course) => {
                 ))}
               </div>
             ) : sortedCourses.length === 0 ? (
-              <div className="text-center py-20">
-                <div className="relative inline-block mb-6">
-                  <BookOpen className="w-24 h-24 text-slate-300 dark:text-slate-600 mx-auto" />
-                  <div className="absolute inset-0 bg-gradient-to-r from-rose-600 to-pink-600 blur-xl opacity-10 rounded-full"></div>
+              <div className="text-center py-16">
+                <div className="inline-block p-6 bg-gray-100 dark:bg-gray-900 rounded-2xl mb-6">
+                  <BookOpen className="w-12 h-12 text-gray-400" />
                 </div>
-                <h3 className="text-2xl font-semibold text-slate-600 dark:text-slate-400 mb-4">
-                  No courses found
-                </h3>
-                <p className="text-slate-500 dark:text-slate-500 text-lg mb-6 max-w-md mx-auto">
-                  Try adjusting your search criteria or explore our featured courses below.
+                <h3 className="text-xl font-semibold mb-2">No courses found</h3>
+                <p className="text-gray-500 mb-6 max-w-sm mx-auto">
+                  Try adjusting your search or filters
                 </p>
-                <Button onClick={clearFilters} variant="default" className="rounded-2xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 shadow-lg shadow-rose-500/25">
-                  Clear Filters
+                <Button onClick={clearFilters} variant="outline" className="rounded-lg">
+                  Clear filters
                 </Button>
               </div>
             ) : (
               <>
-                <div className={`grid gap-8 ${
+                <div className={`grid gap-6 ${
                   viewMode === 'grid' 
-                    ? 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3' 
+                    ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' 
                     : 'grid-cols-1'
                 }`}>
                   {sortedCourses.map((course) => {
                     const progress = userProgress[course._id]
                     const isEnrolled = isUserEnrolled(course._id)
-                    const isLoading = progressLoading.has(course._id)
                     
                     return (
                       <Card 
                         key={course._id} 
-                        className="rounded-3xl overflow-hidden hover:shadow-2xl transition-all duration-500 hover:scale-[1.02] group cursor-pointer border border-slate-200/50 dark:border-slate-700/50 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm shadow-xl"
+                        className="group rounded-xl overflow-hidden hover:shadow-lg transition-shadow border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 cursor-pointer"
                         onClick={() => setSelectedCourse(course)}
                       >
-                        {/* Enhanced Course Thumbnail */}
-                        <div className="h-52 relative bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                        {/* Course Thumbnail */}
+                        <div className="relative h-44 bg-gray-200 dark:bg-gray-800 overflow-hidden">
                           <img
                             src={course.thumbnail.url}
                             alt={course.title}
-                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                           />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                          
-                          {/* Enhanced Badges */}
-                          <div className="absolute top-4 left-4 flex flex-wrap gap-2">
-                            {course.isFeatured && (
-                              <Badge className="rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-white backdrop-blur-sm border-0 shadow-lg">
-                                <Crown className="w-3 h-3 mr-1" />
-                                Featured
-                              </Badge>
-                            )}
-                            {course.isFree && (
-                              <Badge className="rounded-full bg-gradient-to-r from-green-500 to-emerald-500 text-white backdrop-blur-sm border-0 shadow-lg">
+                          <div className="absolute top-3 left-3">
+                            <Badge className={`rounded-lg ${getLevelColor(course.level)} border shadow-sm`}>
+                              {course.level}
+                            </Badge>
+                          </div>
+                          {course.isFree && (
+                            <div className="absolute top-3 right-3">
+                              <Badge className="rounded-lg bg-green-500 text-white border-0 shadow-sm">
                                 Free
                               </Badge>
-                            )}
-                            {course.aiFeatures && (
-                              <Badge className="rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 text-white backdrop-blur-sm border-0 shadow-lg">
-                                <Sparkles className="w-3 h-3 mr-1" />
-                                AI Powered
-                              </Badge>
-                            )}
-                            {isEnrolled && !isLoading && (
-                              <Badge className={`rounded-full backdrop-blur-sm border-0 shadow-lg ${
-                                progress?.completed 
-                                  ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white'
-                                  : progress?.progress && progress.progress > 0
-                                  ? 'bg-gradient-to-r from-blue-500 to-cyan-500 text-white'
-                                  : 'bg-gradient-to-r from-slate-500 to-slate-600 text-white'
-                              }`}>
-                                {progress?.completed ? 'Completed' : progress?.progress && progress.progress > 0 ? 'In Progress' : 'Enrolled'}
-                              </Badge>
-                            )}
-                          </div>
-
-                          {/* Enhanced Quick Actions */}
-                          <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-all duration-500 transform translate-y-2 group-hover:translate-y-0">
-                            <div className="flex space-x-2">
-                              <Button 
-                                variant="secondary" 
-                                size="icon" 
-                                className="rounded-xl bg-white/90 backdrop-blur-sm hover:bg-white border-0 shadow-lg hover:shadow-xl transition-all duration-200"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  toggleFavorite(course._id)
-                                }}
-                              >
-                                <Heart className={`w-4 h-4 transition-all duration-200 ${
-                                  favoriteCourses.has(course._id) 
-                                    ? 'fill-rose-500 text-rose-500 scale-110' 
-                                    : 'hover:fill-rose-500 hover:text-rose-500'
-                                }`} />
-                              </Button>
-                              <Button 
-                                variant="secondary" 
-                                size="icon" 
-                                className="rounded-xl bg-white/90 backdrop-blur-sm hover:bg-white border-0 shadow-lg hover:shadow-xl transition-all duration-200"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  shareCourse(course)
-                                }}
-                              >
-                                <Share2 className="w-4 h-4 hover:text-blue-500 transition-colors" />
-                              </Button>
-                            </div>
-                          </div>
-
-                          {/* Play Button */}
-                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-500">
-                            <div className="bg-white/20 backdrop-blur-sm rounded-full p-5 transform scale-75 group-hover:scale-100 transition-transform duration-300 shadow-2xl">
-                              <PlayCircle className="w-10 h-10 text-white" />
-                            </div>
-                          </div>
-
-                          {/* Level Indicator */}
-                          <div className={`absolute bottom-4 left-4 bg-gradient-to-r ${getLevelColor(course.level)} text-white px-4 py-2 rounded-full text-sm font-semibold backdrop-blur-sm border-0 shadow-lg`}>
-                            {course.level}
-                          </div>
-
-                          {/* Progress Indicator */}
-                          {progress?.progress && progress.progress > 0 && !progress.completed && (
-                            <div className="absolute bottom-4 right-4 left-4 bg-black/50 backdrop-blur-sm rounded-full overflow-hidden shadow-lg">
-                              <div 
-                                className="h-2 bg-gradient-to-r from-rose-500 to-purple-500 transition-all duration-1000"
-                                style={{ width: `${progress.progress * 100}%` }}
-                              />
-                            </div>
-                          )}
-
-                          {/* AI Features Indicator */}
-                          {course.aiFeatures && (
-                            <div className="absolute bottom-4 right-4 flex space-x-2">
-                              {Object.entries(course.aiFeatures).slice(0, 2).map(([key, value]) => 
-                                value && (
-                                  <div key={key} className="bg-black/50 backdrop-blur-sm rounded-xl p-2 shadow-lg">
-                                    {getAIFeatureIcon(key)}
-                                  </div>
-                                )
-                              )}
                             </div>
                           )}
                         </div>
                         
-                        <CardHeader className="pb-4">
-                          <div className="flex items-start justify-between mb-3">
-                            <CardTitle className="text-xl line-clamp-2 group-hover:text-rose-600 transition-colors duration-300 pr-4 leading-tight">
-                              {course.title}
-                            </CardTitle>
-                            <span className="text-2xl font-bold bg-gradient-to-r from-rose-600 to-pink-600 bg-clip-text text-transparent flex-shrink-0">
-                              {course.isFree ? 'Free' : `$${course.price}`}
-                            </span>
-                          </div>
-                          <CardDescription className="line-clamp-2 text-slate-600 dark:text-slate-400 text-base leading-relaxed">
+                        <CardHeader className="pb-4 px-5 pt-5">
+                          <CardTitle className="text-lg font-semibold mb-2 line-clamp-2 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors">
+                            {course.title}
+                          </CardTitle>
+                          <CardDescription className="line-clamp-2 text-gray-600 dark:text-gray-400 text-sm">
                             {course.shortDescription}
                           </CardDescription>
                         </CardHeader>
                         
-                        <CardContent className="pb-6">
-                          {/* Instructor */}
-                          <div className="flex items-center space-x-3 mb-4">
-                            <img
-                              src={course.instructor.avatar || '/default-avatar.png'}
-                              alt={course.instructor.username}
-                              className="w-8 h-8 rounded-xl border-2 border-slate-200 dark:border-slate-600 shadow-sm"
-                              onError={(e) => {
-                                const target = e.target as HTMLImageElement
-                                target.src = '/default-avatar.png'
-                              }}
-                            />
-                            <span className="text-sm text-slate-600 dark:text-slate-400 font-medium">
-                              {course.instructor.firstName} {course.instructor.lastName}
-                            </span>
-                          </div>
-
-                          {/* Enhanced Stats */}
-                          <div className="flex items-center justify-between text-sm text-muted-foreground mb-5">
+                        <CardContent className="pb-5 px-5">
+                          {/* Instructor and Rating */}
+                          <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center space-x-2">
+                              <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-800 flex items-center justify-center overflow-hidden">
+                                <img
+                                  src={course.instructor.avatar || '/default-avatar.png'}
+                                  alt={course.instructor.username}
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    const target = e.target as HTMLImageElement
+                                    target.src = '/default-avatar.png'
+                                  }}
+                                />
+                              </div>
+                              <span className="text-sm font-medium">
+                                {course.instructor.firstName}
+                              </span>
+                            </div>
+                            <div className="flex items-center space-x-1">
                               <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                              <span className="font-semibold">{course.averageRating > 0 ? course.averageRating.toFixed(1) : 'New'}</span>
-                              <span className="text-slate-400">({course.totalReviews || 0})</span>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <Users className="w-4 h-4 text-slate-400" />
-                              <span>{course.totalStudents}</span>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <Clock className="w-4 h-4 text-slate-400" />
-                              <span>{formatDuration(course.totalDuration)}</span>
+                              <span className="text-sm font-medium">{course.averageRating > 0 ? course.averageRating.toFixed(1) : 'New'}</span>
                             </div>
                           </div>
                           
-                          {/* Enrollment Button with Status */}
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center space-x-3">
-                              <span className="text-sm text-slate-500 font-medium">{course.totalLessons} lessons</span>
-                              {progress?.progress && progress.progress > 0 && (
-                                <div className="flex items-center space-x-2 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 px-3 py-1 rounded-full">
-                                  <TrendingUp className="w-3 h-3" />
-                                  <span className="text-xs font-medium">{Math.round(progress.progress * 100)}%</span>
-                                </div>
-                              )}
-                            </div>
-                            {getEnrollmentButton(course)}
-                          </div>
+                          {/* Enrollment Button */}
+                          {getEnrollmentButton(course)}
                         </CardContent>
                       </Card>
                     )
                   })}
                 </div>
 
-                {/* Enhanced Load More */}
+                {/* Load More */}
                 {!loading && (
                   <div ref={observerTarget} className="flex justify-center mt-12">
                     {streaming ? (
-                      <div className="flex items-center space-x-3 text-slate-500 bg-slate-100 dark:bg-slate-800 rounded-3xl px-8 py-4 shadow-lg">
-                        <Loader2 className="w-5 h-5 animate-spin text-rose-500" />
-                        <span className="font-medium">Loading more courses...</span>
+                      <div className="flex items-center space-x-3 px-6 py-3 rounded-lg bg-gray-100 dark:bg-gray-900">
+                        <Loader2 className="w-5 h-5 animate-spin text-gray-500" />
+                        <span className="text-sm text-gray-500">Loading more courses...</span>
                       </div>
                     ) : (
                       <Button 
                         onClick={loadMoreCourses}
                         variant="outline"
-                        className="rounded-2xl border-2 border-slate-200 dark:border-slate-700 hover:border-rose-500 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-900/20 transition-all duration-300 px-8 py-6 text-lg font-semibold"
+                        className="rounded-lg border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900 px-8 py-3"
                       >
-                        <DownloadCloud className="w-5 h-5 mr-3" />
+                        <DownloadCloud className="w-5 h-5 mr-2" />
                         Load More Courses
                       </Button>
                     )}
@@ -1995,29 +1449,6 @@ const enrollInCourse = async (course: Course) => {
           onSuccess={handlePaymentSuccess}
         />
       )}
-
-      {/* Custom CSS for enhanced scrollbar */}
-      <style jsx>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: #e5e7eb;
-          border-radius: 3px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #d1d5db;
-        }
-        .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: #4b5563;
-        }
-        .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #6b7280;
-        }
-      `}</style>
     </div>
   )
 }
