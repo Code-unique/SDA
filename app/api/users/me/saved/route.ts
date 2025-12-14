@@ -6,7 +6,7 @@ import User from "@/lib/models/User";
 import { SavedItem } from "@/lib/models/UserInteractions";
 import Post from "@/lib/models/Post";
 import Course from "@/lib/models/Course";
-
+import "@/lib/loadmodels";
 export async function GET() {
   try {
     const user = await currentUser();

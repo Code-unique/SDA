@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import UserProgress from '@/lib/models/UserProgress';
 import Course from '@/lib/models/Course';
-
+import "@/lib/loadmodels";
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

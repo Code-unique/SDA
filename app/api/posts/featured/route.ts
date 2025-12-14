@@ -4,7 +4,7 @@ import { connectToDatabase } from '@/lib/mongodb';
 import Post from '@/lib/models/Post';
 import { ApiResponse, PaginatedResponse } from '@/types/post';
 import { Post as PostType } from '@/types/post';
-
+import "@/lib/loadmodels";
 export async function GET(request: NextRequest) {
   try {
     await connectToDatabase();

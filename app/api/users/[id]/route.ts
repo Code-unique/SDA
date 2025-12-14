@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
 import { currentUser } from '@clerk/nextjs/server';
-
+import "@/lib/loadmodels";
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

@@ -4,7 +4,7 @@ import { currentUser } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
 import { Conversation, Message } from '@/lib/models/Message';
-
+import "@/lib/loadmodels";
 export async function GET(request: NextRequest) {
   try {
     const user = await currentUser();

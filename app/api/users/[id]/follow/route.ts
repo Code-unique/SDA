@@ -4,7 +4,7 @@ import { currentUser } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
 import { NotificationService } from '@/lib/services/notificationService';
-
+import "@/lib/loadmodels";
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

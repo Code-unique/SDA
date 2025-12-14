@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import dbConnect from '@/lib/db';
 import User from '@/lib/models/User';
-
+import "@/lib/loadmodels";
 export async function GET(request: NextRequest) {
   try {
     await dbConnect();

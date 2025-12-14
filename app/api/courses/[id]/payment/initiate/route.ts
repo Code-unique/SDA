@@ -10,7 +10,7 @@ import { initiateKhaltiPayment } from '@/lib/payment/khalti';
 import { paymentConfig, validatePaymentConfig } from '@/lib/payment/config';
 import { rateLimit } from '@/lib/rate-limit';
 import mongoose from 'mongoose';
-
+import "@/lib/loadmodels";
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

@@ -4,7 +4,7 @@ import { NotificationService } from '@/lib/services/notificationService';
 import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
 import { rateLimit } from '@/lib/rate-limit';
-
+import "@/lib/loadmodels";
 export async function POST(request: NextRequest) {
   try {
     await connectToDatabase();

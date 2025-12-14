@@ -5,7 +5,7 @@ import User from '@/lib/models/User';
 import Course, { ICourse } from '@/lib/models/Course'; // ADD TYPE IMPORT
 import { NotificationService } from '@/lib/services/notificationService';
 import mongoose from 'mongoose';
-
+import "@/lib/loadmodels";
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

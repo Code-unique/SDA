@@ -6,7 +6,7 @@ import User from '@/lib/models/User';
 import Course from '@/lib/models/Course';
 import UserProgress from '@/lib/models/UserProgress';
 import mongoose from 'mongoose';
-
+import "@/lib/loadmodels";
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

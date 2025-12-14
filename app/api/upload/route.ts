@@ -4,7 +4,7 @@ import { currentUser } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
 import { uploadSmallFile } from '@/lib/cloudinary';
-
+import "@/lib/loadmodels";
 export const maxDuration = 30;
 
 export async function POST(request: NextRequest) {

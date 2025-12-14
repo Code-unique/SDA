@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import OpenAI from 'openai';
-
+import "@/lib/loadmodels";
 const systemPrompt = `You are an AI Fashion Coach for SUTRA, a fashion design platform. You provide:
 
 1. Design feedback and improvement suggestions

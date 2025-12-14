@@ -76,12 +76,21 @@ interface Lesson {
   }>
 }
 
-interface Module {
+interface Chapter {
   _id: string
   title: string
   description: string
   order: number
   lessons: Lesson[]
+}
+
+interface Module {
+  _id: string
+  title: string
+  description: string
+  thumbnailUrl?: string
+  order: number
+  chapters: Chapter[]
 }
 
 interface Course {
@@ -162,6 +171,7 @@ export default function CourseDetailPage() {
   const [isEnrolling, setIsEnrolling] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'overview' | 'curriculum' | 'reviews' | 'instructor'>('overview')
   const [expandedModules, setExpandedModules] = useState<Set<number>>(new Set([0]))
+  const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set())
   const [newRating, setNewRating] = useState({ rating: 5, review: '' })
   const [isSubmittingRating, setIsSubmittingRating] = useState(false)
   const [isLearningMode, setIsLearningMode] = useState(false)
@@ -215,15 +225,18 @@ export default function CourseDetailPage() {
         } : undefined,
         modules: data.modules?.map((module: any) => ({
           ...module,
-          lessons: module.lessons?.map((lesson: any) => ({
-            ...lesson,
-            video: lesson.video ? {
-              key: lesson.video.key || lesson.video.public_id,
-              url: lesson.video.url || lesson.video.secure_url,
-              size: lesson.video.size || lesson.video.bytes,
-              type: lesson.video.type || 'video',
-              duration: lesson.video.duration
-            } : undefined
+          chapters: module.chapters?.map((chapter: any) => ({
+            ...chapter,
+            lessons: chapter.lessons?.map((lesson: any) => ({
+              ...lesson,
+              video: lesson.video ? {
+                key: lesson.video.key || lesson.video.public_id,
+                url: lesson.video.url || lesson.video.secure_url,
+                size: lesson.video.size || lesson.video.bytes,
+                type: lesson.video.type || 'video',
+                duration: lesson.video.duration
+              } : undefined
+            })) || []
           })) || []
         })) || []
       }
@@ -254,15 +267,15 @@ export default function CourseDetailPage() {
           if (lesson) {
             setActiveLesson(lesson)
           }
-        } else if (processedCourse.modules[0]?.lessons[0]) {
-          setActiveLesson(processedCourse.modules[0].lessons[0])
+        } else if (processedCourse.modules[0]?.chapters[0]?.lessons[0]) {
+          setActiveLesson(processedCourse.modules[0].chapters[0].lessons[0])
         }
       } else {
         setUserProgress(null)
         setCompletedLessons(new Set())
         
-        if (processedCourse.modules[0]?.lessons[0]) {
-          setActiveLesson(processedCourse.modules[0].lessons[0])
+        if (processedCourse.modules[0]?.chapters[0]?.lessons[0]) {
+          setActiveLesson(processedCourse.modules[0].chapters[0].lessons[0])
         }
       }
       
@@ -281,9 +294,11 @@ export default function CourseDetailPage() {
 
   const findLessonById = (courseData: Course, lessonId: string): Lesson | null => {
     for (const module of courseData.modules) {
-      for (const lesson of module.lessons) {
-        if (lesson._id === lessonId) {
-          return lesson
+      for (const chapter of module.chapters) {
+        for (const lesson of chapter.lessons) {
+          if (lesson._id === lessonId) {
+            return lesson
+          }
         }
       }
     }
@@ -296,99 +311,143 @@ export default function CourseDetailPage() {
     }
   }, [slug])
 
-  const enrollInCourse = async () => {
-    if (!course || isEnrolling) return
-    
-    setIsEnrolling(course._id)
-    setError(null)
-    
-    try {
-      const response = await fetch(`/api/courses/${course._id}/enroll`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      })
+  // In CourseDetailPage component, replace the enrollInCourse function with:
 
-      const result = await response.json()
+const enrollInCourse = async () => {
+  if (!course || isEnrolling) return
+  
+  setIsEnrolling(course._id)
+  setError(null)
+  
+  try {
+    console.log('📤 Attempting to enroll in course:', course._id);
+    const response = await fetch(`/api/courses/${course._id}/enroll`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include' // Important for authentication
+    })
 
-      if (response.status === 402 && result.requiresPayment) {
-        setShowPaymentModal(true)
-        setIsEnrolling(null)
-        return
+    console.log('📥 Enrollment response status:', response.status);
+    const result = await response.json();
+    console.log('📥 Enrollment response data:', result);
+
+    // Handle payment required - THIS IS NOT AN ERROR
+    if (response.status === 402 && result.requiresPayment) {
+      console.log('💳 Payment required, showing payment modal');
+      setShowPaymentModal(true);
+      setIsEnrolling(null);
+      return;
+    }
+
+    // Handle actual errors (not 402)
+    if (!response.ok) {
+      console.error('❌ Server error response:', {
+        status: response.status,
+        statusText: response.statusText,
+        result
+      });
+      throw new Error(result.error || `Failed to enroll (${response.status})`);
+    }
+
+    // Handle successful enrollment
+    if (result.enrolled || result.alreadyEnrolled) {
+      console.log('✅ Enrollment successful or already enrolled');
+      
+      const newProgress: UserProgress = {
+        _id: result.progress?._id || `temp-${course._id}`,
+        courseId: course._id,
+        userId: 'current-user',
+        enrolled: true,
+        progress: result.progress?.progress || 0,
+        completed: result.progress?.completed || false,
+        completedLessons: result.progress?.completedLessons || [],
+        currentLesson: result.progress?.currentLesson || course.modules[0]?.chapters[0]?.lessons[0]?._id || null,
+        timeSpent: result.progress?.timeSpent || 0,
+        lastAccessed: new Date()
       }
-
-      if (response.ok) {
-        if (result.enrolled || result.alreadyEnrolled) {
-          const newProgress: UserProgress = {
-            _id: result.progress?._id || `temp-${course._id}`,
-            courseId: course._id,
-            userId: 'current-user',
-            enrolled: true,
-            progress: result.progress?.progress || 0,
-            completed: result.progress?.completed || false,
-            completedLessons: result.progress?.completedLessons || [],
-            currentLesson: result.progress?.currentLesson || course.modules[0]?.lessons[0]?._id || null,
-            timeSpent: result.progress?.timeSpent || 0,
-            lastAccessed: new Date()
-          }
-          
-          setUserProgress(newProgress)
-          setCompletedLessons(new Set(newProgress.completedLessons))
-          
-          toast({
-            title: '🎉 Welcome to the Course!',
-            description: 'Your learning journey begins now. Enjoy!',
-            variant: 'default',
-          })
-
-          setShowEnrollmentSuccess(true)
-          setTimeout(() => setShowEnrollmentSuccess(false), 3000)
-        } else {
-          throw new Error('Unexpected response from server')
-        }
-      } else {
-        throw new Error(result.error || 'Failed to enroll')
-      }
-
-    } catch (err: any) {
-      console.error('Error enrolling:', err)
+      
+      setUserProgress(newProgress);
+      setCompletedLessons(new Set(newProgress.completedLessons));
       
       toast({
-        title: 'Enrollment Failed',
-        description: 'Please try again or contact support',
-        variant: 'destructive',
-      })
-    } finally {
-      setIsEnrolling(null)
+        title: result.alreadyEnrolled ? 'Already Enrolled' : '🎉 Welcome to the Course!',
+        description: result.alreadyEnrolled 
+          ? 'You are already enrolled in this course' 
+          : 'Your learning journey begins now. Enjoy!',
+        variant: 'default',
+      });
+
+      if (!result.alreadyEnrolled) {
+        setShowEnrollmentSuccess(true);
+        setTimeout(() => setShowEnrollmentSuccess(false), 3000);
+      }
+    } else {
+      console.error('❌ Unexpected response structure:', result);
+      throw new Error('Unexpected response from server');
     }
+
+  } catch (err: any) {
+    console.error('❌ Error enrolling:', err);
+    
+    // More specific error handling
+    if (err.message.includes('Unauthorized') || err.message.includes('401')) {
+      toast({
+        title: 'Login Required',
+        description: 'Please log in to enroll in courses',
+        variant: 'destructive',
+      });
+    } else if (err.message.includes('not found') || err.message.includes('404')) {
+      toast({
+        title: 'Course Not Available',
+        description: 'This course is no longer available',
+        variant: 'destructive',
+      });
+    } else if (err.message.includes('Payment Required') || err.message.includes('402')) {
+      // This should have been caught earlier, but just in case
+      setShowPaymentModal(true);
+    } else {
+      toast({
+        title: 'Enrollment Failed',
+        description: err.message || 'Failed to enroll in course. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  } finally {
+    setIsEnrolling(null);
   }
+}
 
   const handlePaymentSuccess = (courseId: string) => {
-    setShowPaymentModal(false)
-    setShowEnrollmentSuccess(true)
-    
-    setUserProgress({
-      _id: `temp-${courseId}`,
-      courseId,
-      userId: 'current-user',
-      enrolled: true,
-      progress: 0,
-      completed: false,
-      completedLessons: [],
-      currentLesson: course?.modules[0]?.lessons[0]?._id || null,
-      timeSpent: 0,
-      lastAccessed: new Date()
-    })
-    
-    fetchCourseData()
-    
-    toast({
-      title: '🎉 Payment Successful!',
-      description: 'Welcome aboard! Let\'s start learning.',
-      variant: 'default',
-    })
+  setShowPaymentModal(false)
+  
+  // Update user progress immediately
+  const newProgress: UserProgress = {
+    _id: `temp-${courseId}`,
+    courseId,
+    userId: 'current-user',
+    enrolled: true,
+    progress: 0,
+    completed: false,
+    completedLessons: [],
+    currentLesson: course?.modules[0]?.chapters[0]?.lessons[0]?._id || null,
+    timeSpent: 0,
+    lastAccessed: new Date()
   }
+  
+  setUserProgress(newProgress)
+  setCompletedLessons(new Set(newProgress.completedLessons))
+  
+  toast({
+    title: '🎉 Payment Successful!',
+    description: 'Welcome aboard! Let\'s start learning.',
+    variant: 'default',
+  })
+  
+  // Refresh course data to get updated enrollment count
+  fetchCourseData()
+}
 
   const updateProgress = async (lessonId: string, completed: boolean = false, isCurrent: boolean = true) => {
     if (!course || !userProgress?.enrolled) return
@@ -449,9 +508,11 @@ export default function CourseDetailPage() {
 
     let found = false
     for (const module of course.modules) {
-      for (const lesson of module.lessons) {
-        if (found) return lesson
-        if (lesson._id === activeLesson._id) found = true
+      for (const chapter of module.chapters) {
+        for (const lesson of chapter.lessons) {
+          if (found) return lesson
+          if (lesson._id === activeLesson._id) found = true
+        }
       }
     }
     return null
@@ -462,8 +523,10 @@ export default function CourseDetailPage() {
 
     const allLessons: Lesson[] = []
     course.modules.forEach(module => {
-      module.lessons.forEach(lesson => {
-        allLessons.push(lesson)
+      module.chapters.forEach(chapter => {
+        chapter.lessons.forEach(lesson => {
+          allLessons.push(lesson)
+        })
       })
     })
 
@@ -480,8 +543,10 @@ export default function CourseDetailPage() {
 
     const allLessons: Lesson[] = []
     course.modules.forEach(module => {
-      module.lessons.forEach(lesson => {
-        allLessons.push(lesson)
+      module.chapters.forEach(chapter => {
+        chapter.lessons.forEach(lesson => {
+          allLessons.push(lesson)
+        })
       })
     })
 
@@ -565,6 +630,18 @@ export default function CourseDetailPage() {
     })
   }
 
+  const toggleChapter = (chapterId: string) => {
+    setExpandedChapters(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(chapterId)) {
+        newSet.delete(chapterId)
+      } else {
+        newSet.add(chapterId)
+      }
+      return newSet
+    })
+  }
+
   const formatDuration = (minutes: number) => {
     const hours = Math.floor(minutes / 60)
     const mins = minutes % 60
@@ -581,11 +658,29 @@ export default function CourseDetailPage() {
   }
 
   const calculateModuleProgress = (module: Module) => {
-    if (!userProgress) return 0
-    const completedInModule = module.lessons.filter(lesson => 
+  if (!userProgress || !module.chapters) return 0
+  
+  const totalLessonsInModule = module.chapters.reduce((total, chapter) => 
+    total + (chapter.lessons?.length || 0), 0
+  )
+  
+  if (totalLessonsInModule === 0) return 0
+  
+  const completedInModule = module.chapters.reduce((total, chapter) => 
+    total + (chapter.lessons?.filter(lesson => 
+      completedLessons.has(lesson._id)
+    ).length || 0), 0
+  )
+  
+  return (completedInModule / totalLessonsInModule) * 100
+}
+
+  const calculateChapterProgress = (chapter: Chapter) => {
+    if (!userProgress || chapter.lessons.length === 0) return 0
+    const completedInChapter = chapter.lessons.filter(lesson => 
       completedLessons.has(lesson._id)
     ).length
-    return (completedInModule / module.lessons.length) * 100
+    return (completedInChapter / chapter.lessons.length) * 100
   }
 
   // Stunning Enrollment Button
@@ -795,7 +890,20 @@ export default function CourseDetailPage() {
               <div className="mb-4">
                 <div className="flex items-center gap-1.5 mb-3">
                   <Badge className="bg-blue-100 text-blue-700 border-0 text-xs px-2 py-0.5">
-                    Lesson {course.modules.flatMap(m => m.lessons).findIndex(l => l._id === activeLesson._id) + 1}
+                    Lesson {(() => {
+                      let lessonCount = 0
+                      for (const module of course.modules) {
+                        for (const chapter of module.chapters) {
+                          for (const lesson of chapter.lessons) {
+                            lessonCount++
+                            if (lesson._id === activeLesson._id) {
+                              return lessonCount
+                            }
+                          }
+                        }
+                      }
+                      return lessonCount
+                    })()}
                   </Badge>
                   {activeLesson.isPreview && (
                     <Badge className="bg-amber-100 text-amber-700 border-0 text-xs px-2 py-0.5">
@@ -934,7 +1042,7 @@ export default function CourseDetailPage() {
                         <div>
                           <h3 className="font-medium text-gray-900 text-sm">{module.title}</h3>
                           <p className="text-xs text-gray-500 mt-0.5">
-                            {module.lessons.length} lessons
+                            {module.chapters.length} chapters
                           </p>
                         </div>
                       </div>
@@ -944,52 +1052,80 @@ export default function CourseDetailPage() {
                   
                   {expandedModules.has(moduleIndex) && (
                     <div className="mt-1.5 space-y-1.5 animate-in fade-in">
-                      {module.lessons.map((lesson, lessonIndex) => {
-                        const isCompleted = completedLessons.has(lesson._id)
-                        const isActive = activeLesson?._id === lesson._id
-                        
-                        return (
-                          <div
-                            key={lesson._id}
-                            className={`p-3 rounded border cursor-pointer transition-colors ${
-                              isActive 
-                                ? 'bg-blue-600 text-white border-blue-600' 
-                                : isCompleted
-                                ? 'bg-green-50 border-green-200'
-                                : 'bg-white border-gray-200 hover:border-blue-300'
-                            }`}
-                            onClick={() => {
-                              handleLessonSelect(lesson)
-                              setShowMobileCurriculum(false)
-                            }}
+                      {module.chapters.map((chapter, chapterIndex) => (
+                        <div key={chapter._id} className="ml-4">
+                          <div 
+                            className="p-3 bg-gray-100 rounded border cursor-pointer hover:border-blue-300 transition-colors"
+                            onClick={() => toggleChapter(chapter._id)}
                           >
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
-                                <div className={`w-5 h-5 rounded flex items-center justify-center ${
-                                  isActive ? 'bg-white/20' : isCompleted ? 'bg-green-100' : 'bg-gray-100'
-                                }`}>
-                                  {isCompleted ? (
-                                    <Check className={`w-2.5 h-2.5 ${isActive ? 'text-white' : 'text-green-600'}`} />
-                                  ) : (
-                                    <PlayCircle className={`w-2.5 h-2.5 ${isActive ? 'text-white' : 'text-gray-500'}`} />
-                                  )}
+                                <div className="w-5 h-5 bg-blue-50 rounded flex items-center justify-center">
+                                  <span className="font-semibold text-blue-600 text-xs">{chapterIndex + 1}</span>
                                 </div>
-                                <div className="flex-1">
-                                  <p className={`font-medium text-sm ${isActive ? 'text-white' : 'text-gray-900'}`}>
-                                    {lessonIndex + 1}. {lesson.title}
+                                <div>
+                                  <h4 className="font-medium text-gray-900 text-sm">{chapter.title}</h4>
+                                  <p className="text-xs text-gray-500 mt-0.5">
+                                    {chapter.lessons.length} lessons
                                   </p>
-                                  <div className="flex items-center gap-1.5 mt-0.5">
-                                    <Clock className={`w-2.5 h-2.5 ${isActive ? 'text-white/80' : 'text-gray-400'}`} />
-                                    <span className={`text-xs ${isActive ? 'text-white/80' : 'text-gray-500'}`}>
-                                      {formatDuration(lesson.duration)}
-                                    </span>
-                                  </div>
                                 </div>
                               </div>
+                              <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${expandedChapters.has(chapter._id) ? 'rotate-180' : ''}`} />
                             </div>
                           </div>
-                        )
-                      })}
+                          
+                          {expandedChapters.has(chapter._id) && (
+                            <div className="mt-1.5 ml-4 space-y-1.5 animate-in fade-in">
+                              {chapter.lessons.map((lesson, lessonIndex) => {
+                                const isCompleted = completedLessons.has(lesson._id)
+                                const isActive = activeLesson?._id === lesson._id
+                                
+                                return (
+                                  <div
+                                    key={lesson._id}
+                                    className={`p-3 rounded border cursor-pointer transition-colors ${
+                                      isActive 
+                                        ? 'bg-blue-600 text-white border-blue-600' 
+                                        : isCompleted
+                                        ? 'bg-green-50 border-green-200'
+                                        : 'bg-white border-gray-200 hover:border-blue-300'
+                                    }`}
+                                    onClick={() => {
+                                      handleLessonSelect(lesson)
+                                      setShowMobileCurriculum(false)
+                                    }}
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-2">
+                                        <div className={`w-5 h-5 rounded flex items-center justify-center ${
+                                          isActive ? 'bg-white/20' : isCompleted ? 'bg-green-100' : 'bg-gray-100'
+                                        }`}>
+                                          {isCompleted ? (
+                                            <Check className={`w-2.5 h-2.5 ${isActive ? 'text-white' : 'text-green-600'}`} />
+                                          ) : (
+                                            <PlayCircle className={`w-2.5 h-2.5 ${isActive ? 'text-white' : 'text-gray-500'}`} />
+                                          )}
+                                        </div>
+                                        <div className="flex-1">
+                                          <p className={`font-medium text-sm ${isActive ? 'text-white' : 'text-gray-900'}`}>
+                                            {lessonIndex + 1}. {lesson.title}
+                                          </p>
+                                          <div className="flex items-center gap-1.5 mt-0.5">
+                                            <Clock className={`w-2.5 h-2.5 ${isActive ? 'text-white/80' : 'text-gray-400'}`} />
+                                            <span className={`text-xs ${isActive ? 'text-white/80' : 'text-gray-500'}`}>
+                                              {formatDuration(lesson.duration)}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -1195,7 +1331,7 @@ export default function CourseDetailPage() {
                 <div>
                   <h3 className="text-lg font-bold text-gray-900">Course Curriculum</h3>
                   <p className="text-gray-600 text-sm mt-0.5">
-                    {course.totalLessons} lessons
+                    {course.totalLessons} lessons in {course.modules.length} modules
                   </p>
                 </div>
                 {userProgress?.enrolled && (
@@ -1226,7 +1362,7 @@ export default function CourseDetailPage() {
                             <div className="flex-1">
                               <h4 className="font-bold text-gray-900 text-sm">{module.title}</h4>
                               <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
-                                <span>{module.lessons.length} lessons</span>
+                                <span>{module.chapters.length} chapters</span>
                               </div>
                             </div>
                           </div>
@@ -1236,67 +1372,99 @@ export default function CourseDetailPage() {
                       
                       {expandedModules.has(moduleIndex) && (
                         <div className="px-3 pb-3 animate-in fade-in">
-                          <div className="space-y-1.5">
-                            {module.lessons.map((lesson, lessonIndex) => {
-                              const isCompleted = completedLessons.has(lesson._id)
+                          <div className="space-y-2">
+                            {module.chapters.map((chapter, chapterIndex) => {
+                              const chapterProgress = calculateChapterProgress(chapter)
                               
                               return (
-                                <div
-                                  key={lesson._id}
-                                  className="p-2.5 bg-gray-50 rounded border"
-                                >
-                                  <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                      <div className={`w-6 h-6 rounded flex items-center justify-center ${
-                                        isCompleted ? 'bg-green-100' : 'bg-blue-100'
-                                      }`}>
-                                        {isCompleted ? (
-                                          <Check className="w-3 h-3 text-green-600" />
-                                        ) : (
-                                          <PlayCircle className="w-3 h-3 text-blue-600" />
-                                        )}
-                                      </div>
-                                      <div className="flex-1 min-w-0">
-                                        <p className="font-medium text-gray-900 text-sm truncate">
-                                          {lessonIndex + 1}. {lesson.title}
-                                        </p>
-                                        <div className="flex items-center gap-2 mt-0.5">
-                                          <div className="flex items-center gap-1 text-xs text-gray-500">
-                                            <Clock className="w-2.5 h-2.5" />
-                                            <span>{formatDuration(lesson.duration)}</span>
+                                <div key={chapter._id} className="ml-4">
+                                  <div 
+                                    className="p-3 bg-gray-50 rounded border cursor-pointer hover:border-blue-300 transition-colors"
+                                    onClick={() => toggleChapter(chapter._id)}
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-6 h-6 bg-blue-50 rounded flex items-center justify-center">
+                                          <span className="font-bold text-blue-600 text-xs">{chapterIndex + 1}</span>
+                                        </div>
+                                        <div className="flex-1">
+                                          <h5 className="font-bold text-gray-900 text-sm">{chapter.title}</h5>
+                                          <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
+                                            <span>{chapter.lessons.length} lessons</span>
                                           </div>
-                                          {lesson.isPreview && (
-                                            <Badge className="bg-amber-100 text-amber-700 text-xs px-1.5 py-0">
-                                              Preview
-                                            </Badge>
-                                          )}
                                         </div>
                                       </div>
+                                      <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${expandedChapters.has(chapter._id) ? 'rotate-180' : ''}`} />
                                     </div>
-                                    
-                                    {userProgress?.enrolled ? (
-                                      <Button 
-                                        onClick={() => {
-                                          setActiveLesson(lesson)
-                                          setIsLearningMode(true)
-                                        }}
-                                        className={`rounded text-xs px-2 py-1 h-6 ${
-                                          isCompleted 
-                                            ? 'bg-green-100 text-green-700 hover:bg-green-200' 
-                                            : 'bg-blue-600 hover:bg-blue-700 text-white'
-                                        }`}
-                                      >
-                                        {isCompleted ? 'Review' : 'Start'}
-                                      </Button>
-                                    ) : lesson.isPreview && lesson.video ? (
-                                      <Button 
-                                        onClick={() => handlePreviewLesson(lesson)}
-                                        className="rounded bg-amber-100 text-amber-700 hover:bg-amber-200 text-xs px-2 py-1 h-6"
-                                      >
-                                        Preview
-                                      </Button>
-                                    ) : null}
                                   </div>
+                                  
+                                  {expandedChapters.has(chapter._id) && (
+                                    <div className="mt-2 ml-4 space-y-1.5 animate-in fade-in">
+                                      {chapter.lessons.map((lesson, lessonIndex) => {
+                                        const isCompleted = completedLessons.has(lesson._id)
+                                        
+                                        return (
+                                          <div
+                                            key={lesson._id}
+                                            className="p-2.5 bg-white rounded border"
+                                          >
+                                            <div className="flex items-center justify-between">
+                                              <div className="flex items-center gap-2">
+                                                <div className={`w-6 h-6 rounded flex items-center justify-center ${
+                                                  isCompleted ? 'bg-green-100' : 'bg-blue-100'
+                                                }`}>
+                                                  {isCompleted ? (
+                                                    <Check className="w-3 h-3 text-green-600" />
+                                                  ) : (
+                                                    <PlayCircle className="w-3 h-3 text-blue-600" />
+                                                  )}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                  <p className="font-medium text-gray-900 text-sm truncate">
+                                                    {lessonIndex + 1}. {lesson.title}
+                                                  </p>
+                                                  <div className="flex items-center gap-2 mt-0.5">
+                                                    <div className="flex items-center gap-1 text-xs text-gray-500">
+                                                      <Clock className="w-2.5 h-2.5" />
+                                                      <span>{formatDuration(lesson.duration)}</span>
+                                                    </div>
+                                                    {lesson.isPreview && (
+                                                      <Badge className="bg-amber-100 text-amber-700 text-xs px-1.5 py-0">
+                                                        Preview
+                                                      </Badge>
+                                                    )}
+                                                  </div>
+                                                </div>
+                                              </div>
+                                              
+                                              {userProgress?.enrolled ? (
+                                                <Button 
+                                                  onClick={() => {
+                                                    setActiveLesson(lesson)
+                                                    setIsLearningMode(true)
+                                                  }}
+                                                  className={`rounded text-xs px-2 py-1 h-6 ${
+                                                    isCompleted 
+                                                      ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+                                                      : 'bg-blue-600 hover:bg-blue-700 text-white'
+                                                  }`}
+                                                >
+                                                  {isCompleted ? 'Review' : 'Start'}
+                                                </Button>
+                                              ) : lesson.isPreview && lesson.video ? (
+                                                <Button 
+                                                  onClick={() => handlePreviewLesson(lesson)}
+                                                  className="rounded bg-amber-100 text-amber-700 hover:bg-amber-200 text-xs px-2 py-1 h-6"
+                                                >
+                                                  Preview
+                                                </Button>
+                                              ) : null}
+                                            </div>
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  )}
                                 </div>
                               )
                             })}

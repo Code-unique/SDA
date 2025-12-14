@@ -5,7 +5,7 @@ import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
 import Post from '@/lib/models/Post';
 import Course from '@/lib/models/Course';
-
+import "@/lib/loadmodels";
 export async function GET(request: NextRequest) {
   try {
     const user = await currentUser();

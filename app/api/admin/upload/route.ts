@@ -6,7 +6,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { currentUser } from '@clerk/nextjs/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import User from '@/lib/models/User'
-
+import "@/lib/loadmodels";
 const s3Client = new S3Client({
   region: process.env.AWS_REGION || 'eu-north-1',
   credentials: {

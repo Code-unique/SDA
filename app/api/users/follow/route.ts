@@ -5,7 +5,7 @@ import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
 import { Follow } from '@/lib/models/UserInteractions';
 import { ApiResponse } from '@/types/post';
-
+import "@/lib/loadmodels";
 export async function POST(request: NextRequest) {
   try {
     const { userId } = await auth();

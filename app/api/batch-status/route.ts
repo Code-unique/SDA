@@ -5,7 +5,7 @@ import User from '@/lib/models/User'
 import Post from '@/lib/models/Post'
 import { SavedItem } from '@/lib/models/UserInteractions'
 import mongoose from 'mongoose'
-
+import "@/lib/loadmodels";
 export async function POST(request: NextRequest) {
   try {
     const user = await currentUser()

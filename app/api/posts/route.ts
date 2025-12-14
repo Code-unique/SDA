@@ -5,7 +5,7 @@ import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
 import Post from '@/lib/models/Post';
 import cloudinary from '@/lib/cloudinary';
-
+import "@/lib/loadmodels";
 // ----------------------------------------------
 // CLOUDINARY UPLOAD HELPER
 // ----------------------------------------------

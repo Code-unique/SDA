@@ -1,10 +1,9 @@
-// app/api/admin/courses/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
 import Course, { IS3Asset } from '@/lib/models/Course';
-
+import "@/lib/loadmodels";
 // app/api/admin/courses/route.ts (POST method - preserve S3 pattern)
 export async function POST(request: NextRequest) {
   try {
@@ -93,20 +92,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Transform modules data with validation (preserve original pattern)
+    // Transform modules data with validation (NEW: includes chapters)
     const transformedModules = body.modules?.map((module: any, index: number) => ({
       title: module.title?.substring(0, 200) || '',
       description: module.description?.substring(0, 1000) || '',
+      thumbnailUrl: module.thumbnailUrl || '', // NEW FIELD
       order: typeof module.order === 'number' ? module.order : index,
-      lessons: module.lessons?.map((lesson: any, lessonIndex: number) => ({
-        title: lesson.title?.substring(0, 200) || '',
-        description: lesson.description?.substring(0, 1000) || '',
-        content: lesson.content || '',
-        video: lesson.video as IS3Asset, // Preserve S3 asset pattern
-        duration: Math.max(0, Math.min(lesson.duration || 0, 10000)),
-        isPreview: !!lesson.isPreview,
-        resources: Array.isArray(lesson.resources) ? lesson.resources.slice(0, 10) : [],
-        order: typeof lesson.order === 'number' ? lesson.order : lessonIndex
+      chapters: module.chapters?.map((chapter: any, chapterIndex: number) => ({
+        title: chapter.title?.substring(0, 200) || '',
+        description: chapter.description?.substring(0, 1000) || '',
+        order: typeof chapter.order === 'number' ? chapter.order : chapterIndex,
+        lessons: chapter.lessons?.map((lesson: any, lessonIndex: number) => ({
+          title: lesson.title?.substring(0, 200) || '',
+          description: lesson.description?.substring(0, 1000) || '',
+          content: lesson.content || '',
+          video: lesson.video as IS3Asset, // Preserve S3 asset pattern
+          duration: Math.max(0, Math.min(lesson.duration || 0, 10000)),
+          isPreview: !!lesson.isPreview,
+          resources: Array.isArray(lesson.resources) ? lesson.resources.slice(0, 10) : [],
+          order: typeof lesson.order === 'number' ? lesson.order : lessonIndex
+        })) || []
       })) || []
     })) || [];
 
@@ -177,6 +182,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
+// GET method remains the same...
 export async function GET(request: NextRequest) {
   try {
     const user = await currentUser();

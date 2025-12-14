@@ -4,7 +4,7 @@ import { currentUser } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
 import Post from '@/lib/models/Post';
-
+import "@/lib/loadmodels";
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

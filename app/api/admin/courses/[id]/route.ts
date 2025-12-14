@@ -5,7 +5,7 @@ import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
 import Course, { IS3Asset } from '@/lib/models/Course';
 import mongoose from 'mongoose';
-
+import "@/lib/loadmodels";
 // GET - Fetch single course for admin
 export async function GET(
   request: NextRequest,

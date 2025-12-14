@@ -7,7 +7,7 @@ import UserProgress from '@/lib/models/UserProgress';
 import { rateLimit } from '@/lib/rate-limit';
 import mongoose from 'mongoose';
 import { NotificationService } from '@/lib/services/notificationService';
-
+import "@/lib/loadmodels";
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -114,7 +114,8 @@ export async function POST(
     );
 
     // Create initial user progress
-    const firstLesson = course.modules[0]?.lessons[0];
+    const firstChapter = course.modules[0]?.chapters?.[0];
+const firstLesson = firstChapter?.lessons?.[0];
     const userProgress = await UserProgress.create({
       courseId: course._id,
       userId: currentUserDoc._id,

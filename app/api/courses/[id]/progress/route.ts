@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { currentUser } from '@clerk/nextjs/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import User from '@/lib/models/User'
-import Course, { ICourse } from '@/lib/models/Course' // ADD TYPE IMPORT
+import Course, { ICourse } from '@/lib/models/Course'
 import UserProgress from '@/lib/models/UserProgress'
 import mongoose from 'mongoose'
 import { NotificationService } from '@/lib/services/notificationService'
-
+import "@/lib/loadmodels";
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -55,12 +55,28 @@ export async function GET(
       userId: currentUserDoc._id
     })
 
+    // Find first lesson in the course for new users
+    let firstLessonId: mongoose.Types.ObjectId | null = null
+    if (course.modules && course.modules.length > 0) {
+      for (const module of course.modules) {
+        if (module.chapters && module.chapters.length > 0) {
+          for (const chapter of module.chapters) {
+            if (chapter.lessons && chapter.lessons.length > 0) {
+              firstLessonId = chapter.lessons[0]._id ?? null
+              break
+            }
+          }
+          if (firstLessonId) break
+        }
+      }
+    }
+
     if (!userProgress) {
       userProgress = await UserProgress.create({
         courseId: course._id,
         userId: currentUserDoc._id,
         completedLessons: [],
-        currentLesson: course.modules[0]?.lessons[0]?._id || null,
+        currentLesson: firstLessonId,
         progress: 0,
         timeSpent: 0,
         lastAccessed: new Date(),
@@ -82,7 +98,7 @@ export async function GET(
   } catch (error: any) {
     console.error('Error fetching user progress:', error)
     return NextResponse.json(
-      { error: 'Internal server error' }, 
+      { error: 'Internal server error', details: error.message }, 
       { status: 500 }
     )
   }
@@ -136,15 +152,25 @@ export async function POST(
     let lessonObjectId: mongoose.Types.ObjectId | null = null
     let lessonExists = false
 
-    for (const module of course.modules) {
-      for (const lesson of module.lessons) {
-        if (lesson._id?.toString() === lessonId) {
-          lessonExists = true
-          lessonObjectId = lesson._id ?? null
-          break
+    // NEW: Search through modules -> chapters -> lessons
+    if (course.modules) {
+      for (const module of course.modules) {
+        if (module.chapters) {
+          for (const chapter of module.chapters) {
+            if (chapter.lessons) {
+              for (const lesson of chapter.lessons) {
+                if (lesson._id?.toString() === lessonId) {
+                  lessonExists = true
+                  lessonObjectId = lesson._id ?? null
+                  break
+                }
+              }
+              if (lessonExists) break
+            }
+          }
+          if (lessonExists) break
         }
       }
-      if (lessonExists) break
     }
 
     if (!lessonExists) {
@@ -157,12 +183,28 @@ export async function POST(
       userId: currentUserDoc._id
     })
 
+    // Find first lesson in the course for new users
+    let firstLessonId: mongoose.Types.ObjectId | null = null
+    if (course.modules && course.modules.length > 0) {
+      for (const module of course.modules) {
+        if (module.chapters && module.chapters.length > 0) {
+          for (const chapter of module.chapters) {
+            if (chapter.lessons && chapter.lessons.length > 0) {
+              firstLessonId = chapter.lessons[0]._id ?? null
+              break
+            }
+          }
+          if (firstLessonId) break
+        }
+      }
+    }
+
     if (!userProgress) {
       userProgress = await UserProgress.create({
         courseId: course._id,
         userId: currentUserDoc._id,
         completedLessons: [],
-        currentLesson: lessonObjectId,
+        currentLesson: firstLessonId,
         progress: 0,
         timeSpent: 0,
         lastAccessed: new Date(),
@@ -170,10 +212,14 @@ export async function POST(
       })
     }
 
-    // Calculate total lessons
-    const totalLessons = course.modules.reduce((total: number, module: any) => 
-      total + module.lessons.length, 0
-    )
+    // Calculate total lessons - NEW: through modules -> chapters -> lessons
+    const totalLessons = course.modules?.reduce((total: number, module: any) => {
+      if (!module.chapters) return total
+      return total + module.chapters.reduce((chapterTotal: number, chapter: any) => {
+        if (!chapter.lessons) return chapterTotal
+        return chapterTotal + (chapter.lessons.length || 0)
+      }, 0)
+    }, 0) || 0
 
     // Update progress
     const updates: any = {
@@ -198,7 +244,7 @@ export async function POST(
       updates.progress = Math.min(newCompletedCount / totalLessons, 1)
       
       // Check if course is completed
-      if (newCompletedCount === totalLessons) {
+      if (newCompletedCount >= totalLessons) {
         updates.completed = true
         updates.completedAt = new Date()
         
@@ -207,7 +253,7 @@ export async function POST(
           await NotificationService.createNotification({
             userId: currentUserDoc._id,
             type: 'achievement',
-            courseId: course._id as mongoose.Types.ObjectId, // FIX: Type cast
+            courseId: course._id as mongoose.Types.ObjectId,
             message: `🎉 You completed "${course.title}"! Congratulations!`,
             actionUrl: `/courses/${course.slug || course._id}/certificate`
           });
@@ -218,7 +264,7 @@ export async function POST(
           await NotificationService.createNotification({
             userId: currentUserDoc._id,
             type: 'course',
-            courseId: course._id as mongoose.Types.ObjectId, // FIX: Type cast
+            courseId: course._id as mongoose.Types.ObjectId,
             message: `You successfully completed "${course.title}"!`,
             actionUrl: `/profile/achievements`
           });
@@ -246,7 +292,7 @@ export async function POST(
   } catch (error: any) {
     console.error('Error updating user progress:', error)
     return NextResponse.json(
-      { error: 'Internal server error' }, 
+      { error: 'Internal server error', details: error.message }, 
       { status: 500 }
     )
   }

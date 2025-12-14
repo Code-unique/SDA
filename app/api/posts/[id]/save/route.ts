@@ -6,7 +6,7 @@ import User from '@/lib/models/User';
 import { SavedItem } from '@/lib/models/UserInteractions';
 import Post from '@/lib/models/Post';
 import { ApiResponse } from '@/types/post';
-
+import "@/lib/loadmodels";
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

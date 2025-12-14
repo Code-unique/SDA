@@ -8,7 +8,7 @@ import UserProgress from '@/lib/models/UserProgress';
 import PendingEnrollment from '@/lib/models/PendingEnrollment';
 import Payment from '@/lib/models/Payment';
 import mongoose from 'mongoose';
-
+import "@/lib/loadmodels";
 export async function POST(request: NextRequest) {
   const body = await request.text();
   const signature = request.headers.get('stripe-signature')!;
@@ -123,7 +123,8 @@ async function handlePaymentIntentSucceeded(paymentIntent: any, session: mongoos
   );
 
   // Create user progress
-  const firstLesson = course.modules[0]?.lessons[0];
+  const firstChapter = course.modules[0]?.chapters?.[0];
+const firstLesson = firstChapter?.lessons?.[0];
   await UserProgress.create([{
     courseId: metadata.courseId,
     userId: metadata.userId,

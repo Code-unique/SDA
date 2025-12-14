@@ -5,7 +5,7 @@ import PendingEnrollment from '@/lib/models/PendingEnrollment';
 import Course from '@/lib/models/Course';
 import User from '@/lib/models/User';
 import { verifyKhaltiPayment } from '@/lib/payment/khalti';
-
+import "@/lib/loadmodels";
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);

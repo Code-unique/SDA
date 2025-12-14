@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { NotificationService } from '@/lib/services/notificationService';
 import { connectToDatabase } from '@/lib/mongodb';
-
+import "@/lib/loadmodels";
 export async function GET(request: NextRequest) {
   try {
     await connectToDatabase();

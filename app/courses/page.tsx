@@ -6,65 +6,46 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
 import { useToast } from "@/components/ui/use-toast"
 import { 
   Star, 
-  Users, 
-  Clock, 
-  PlayCircle, 
+  Play, 
   BookOpen, 
   Search,
   Filter,
   Grid,
   List,
-  Sparkles,
-  Zap,
-  Crown,
-  TrendingUp,
   Award,
-  Shield,
   Globe,
-  Download,
-  Share2,
-  Heart,
-  Bookmark,
-  Eye,
-  ChevronDown,
-  ChevronUp,
-  Loader2,
-  RotateCw,
-  Brain,
-  Rocket,
-  Target,
-  BarChart3,
-  Video,
   DownloadCloud,
   CheckCircle,
-  ArrowRight,
-  Flame,
-  BookCheck,
-  Play,
+  X,
+  Loader2,
   Palette,
   Code,
-  Music,
   Camera,
-  Target as TargetIcon,
-  Gauge,
-  BatteryCharging,
-  Zap as Lightning,
-  Calendar,
-  ThumbsUp,
+  TrendingUp,
+  Zap,
+  Target,
+  Rocket,
+  CloudLightning,
   Medal,
-  Clock4,
+  Gauge,
   ShieldCheck,
-  X,
-  SlidersHorizontal,
-  CreditCard,
-  Smartphone
+  Clock4,
+  Brain,
+  AlertCircle,
+  Lock,
+  TrendingUp as TrendingIcon,
+  Calendar,
+  Clock,
+  BarChart,
+  Users,
+  Bookmark
 } from 'lucide-react'
 import { PaymentModal } from '@/components/payment/PaymentModal'
 
+// Define interfaces
 interface S3Asset {
   key: string
   url: string
@@ -89,7 +70,6 @@ interface Course {
     avatar?: string
     bio?: string
     rating?: number
-    totalStudents?: number
   }
   price: number
   isFree: boolean
@@ -106,13 +86,19 @@ interface Course {
     title: string
     description: string
     order: number
-    lessons: Array<{
+    chapters: Array<{  // Changed from lessons to chapters
       _id: string
       title: string
       description: string
-      duration: number
-      isPreview: boolean
       order: number
+      lessons: Array<{  // Lessons are now inside chapters
+        _id: string
+        title: string
+        description: string
+        duration: number
+        isPreview: boolean
+        order: number
+      }>
     }>
   }>
   totalDuration: number
@@ -132,11 +118,6 @@ interface Course {
     hasProgressTracking: boolean
     hasPersonalizedFeedback: boolean
   }
-  students?: Array<{
-    user: string
-    enrolledAt: Date
-    completed?: boolean
-  }>
 }
 
 interface UserProgress {
@@ -147,7 +128,7 @@ interface UserProgress {
   progress: number
   completed: boolean
   currentLesson?: string
-  lastAccessed?: Date
+  lastAccessed?: string
   timeSpent?: number
   completedLessons: string[]
 }
@@ -156,83 +137,85 @@ interface FilterState {
   category: string[]
   level: string[]
   price: 'all' | 'free' | 'paid'
-  duration: string[]
-  features: string[]
   rating: number
-  sort: 'popular' | 'newest' | 'rating' | 'duration' | 'price-low' | 'price-high' | 'trending'
+  sort: 'popular' | 'newest' | 'rating' | 'price-low' | 'price-high' | 'trending'
 }
 
 export default function CoursesPage() {
   const router = useRouter()
   const { toast } = useToast()
   const [courses, setCourses] = useState<Course[]>([])
-  const [recommendations, setRecommendations] = useState<Course[]>([])
-  const [trendingCourses, setTrendingCourses] = useState<Course[]>([])
   const [loading, setLoading] = useState(true)
-  const [streaming, setStreaming] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
-  const [showFilters, setShowFilters] = useState(false)
-  const [selectedCourse, setSelectedCourse] = useState<Course | null>(null)
   const [isEnrolling, setIsEnrolling] = useState<string | null>(null)
-  const [favoriteCourses, setFavoriteCourses] = useState<Set<string>>(new Set())
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [enrollingCourse, setEnrollingCourse] = useState<Course | null>(null)
+  const [favoriteCourses, setFavoriteCourses] = useState<Set<string>>(new Set())
+  
   const observerTarget = useRef<HTMLDivElement>(null)
-  const streamController = useRef<AbortController | null>(null)
   const filtersRef = useRef<HTMLDivElement>(null)
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
-  // User progress state
-  const [userProgress, setUserProgress] = useState<{[courseId: string]: UserProgress}>({})
+  // Pagination
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 12,
+    total: 0,
+    totalPages: 1,
+    hasMore: true
+  })
+
+  // User progress state - with better initialization
+  const [userProgress, setUserProgress] = useState<Record<string, UserProgress>>({})
   const [progressLoading, setProgressLoading] = useState<Set<string>>(new Set())
 
   const [filters, setFilters] = useState<FilterState>({
     category: [],
     level: [],
     price: 'all',
-    duration: [],
-    features: [],
     rating: 0,
     sort: 'popular'
   })
 
-  const [stats, setStats] = useState({
-    totalCourses: 0,
-    featuredCourses: 0,
-    freeCourses: 0,
-    totalEnrollments: 0
-  })
+  // Debounce search input
+  useEffect(() => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current)
+    }
+    
+    searchTimeoutRef.current = setTimeout(() => {
+      setDebouncedSearch(searchQuery)
+    }, 500)
 
-  // Enhanced filter options with icons
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current)
+      }
+    }
+  }, [searchQuery])
+
   const filterOptions = {
     categories: [
-      { name: 'Fashion Design', icon: Palette },
-      { name: 'Pattern Making', icon: TargetIcon },
-      { name: 'Sewing', icon: Medal },
-      { name: 'Textiles', icon: Gauge },
-      { name: 'Fashion Business', icon: TrendingUp },
-      { name: 'Sustainability', icon: Globe },
-      { name: 'Digital Fashion', icon: Code },
-      { name: '3D Design', icon: Camera },
-      { name: 'Fashion Marketing', icon: Zap }
+      { name: 'Fashion Design', icon: Palette, color: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300' },
+      { name: 'Pattern Making', icon: Target, color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' },
+      { name: 'Sewing', icon: Medal, color: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' },
+      { name: 'Textiles', icon: Gauge, color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' },
+      { name: 'Fashion Business', icon: TrendingUp, color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300' },
+      { name: 'Sustainability', icon: Globe, color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300' },
+      { name: 'Digital Fashion', icon: Code, color: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-300' },
+      { name: '3D Design', icon: Camera, color: 'bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300' },
+      { name: 'Fashion Marketing', icon: Zap, color: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300' }
     ],
     levels: [
-      { name: 'beginner', icon: Rocket, color: 'bg-green-100 text-green-800 border-green-200' },
-      { name: 'intermediate', icon: Target, color: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
-      { name: 'advanced', icon: Lightning, color: 'bg-red-100 text-red-800 border-red-200' }
-    ],
-    durations: ['0-2 hours', '2-5 hours', '5-10 hours', '10-20 hours', '20+ hours'],
-    features: [
-      { name: 'AI Assistant', icon: Brain },
-      { name: 'Personalized Learning', icon: Target },
-      { name: 'Certification', icon: Award },
-      { name: 'Live Sessions', icon: Video },
-      { name: 'Community Access', icon: Users },
-      { name: 'Lifetime Access', icon: Clock4 },
-      { name: 'Project Based', icon: Palette },
-      { name: 'Mentor Support', icon: ShieldCheck }
+      { name: 'beginner', icon: Rocket, color: 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-800' },
+      { name: 'intermediate', icon: Target, color: 'bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-800' },
+      { name: 'advanced', icon: CloudLightning, color: 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800' }
     ]
   }
 
@@ -252,11 +235,17 @@ export default function CoursesPage() {
   const filteredCourses = useMemo(() => {
     return courses.filter(course => {
       // Search filter
-      if (searchQuery && !course.title.toLowerCase().includes(searchQuery.toLowerCase()) &&
-          !course.shortDescription.toLowerCase().includes(searchQuery.toLowerCase()) &&
-          !course.instructor.firstName.toLowerCase().includes(searchQuery.toLowerCase()) &&
-          !course.instructor.lastName.toLowerCase().includes(searchQuery.toLowerCase())) {
-        return false
+      if (debouncedSearch) {
+        const searchLower = debouncedSearch.toLowerCase()
+        const matchesSearch = 
+          course.title.toLowerCase().includes(searchLower) ||
+          course.shortDescription.toLowerCase().includes(searchLower) ||
+          course.description.toLowerCase().includes(searchLower) ||
+          course.instructor.firstName.toLowerCase().includes(searchLower) ||
+          course.instructor.lastName.toLowerCase().includes(searchLower) ||
+          course.tags.some(tag => tag.toLowerCase().includes(searchLower))
+        
+        if (!matchesSearch) return false
       }
 
       // Category filter
@@ -278,28 +267,9 @@ export default function CoursesPage() {
         return false
       }
 
-      // Features filter
-      if (filters.features.length > 0) {
-        const hasFeature = filters.features.some(feature => {
-          switch (feature) {
-            case 'AI Assistant':
-              return course.aiFeatures?.hasAIAssistant
-            case 'Personalized Learning':
-              return course.aiFeatures?.hasPersonalizedLearning
-            case 'Certification':
-              return true // Assuming all courses have certification
-            case 'Live Sessions':
-              return false // You might want to add this field to your Course interface
-            default:
-              return false
-          }
-        })
-        if (!hasFeature) return false
-      }
-
       return true
     })
-  }, [courses, searchQuery, filters])
+  }, [courses, debouncedSearch, filters])
 
   // Apply sorting to filtered courses
   const sortedCourses = useMemo(() => {
@@ -314,8 +284,6 @@ export default function CoursesPage() {
         return sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       case 'rating':
         return sorted.sort((a, b) => b.averageRating - a.averageRating)
-      case 'duration':
-        return sorted.sort((a, b) => b.totalDuration - a.totalDuration)
       case 'price-low':
         return sorted.sort((a, b) => (a.isFree ? 0 : a.price) - (b.isFree ? 0 : b.price))
       case 'price-high':
@@ -328,11 +296,9 @@ export default function CoursesPage() {
   // Active filters count for badge
   const activeFiltersCount = useMemo(() => {
     return (
-      (filters.category.length) +
-      (filters.level.length) +
+      filters.category.length +
+      filters.level.length +
       (filters.price !== 'all' ? 1 : 0) +
-      (filters.duration.length) +
-      (filters.features.length) +
       (filters.rating > 0 ? 1 : 0)
     )
   }, [filters])
@@ -344,7 +310,9 @@ export default function CoursesPage() {
     setProgressLoading(prev => new Set([...prev, courseId]))
     
     try {
-      const response = await fetch(`/api/courses/${courseId}/progress`)
+      const response = await fetch(`/api/courses/${courseId}/progress`, {
+        credentials: 'include'
+      })
       
       if (response.ok) {
         const progress = await response.json()
@@ -355,7 +323,8 @@ export default function CoursesPage() {
             enrolled: true
           }
         }))
-      } else if (response.status === 403) {
+      } else if (response.status === 403 || response.status === 404) {
+        // User is not enrolled
         setUserProgress(prev => ({
           ...prev,
           [courseId]: {
@@ -366,7 +335,7 @@ export default function CoursesPage() {
             progress: 0,
             completed: false,
             completedLessons: [],
-            lastAccessed: new Date(),
+            lastAccessed: new Date().toISOString(),
             timeSpent: 0
           }
         }))
@@ -383,7 +352,7 @@ export default function CoursesPage() {
           progress: 0,
           completed: false,
           completedLessons: [],
-          lastAccessed: new Date(),
+          lastAccessed: new Date().toISOString(),
           timeSpent: 0
         }
       }))
@@ -407,131 +376,134 @@ export default function CoursesPage() {
   }
 
   // Enhanced enrollment function with proper payment handling
-const enrollInCourse = async (course: Course) => {
-  if (isEnrolling) return
-  
-  setIsEnrolling(course._id)
-  setError(null)
-  
-  try {
-    const response = await fetch(`/api/courses/${course._id}/enroll`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      }
-    })
-
-    const result = await response.json()
-
-    // Handle payment required - this is NOT an error, it's a normal flow
-    if (response.status === 402 && result.requiresPayment) {
-      // Show payment modal for paid courses
-      setEnrollingCourse(course)
-      setShowPaymentModal(true)
-      setIsEnrolling(null)
-      return // Exit early - this is not an error
-    }
-
-    // Handle other successful responses (200 status)
-    if (response.ok) {
-      if (result.enrolled) {
-        // Handle successful enrollment for free courses
-        setCourses(prev => prev.map(c => 
-          c._id === course._id 
-            ? { 
-                ...c, 
-                totalStudents: result.course?.totalStudents || c.totalStudents + 1,
-                instructor: result.course?.instructor || c.instructor
-              }
-            : c
-        ))
-        
-        setUserProgress(prev => ({
-          ...prev,
-          [course._id]: {
-            _id: `temp-${course._id}`,
-            courseId: course._id,
-            userId: 'current-user',
-            enrolled: true,
-            progress: 0,
-            completed: false,
-            completedLessons: [],
-            lastAccessed: new Date(),
-            timeSpent: 0
-          }
-        }))
-        
-        toast({
-          title: 'Successfully Enrolled!',
-          description: 'You can now start learning immediately',
-        })
-
-        if (course.slug) {
-          setTimeout(() => {
-            router.push(`/courses/${course.slug}`)
-          }, 1500)
-        }
-      } 
-      // Handle already enrolled case
-      else if (result.alreadyEnrolled) {
-        toast({
-          title: 'Already Enrolled!',
-          description: 'You are already enrolled in this course',
-        })
-        
-        // Update UI to show enrolled status
-        setUserProgress(prev => ({
-          ...prev,
-          [course._id]: {
-            _id: `temp-${course._id}`,
-            courseId: course._id,
-            userId: 'current-user',
-            enrolled: true,
-            progress: result.progress?.progress || 0,
-            completed: result.progress?.completed || false,
-            completedLessons: result.progress?.completedLessons || [],
-            lastAccessed: new Date(),
-            timeSpent: result.progress?.timeSpent || 0
-          }
-        }))
-      }
-      else {
-        throw new Error('Unexpected response from server')
-      }
-    } else {
-      // Handle actual errors (not 402 payment required)
-      throw new Error(result.error || `Failed to enroll (${response.status})`)
-    }
-
-  } catch (err: any) {
-    console.error('Error enrolling:', err)
+  const enrollInCourse = async (course: Course) => {
+    if (isEnrolling) return
     
-    // Only show error toast for actual errors (not payment flow)
-    if (err.message && !err.message.includes('402')) {
-      if (err.message.includes('Unauthorized')) {
-        toast({
-          title: 'Login Required',
-          description: 'Please log in to enroll in courses',
-          variant: 'destructive',
-        })
-      } else if (err.message.includes('not found')) {
-        toast({
-          title: 'Course Not Available',
-          description: 'This course is no longer available',
-          variant: 'destructive',
-        })
-      } else {
-        toast({
-          title: 'Enrollment Failed',
-          description: err.message || 'Failed to enroll in course. Please try again.',
-          variant: 'destructive',
-        })
+    setIsEnrolling(course._id)
+    setError(null)
+    
+    try {
+      const response = await fetch(`/api/courses/${course._id}/enroll`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include'
+      })
+
+      const result = await response.json()
+
+      // Handle payment required - this is NOT an error, it's a normal flow
+      if (response.status === 402 && result.requiresPayment) {
+        // Show payment modal for paid courses
+        setEnrollingCourse(course)
+        setShowPaymentModal(true)
+        setIsEnrolling(null)
+        return // Exit early - this is not an error
       }
+
+      // Handle other successful responses (200 status)
+      if (response.ok) {
+        if (result.enrolled) {
+          // Handle successful enrollment for free courses
+          setCourses(prev => prev.map(c => 
+            c._id === course._id 
+              ? { 
+                  ...c, 
+                  totalStudents: result.course?.totalStudents || c.totalStudents + 1
+                }
+              : c
+          ))
+          
+          setUserProgress(prev => ({
+            ...prev,
+            [course._id]: {
+              _id: `temp-${course._id}`,
+              courseId: course._id,
+              userId: 'current-user',
+              enrolled: true,
+              progress: 0,
+              completed: false,
+              completedLessons: [],
+              lastAccessed: new Date().toISOString(),
+              timeSpent: 0
+            }
+          }))
+          
+          toast({
+            title: 'Successfully Enrolled!',
+            description: 'You can now start learning immediately',
+          })
+
+          if (course.slug) {
+            setTimeout(() => {
+              router.push(`/courses/${course.slug}`)
+            }, 1500)
+          }
+        } 
+        // Handle already enrolled case
+        else if (result.alreadyEnrolled) {
+          toast({
+            title: 'Already Enrolled!',
+            description: 'You are already enrolled in this course',
+          })
+          
+          // Update UI to show enrolled status
+          setUserProgress(prev => ({
+            ...prev,
+            [course._id]: {
+              _id: `temp-${course._id}`,
+              courseId: course._id,
+              userId: 'current-user',
+              enrolled: true,
+              progress: result.progress?.progress || 0,
+              completed: result.progress?.completed || false,
+              completedLessons: result.progress?.completedLessons || [],
+              lastAccessed: new Date().toISOString(),
+              timeSpent: result.progress?.timeSpent || 0
+            }
+          }))
+        }
+        else {
+          throw new Error('Unexpected response from server')
+        }
+      } else {
+        // Handle actual errors (not 402 payment required)
+        throw new Error(result.error || `Failed to enroll (${response.status})`)
+      }
+
+    } catch (err: any) {
+      console.error('Error enrolling:', err)
+      
+      // Only show error toast for actual errors (not payment flow)
+      if (err.message && !err.message.includes('402')) {
+        if (err.message.includes('Unauthorized') || err.message.includes('401')) {
+          toast({
+            title: 'Login Required',
+            description: 'Please log in to enroll in courses',
+            variant: 'destructive',
+          })
+          // Redirect to login with return URL
+          const currentUrl = encodeURIComponent(window.location.pathname + window.location.search)
+          router.push(`/login?redirect=${currentUrl}`)
+        } else if (err.message.includes('not found')) {
+          toast({
+            title: 'Course Not Available',
+            description: 'This course is no longer available',
+            variant: 'destructive',
+          })
+        } else {
+          toast({
+            title: 'Enrollment Failed',
+            description: err.message || 'Failed to enroll in course. Please try again.',
+            variant: 'destructive',
+          })
+        }
+      }
+    } finally {
+      setIsEnrolling(null)
     }
-  } finally {
-    setIsEnrolling(null)
   }
-}
 
   // Handle payment success
   const handlePaymentSuccess = (courseId: string) => {
@@ -545,7 +517,7 @@ const enrollInCourse = async (course: Course) => {
         progress: 0,
         completed: false,
         completedLessons: [],
-        lastAccessed: new Date(),
+        lastAccessed: new Date().toISOString(),
         timeSpent: 0
       }
     }))
@@ -553,29 +525,24 @@ const enrollInCourse = async (course: Course) => {
     setShowPaymentModal(false)
     setEnrollingCourse(null)
     
-    // Refresh course data
-    fetchCourses(1, false)
-    
     toast({
       title: '🎉 Enrollment Successful!',
       description: 'You have been successfully enrolled in the course',
       variant: 'default',
     })
-  }
 
-  // Continue learning - redirect to course detail page
-  const continueLearning = (course: Course) => {
-    router.push(`/courses/${course.slug}`)
-  }
-
-  // View course details
-  const viewCourseDetails = (course: Course) => {
-    router.push(`/courses/${course.slug}`)
+    // Find the course to redirect
+    const enrolledCourse = courses.find(c => c._id === courseId)
+    if (enrolledCourse?.slug) {
+      setTimeout(() => {
+        router.push(`/courses/${enrolledCourse.slug}`)
+      }, 1200)
+    }
   }
 
   // Check if user is enrolled in a course
   const isUserEnrolled = (courseId: string) => {
-    return userProgress[courseId]?.enrolled || false
+    return userProgress[courseId]?.enrolled === true
   }
 
   // Enhanced enrollment button with better styling
@@ -583,6 +550,7 @@ const enrollInCourse = async (course: Course) => {
     const progress = userProgress[course._id]
     const isEnrolled = isUserEnrolled(course._id)
     const isLoading = progressLoading.has(course._id) || isEnrolling === course._id
+    const isFavorite = favoriteCourses.has(course._id)
     
     if (isLoading) {
       return (
@@ -594,26 +562,57 @@ const enrollInCourse = async (course: Course) => {
 
     if (!isEnrolled) {
       return (
-        <Button 
-          size="sm" 
-          className="rounded-lg bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition-all shadow-sm hover:shadow"
-          onClick={(e) => {
-            e.stopPropagation()
-            enrollInCourse(course)
-          }}
-          disabled={isEnrolling === course._id}
-        >
-          {isEnrolling === course._id ? (
-            <Loader2 className="w-4 h-4 animate-spin mr-2" />
-          ) : null}
-          {course.isFree ? 'Enroll Free' : `Enroll $${course.price}`}
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            size="sm"
+            variant="ghost"
+            className="rounded-lg p-2 hover:bg-gray-100 dark:hover:bg-gray-800"
+            onClick={(e) => {
+              e.stopPropagation()
+              setFavoriteCourses(prev => {
+                const newSet = new Set(prev)
+                if (newSet.has(course._id)) {
+                  newSet.delete(course._id)
+                  toast({
+                    title: 'Removed from favorites',
+                    description: 'Course removed from your favorites',
+                  })
+                } else {
+                  newSet.add(course._id)
+                  toast({
+                    title: 'Added to favorites',
+                    description: 'Course added to your favorites',
+                  })
+                }
+                return newSet
+              })
+            }}
+            title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+          >
+            {isFavorite ? (
+              <Bookmark className="w-4 h-4 fill-current text-yellow-500" />
+            ) : (
+              <Bookmark className="w-4 h-4" />
+            )}
+          </Button>
+          <Button 
+            size="sm" 
+            className="flex-1 rounded-lg bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition-all shadow-sm hover:shadow"
+            onClick={(e) => {
+              e.stopPropagation()
+              enrollInCourse(course)
+            }}
+            disabled={isEnrolling === course._id}
+          >
+            {course.isFree ? 'Enroll Free' : `Enroll $${course.price}`}
+          </Button>
+        </div>
       )
     }
 
     if (progress?.completed) {
       return (
-        <div className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+        <div className="flex items-center justify-center space-x-2 px-4 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 w-full">
           <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
           <span className="text-sm font-medium text-green-700 dark:text-green-300">Completed</span>
         </div>
@@ -623,9 +622,6 @@ const enrollInCourse = async (course: Course) => {
     if (progress?.progress && progress.progress > 0) {
       return (
         <div className="w-full">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-sm text-gray-600 dark:text-gray-400">{Math.round(progress.progress * 100)}%</span>
-          </div>
           <div className="relative h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mb-2">
             <div 
               className="absolute h-full bg-black dark:bg-white rounded-full transition-all duration-500"
@@ -634,14 +630,14 @@ const enrollInCourse = async (course: Course) => {
           </div>
           <Button 
             size="sm" 
-            className="rounded-lg bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 w-full transition-all shadow-sm hover:shadow"
+            className="w-full rounded-lg bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition-all shadow-sm hover:shadow"
             onClick={(e) => {
               e.stopPropagation()
-              continueLearning(course)
+              router.push(`/courses/${course.slug}`)
             }}
           >
             <Play className="w-4 h-4 mr-2" />
-            Continue
+            Continue ({Math.round(progress.progress * 100)}%)
           </Button>
         </div>
       )
@@ -650,10 +646,10 @@ const enrollInCourse = async (course: Course) => {
     return (
       <Button 
         size="sm" 
-        className="rounded-lg bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition-all shadow-sm hover:shadow w-full"
+        className="w-full rounded-lg bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition-all shadow-sm hover:shadow"
         onClick={(e) => {
           e.stopPropagation()
-          continueLearning(course)
+          router.push(`/courses/${course.slug}`)
         }}
       >
         <Play className="w-4 h-4 mr-2" />
@@ -662,214 +658,185 @@ const enrollInCourse = async (course: Course) => {
     )
   }
 
-  // Enhanced favorite toggle with animation
-  const toggleFavorite = (courseId: string) => {
-    setFavoriteCourses(prev => {
-      const newFavorites = new Set(prev)
-      if (newFavorites.has(courseId)) {
-        newFavorites.delete(courseId)
-        toast({
-          title: 'Removed from favorites',
-          description: 'Course removed from your favorites',
-        })
-      } else {
-        newFavorites.add(courseId)
-        toast({
-          title: 'Added to favorites',
-          description: 'Course added to your favorites',
-        })
-      }
-      return newFavorites
-    })
-  }
+  // Fetch courses with abort controller and retry logic
+  const fetchCourses = useCallback(async (page = 1, isLoadMore = false) => {
+    // Abort previous request if exists
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
 
-  // Enhanced share course
-  const shareCourse = async (course: Course) => {
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: course.title,
-          text: course.shortDescription,
-          url: `${window.location.origin}/courses/${course.slug}`,
-        })
-      } catch (err) {
-        console.log('Share cancelled')
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+
+    if (!isLoadMore) {
+      setLoading(true)
+      if (page === 1) {
+        setCourses([])
       }
     } else {
-      navigator.clipboard.writeText(`${window.location.origin}/courses/${course.slug}`)
-      toast({
-        title: 'Link copied to clipboard!',
-        description: 'Share this course with your friends',
-      })
+      setLoadingMore(true)
     }
-  }
-
-  // Fetch courses with enhanced streaming
-  const fetchCourses = useCallback(async (page = 1, isLoadMore = false) => {
-    if (streamController.current) {
-      streamController.current.abort()
-    }
-
-    streamController.current = new AbortController()
+    
+    setError(null)
 
     try {
-      if (!isLoadMore) {
-        setLoading(true)
-        setStreaming(true)
-        setCourses([])
-        setRecommendations([])
-        setTrendingCourses([])
-        setUserProgress({})
-      }
-      
-      setError(null)
-
       const params = new URLSearchParams({
         page: page.toString(),
-        limit: '12',
-        search: searchQuery,
+        limit: pagination.limit.toString(),
         sort: filters.sort,
-        ...(filters.category.length > 0 && { category: filters.category.join(',') }),
-        ...(filters.level.length > 0 && { level: filters.level.join(',') }),
         price: filters.price,
-        ...(filters.features.length > 0 && { features: filters.features.join(',') }),
-        rating: filters.rating.toString()
+        rating: filters.rating.toString(),
+        _t: Date.now().toString() // Cache busting
       })
 
-      const response = await fetch(`/api/courses/stream?${params}`, {
-        signal: streamController.current.signal,
+      if (debouncedSearch) {
+        params.append('search', debouncedSearch)
+      }
+      if (filters.category.length > 0) {
+        params.append('categories', filters.category.join(','))
+      }
+      if (filters.level.length > 0) {
+        params.append('levels', filters.level.join(','))
+      }
+
+      const response = await fetch(`/api/courses?${params}`, {
+        credentials: 'include',
         headers: {
-          'Accept': 'text/event-stream'
-        }
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
+          'Accept': 'application/json'
+        },
+        signal: controller.signal
       })
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch courses: ${response.status}`)
+        throw new Error(`HTTP ${response.status}: Failed to fetch courses`)
       }
 
-      if (response.headers.get('content-type')?.includes('text/event-stream')) {
-        const reader = response.body?.getReader()
-        if (!reader) throw new Error('Response body is not readable')
+      const data = await response.json()
+      
+      // Handle different API response formats
+      let coursesData: Course[] = []
+      let paginationData = {
+        page: page,
+        total: 0,
+        totalPages: 1
+      }
 
-        let buffer = ''
-        const seenCourseIds = new Set<string>()
-        
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          const chunk = new TextDecoder().decode(value)
-          buffer += chunk
-
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6))
-                
-                switch (data.type) {
-                  case 'stats':
-                    setStats(data.stats)
-                    break
-                  case 'course':
-                    if (!seenCourseIds.has(data.course._id)) {
-                      seenCourseIds.add(data.course._id)
-                      if (isLoadMore) {
-                        setCourses(prev => {
-                          const existingIds = new Set(prev.map(c => c._id))
-                          return existingIds.has(data.course._id) 
-                            ? prev 
-                            : [...prev, data.course]
-                        })
-                      } else {
-                        setCourses(prev => [...prev, data.course])
-                      }
-                    }
-                    break
-                  case 'recommendation':
-                    setRecommendations(prev => {
-                      const existingIds = new Set(prev.map(c => c._id))
-                      return existingIds.has(data.course._id) 
-                        ? prev 
-                        : [...prev, data.course]
-                    })
-                    break
-                  case 'trending':
-                    setTrendingCourses(prev => {
-                      const existingIds = new Set(prev.map(c => c._id))
-                      return existingIds.has(data.course._id) 
-                        ? prev 
-                        : [...prev, data.course]
-                    })
-                    break
-                  case 'complete':
-                    setStreaming(false)
-                    break
-                  case 'error':
-                    console.error('Stream error:', data.message)
-                    break
-                }
-              } catch (e) {
-                console.warn('Failed to parse stream data:', e)
-              }
-            }
-          }
+      if (Array.isArray(data)) {
+        coursesData = data
+        paginationData.total = data.length
+      } else if (data.courses && Array.isArray(data.courses)) {
+        coursesData = data.courses
+        paginationData = {
+          page: data.pagination?.page || page,
+          total: data.pagination?.total || data.courses.length,
+          totalPages: data.pagination?.totalPages || 1
         }
+      } else if (data.data && Array.isArray(data.data)) {
+        coursesData = data.data
+        paginationData.total = data.data.length
+      } else if (data.items && Array.isArray(data.items)) {
+        coursesData = data.items
+        paginationData.total = data.items.length
       }
+
+      if (isLoadMore) {
+        setCourses(prev => {
+          const existingIds = new Set(prev.map(c => c._id))
+          const newCourses = coursesData.filter(c => !existingIds.has(c._id))
+          return [...prev, ...newCourses]
+        })
+      } else {
+        setCourses(coursesData)
+      }
+      
+      setPagination({
+        ...pagination,
+        page: paginationData.page,
+        total: paginationData.total,
+        totalPages: paginationData.totalPages,
+        hasMore: paginationData.page < paginationData.totalPages
+      })
+
+      // Fetch progress for all courses after loading
+      if (coursesData.length > 0) {
+        fetchAllCoursesProgress(coursesData.map(c => c._id))
+      }
+      
     } catch (err: any) {
-      if (err.name === 'AbortError') return
+      if (err.name === 'AbortError') {
+        console.log('Request aborted')
+        return
+      }
+      
       console.error('Error fetching courses:', err)
       setError(err.message || 'Failed to load courses')
+      
+      if (!isLoadMore) {
+        toast({
+          title: 'Error Loading Courses',
+          description: 'Please check your connection and try again',
+          variant: 'destructive',
+        })
+      }
     } finally {
       setLoading(false)
-      setStreaming(false)
+      setLoadingMore(false)
+      abortControllerRef.current = null
     }
-  }, [searchQuery, filters])
+  }, [debouncedSearch, filters, pagination.limit, toast])
 
   // Load more courses
   const loadMoreCourses = useCallback(async () => {
-    if (!streaming && courses.length > 0) {
-      const currentPage = Math.ceil(courses.length / 12)
-      await fetchCourses(currentPage + 1, true)
-    }
-  }, [streaming, courses.length, fetchCourses])
+    if (!pagination.hasMore || loading || loadingMore) return
+    
+    const nextPage = pagination.page + 1
+    await fetchCourses(nextPage, true)
+  }, [pagination, loading, loadingMore, fetchCourses])
 
   // Intersection Observer for infinite scroll
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && !streaming && !loading) {
+        if (entries[0].isIntersecting && pagination.hasMore && !loading && !loadingMore) {
           loadMoreCourses()
         }
       },
-      { threshold: 0.1 }
+      { threshold: 0.3, rootMargin: '200px' }
     )
 
-    if (observerTarget.current) {
-      observer.observe(observerTarget.current)
+    const currentTarget = observerTarget.current
+    if (currentTarget) {
+      observer.observe(currentTarget)
     }
 
     return () => {
-      if (observerTarget.current) {
-        observer.unobserve(observerTarget.current)
+      if (currentTarget) {
+        observer.unobserve(currentTarget)
       }
     }
-  }, [streaming, loading, loadMoreCourses])
+  }, [pagination.hasMore, loading, loadingMore, loadMoreCourses])
 
-  // Initial load and filter changes
+  // Initial load on mount
   useEffect(() => {
     fetchCourses(1, false)
-  }, [searchQuery, filters, fetchCourses])
+  }, [])
 
-  // Fetch progress for courses when they are loaded
+  // Fetch courses when search or sort filters change
   useEffect(() => {
-    if (courses.length > 0) {
-      const courseIds = courses.map(course => course._id)
-      fetchAllCoursesProgress(courseIds)
-    }
-  }, [courses.length])
+    // Reset to page 1 when search or sort changes
+    fetchCourses(1, false)
+  }, [debouncedSearch, filters.sort, filters.price, filters.rating])
+
+  // Category and level filters with debounce
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      fetchCourses(1, false)
+    }, 300)
+
+    return () => clearTimeout(timeoutId)
+  }, [filters.category, filters.level])
 
   // Toggle filters
   const toggleFilter = (type: keyof FilterState, value: string) => {
@@ -893,41 +860,36 @@ const enrollInCourse = async (course: Course) => {
       category: [],
       level: [],
       price: 'all',
-      duration: [],
-      features: [],
       rating: 0,
       sort: 'popular'
     })
-  }
-
-  // Format duration
-  const formatDuration = (minutes: number) => {
-    const hours = Math.floor(minutes / 60)
-    const mins = minutes % 60
-    if (hours > 0) {
-      return `${hours}h ${mins > 0 ? `${mins}m` : ''}`.trim()
-    }
-    return `${mins}m`
+    setSearchQuery('')
   }
 
   // Get level color
   const getLevelColor = (level: string) => {
     switch (level) {
       case 'beginner':
-        return 'bg-green-100 text-green-800 border-green-200'
+        return 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-800'
       case 'intermediate':
-        return 'bg-yellow-100 text-yellow-800 border-yellow-200'
+        return 'bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-800'
       case 'advanced':
-        return 'bg-red-100 text-red-800 border-red-200'
+        return 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800'
       default:
-        return 'bg-gray-100 text-gray-800 border-gray-200'
+        return 'bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-800 dark:text-gray-300'
     }
+  }
+
+  // Get category color
+  const getCategoryColor = (categoryName: string) => {
+    const category = filterOptions.categories.find(c => c.name === categoryName)
+    return category?.color || 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
   }
 
   // Course Skeleton
   const CourseSkeleton = () => (
     <Card className="rounded-xl overflow-hidden animate-pulse border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
-      <div className="h-44 bg-gray-200 dark:bg-gray-800"></div>
+      <div className="h-44 bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-800 dark:to-gray-700"></div>
       <CardHeader className="pb-4 px-5">
         <div className="h-5 bg-gray-200 dark:bg-gray-800 rounded mb-3 w-4/5"></div>
         <div className="h-4 bg-gray-200 dark:bg-gray-800 rounded w-3/4"></div>
@@ -941,149 +903,31 @@ const enrollInCourse = async (course: Course) => {
     </Card>
   )
 
-  // Quick View Modal
-  const QuickViewModal = ({ course, onClose }: { course: Course, onClose: () => void }) => {
-    const progress = userProgress[course._id]
-    const isEnrolled = isUserEnrolled(course._id)
-    const isLoading = progressLoading.has(course._id)
-    
-    return (
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-        <div className="bg-white dark:bg-gray-900 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-gray-200 dark:border-gray-800 shadow-2xl">
-          <div className="relative">
-            <img
-              src={course.thumbnail.url}
-              alt={course.title}
-              className="w-full h-56 object-cover rounded-t-xl"
-            />
-            <button
-              onClick={onClose}
-              className="absolute top-4 right-4 bg-white dark:bg-gray-900 rounded-lg p-2 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors shadow-lg"
-            >
-              <X className="w-5 h-5" />
-            </button>
-            
-            {/* Badges */}
-            <div className="absolute top-4 left-4 flex flex-wrap gap-2">
-              <Badge className={`rounded-lg ${getLevelColor(course.level)} border`}>
-                {course.level}
-              </Badge>
-              {course.isFree && (
-                <Badge className="rounded-lg bg-green-500 text-white border-0">
-                  Free
-                </Badge>
-              )}
-            </div>
-          </div>
-          
-          <div className="p-6">
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex-1">
-                <h2 className="text-2xl font-bold mb-3">
-                  {course.title}
-                </h2>
-                <p className="text-gray-600 dark:text-gray-400">{course.shortDescription}</p>
-              </div>
-              <span className="text-2xl font-bold text-black dark:text-white ml-4">
-                {course.isFree ? 'Free' : `$${course.price}`}
-              </span>
-            </div>
-
-            {/* Instructor Info */}
-            <div className="flex items-center space-x-3 mb-6 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
-              <img
-                src={course.instructor.avatar || '/default-avatar.png'}
-                alt={course.instructor.username}
-                className="w-10 h-10 rounded-lg"
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement
-                  target.src = '/default-avatar.png'
-                }}
-              />
-              <div>
-                <p className="font-medium">
-                  {course.instructor.firstName} {course.instructor.lastName}
-                </p>
-                <p className="text-sm text-gray-500">
-                  {course.instructor.totalStudents || 0}+ students
-                </p>
-              </div>
-            </div>
-
-            {/* Stats */}
-            <div className="grid grid-cols-3 gap-4 mb-6">
-              <div className="text-center p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
-                <div className="text-lg font-bold text-black dark:text-white">{course.totalLessons}</div>
-                <div className="text-sm text-gray-500">Lessons</div>
-              </div>
-              <div className="text-center p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
-                <div className="flex items-center justify-center text-lg font-bold text-black dark:text-white">
-                  <Star className="w-4 h-4 fill-yellow-400 text-yellow-400 mr-1" />
-                  {course.averageRating > 0 ? course.averageRating.toFixed(1) : 'New'}
-                </div>
-                <div className="text-sm text-gray-500">Rating</div>
-              </div>
-              <div className="text-center p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
-                <div className="text-lg font-bold text-black dark:text-white">{formatDuration(course.totalDuration)}</div>
-                <div className="text-sm text-gray-500">Duration</div>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="space-y-3">
-              {isLoading ? (
-                <div className="flex items-center justify-center px-4 py-3 rounded-lg bg-gray-100 dark:bg-gray-800">
-                  <Loader2 className="w-5 h-5 animate-spin text-gray-500" />
-                </div>
-              ) : isEnrolled ? (
-                progress?.completed ? (
-                  <div className="flex items-center justify-center space-x-2 px-4 py-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
-                    <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
-                    <span className="font-medium text-green-700 dark:text-green-300">Course Completed</span>
-                  </div>
-                ) : (
-                  <Button 
-                    onClick={() => {
-                      onClose()
-                      continueLearning(course)
-                    }}
-                    className="w-full rounded-lg bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 py-3 text-base"
-                  >
-                    <Play className="w-5 h-5 mr-2" />
-                    {progress?.progress && progress.progress > 0 ? 'Continue Learning' : 'Start Learning'}
-                  </Button>
-                )
-              ) : (
-                <Button 
-                  className="w-full rounded-lg bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 py-3 text-base"
-                  onClick={() => enrollInCourse(course)}
-                  disabled={isEnrolling === course._id}
-                >
-                  {isEnrolling === course._id ? (
-                    <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                  ) : (
-                    <BookCheck className="w-5 h-5 mr-2" />
-                  )}
-                  {isEnrolling === course._id ? 'Enrolling...' : course.isFree ? 'Enroll Free' : `Enroll for $${course.price}`}
-                </Button>
-              )}
-              <Button 
-                onClick={() => {
-                  onClose()
-                  viewCourseDetails(course)
-                }}
-                variant="outline" 
-                className="w-full rounded-lg border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 py-3 text-base"
-              >
-                <BookOpen className="w-5 h-5 mr-2" />
-                View Full Details
-              </Button>
-            </div>
-          </div>
-        </div>
+  // Error Display
+  const ErrorDisplay = () => (
+    <div className="text-center py-12">
+      <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-100 dark:bg-red-900/20 mb-4">
+        <AlertCircle className="w-8 h-8 text-red-600 dark:text-red-400" />
       </div>
-    )
-  }
+      <h3 className="text-xl font-semibold mb-2">Failed to Load Courses</h3>
+      <p className="text-gray-600 dark:text-gray-400 mb-6 max-w-md mx-auto">
+        {error || 'There was an error loading the courses. Please check your connection and try again.'}
+      </p>
+      <div className="flex justify-center gap-3">
+        <Button onClick={() => fetchCourses(1, false)} className="rounded-lg">
+          <Loader2 className="w-4 h-4 mr-2" />
+          Retry
+        </Button>
+        <Button 
+          onClick={clearFilters} 
+          variant="outline" 
+          className="rounded-lg"
+        >
+          Clear Filters
+        </Button>
+      </div>
+    </div>
+  )
 
   // Filters Sidebar Component
   const FiltersSidebar = () => (
@@ -1121,6 +965,7 @@ const enrollInCourse = async (course: Course) => {
             className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm focus:ring-2 focus:ring-black dark:focus:ring-white focus:border-transparent"
           >
             <option value="popular">Most Popular</option>
+            <option value="trending">Trending</option>
             <option value="newest">Newest</option>
             <option value="rating">Highest Rated</option>
             <option value="price-low">Price: Low to High</option>
@@ -1182,7 +1027,7 @@ const enrollInCourse = async (course: Course) => {
             Category
           </h4>
           <div className="space-y-2">
-            {filterOptions.categories.slice(0, 5).map((category) => (
+            {filterOptions.categories.map((category) => (
               <label key={category.name} className="flex items-center space-x-3 cursor-pointer group">
                 <input
                   type="checkbox"
@@ -1190,9 +1035,30 @@ const enrollInCourse = async (course: Course) => {
                   onChange={() => toggleFilter('category', category.name)}
                   className="w-4 h-4 text-black dark:text-white rounded border-gray-300 dark:border-gray-600"
                 />
-                <span className="text-sm">{category.name}</span>
+                <span className={`px-3 py-1.5 rounded text-xs font-medium ${category.color} border`}>
+                  {category.name}
+                </span>
               </label>
             ))}
+          </div>
+        </div>
+
+        {/* Rating Filter */}
+        <div>
+          <h4 className="font-medium mb-3 text-sm text-gray-700 dark:text-gray-300">
+            Minimum Rating
+          </h4>
+          <div className="flex items-center space-x-2">
+            <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+            <select
+              value={filters.rating}
+              onChange={(e) => setFilters(prev => ({ ...prev, rating: Number(e.target.value) }))}
+              className="flex-1 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm focus:ring-2 focus:ring-black dark:focus:ring-white focus:border-transparent"
+            >
+              <option value="0">Any rating</option>
+              <option value="4">4+ stars</option>
+              <option value="4.5">4.5+ stars</option>
+            </select>
           </div>
         </div>
       </CardContent>
@@ -1200,17 +1066,20 @@ const enrollInCourse = async (course: Course) => {
   )
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-black">
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white dark:from-black dark:to-gray-900">
       {/* Main Content */}
       <div className="container mx-auto px-4 py-8">
         {/* Header Section */}
         <div className="mb-10">
           <div className="text-center mb-8">
-            <h1 className="text-3xl md:text-4xl font-bold mb-3">
-              Fashion Design Courses
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-purple-100 to-pink-100 dark:from-purple-900/30 dark:to-pink-900/30 mb-4">
+              <Palette className="w-8 h-8 text-purple-600 dark:text-purple-400" />
+            </div>
+            <h1 className="text-3xl md:text-4xl font-bold mb-3 bg-gradient-to-r from-gray-900 to-gray-700 dark:from-white dark:to-gray-300 bg-clip-text text-transparent">
+              Master Fashion Design
             </h1>
-            <p className="text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-              Master your craft with expert-led courses in fashion design, pattern making, and more
+            <p className="text-gray-600 dark:text-gray-400 max-w-2xl mx-auto text-lg">
+              Learn from industry experts with hands-on projects and personalized feedback
             </p>
           </div>
           
@@ -1223,8 +1092,16 @@ const enrollInCourse = async (course: Course) => {
                 placeholder="Search for courses, topics, or instructors..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-12 pr-4 py-3 rounded-xl border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-base shadow-sm focus:shadow-md transition-shadow"
+                className="pl-12 pr-4 py-3 rounded-xl border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-base shadow-sm focus:shadow-md transition-shadow focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400"
               />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1253,10 +1130,11 @@ const enrollInCourse = async (course: Course) => {
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
               <div>
                 <h2 className="text-xl font-semibold mb-1">
-                  {searchQuery ? `Search results for "${searchQuery}"` : 'All Courses'}
+                  {debouncedSearch ? `Search results for "${debouncedSearch}"` : 'All Courses'}
                 </h2>
                 <p className="text-gray-500 text-sm">
-                  {sortedCourses.length} courses
+                  {courses.length} of {pagination.total} courses
+                  {activeFiltersCount > 0 && ` • ${activeFiltersCount} filter${activeFiltersCount > 1 ? 's' : ''} active`}
                 </p>
               </div>
               
@@ -1300,7 +1178,9 @@ const enrollInCourse = async (course: Course) => {
             </div>
 
             {/* Courses Grid */}
-            {loading && courses.length === 0 ? (
+            {error && !loading ? (
+              <ErrorDisplay />
+            ) : loading && courses.length === 0 ? (
               <div className={`grid gap-6 ${
                 viewMode === 'grid' 
                   ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' 
@@ -1312,16 +1192,21 @@ const enrollInCourse = async (course: Course) => {
               </div>
             ) : sortedCourses.length === 0 ? (
               <div className="text-center py-16">
-                <div className="inline-block p-6 bg-gray-100 dark:bg-gray-900 rounded-2xl mb-6">
-                  <BookOpen className="w-12 h-12 text-gray-400" />
+                <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-gray-100 dark:bg-gray-900 mb-6">
+                  <BookOpen className="w-10 h-10 text-gray-400" />
                 </div>
                 <h3 className="text-xl font-semibold mb-2">No courses found</h3>
                 <p className="text-gray-500 mb-6 max-w-sm mx-auto">
-                  Try adjusting your search or filters
+                  Try adjusting your search or filters to find what you're looking for
                 </p>
-                <Button onClick={clearFilters} variant="outline" className="rounded-lg">
-                  Clear filters
-                </Button>
+                <div className="flex justify-center gap-3">
+                  <Button onClick={clearFilters} variant="outline" className="rounded-lg">
+                    Clear filters
+                  </Button>
+                  <Button onClick={() => setSearchQuery('')} variant="ghost" className="rounded-lg">
+                    Clear search
+                  </Button>
+                </div>
               </div>
             ) : (
               <>
@@ -1330,83 +1215,116 @@ const enrollInCourse = async (course: Course) => {
                     ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' 
                     : 'grid-cols-1'
                 }`}>
-                  {sortedCourses.map((course) => {
-                    const progress = userProgress[course._id]
-                    const isEnrolled = isUserEnrolled(course._id)
-                    
-                    return (
-                      <Card 
-                        key={course._id} 
-                        className="group rounded-xl overflow-hidden hover:shadow-lg transition-shadow border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 cursor-pointer"
-                        onClick={() => setSelectedCourse(course)}
-                      >
-                        {/* Course Thumbnail */}
-                        <div className="relative h-44 bg-gray-200 dark:bg-gray-800 overflow-hidden">
-                          <img
-                            src={course.thumbnail.url}
-                            alt={course.title}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                          />
-                          <div className="absolute top-3 left-3">
-                            <Badge className={`rounded-lg ${getLevelColor(course.level)} border shadow-sm`}>
-                              {course.level}
+                  {sortedCourses.map((course) => (
+                    <Card 
+                      key={course._id} 
+                      className="group relative rounded-xl overflow-hidden hover:shadow-xl transition-all duration-300 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 cursor-pointer hover:border-gray-300 dark:hover:border-gray-700 hover:-translate-y-1"
+                      onClick={(e) => {
+                        // Don't navigate if clicking on a button or favorite icon
+                        const target = e.target as HTMLElement;
+                        const isButtonClick = target.closest('button');
+                        if (!isButtonClick) {
+                          router.push(`/courses/${course.slug}`);
+                        }
+                      }}
+                    >
+                      {/* Course Thumbnail */}
+                      <div className="relative h-48 bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-800 dark:to-gray-700 overflow-hidden">
+                        <img
+                          src={course.thumbnail?.url || '/api/placeholder/400/250'}
+                          alt={course.title}
+                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                          loading="lazy"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement
+                            target.src = '/api/placeholder/400/250'
+                          }}
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                        
+                        {/* Badges */}
+                        <div className="absolute top-3 left-3 flex flex-wrap gap-2">
+                          <Badge className={`rounded-lg ${getLevelColor(course.level)} border shadow-sm backdrop-blur-sm`}>
+                            {course.level}
+                          </Badge>
+                          <Badge className={`rounded-lg ${getCategoryColor(course.category)} border shadow-sm backdrop-blur-sm`}>
+                            {course.category}
+                          </Badge>
+                        </div>
+                        
+                        {/* Price Badge */}
+                        <div className="absolute top-3 right-3">
+                          {course.isFree ? (
+                            <Badge className="rounded-lg bg-gradient-to-r from-green-500 to-emerald-500 text-white border-0 shadow-lg backdrop-blur-sm">
+                              Free
                             </Badge>
-                          </div>
-                          {course.isFree && (
-                            <div className="absolute top-3 right-3">
-                              <Badge className="rounded-lg bg-green-500 text-white border-0 shadow-sm">
-                                Free
-                              </Badge>
-                            </div>
+                          ) : (
+                            <Badge className="rounded-lg bg-gradient-to-r from-purple-500 to-pink-500 text-white border-0 shadow-lg backdrop-blur-sm">
+                              ${course.price}
+                            </Badge>
                           )}
                         </div>
                         
-                        <CardHeader className="pb-4 px-5 pt-5">
-                          <CardTitle className="text-lg font-semibold mb-2 line-clamp-2 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors">
-                            {course.title}
-                          </CardTitle>
-                          <CardDescription className="line-clamp-2 text-gray-600 dark:text-gray-400 text-sm">
-                            {course.shortDescription}
-                          </CardDescription>
-                        </CardHeader>
-                        
-                        <CardContent className="pb-5 px-5">
-                          {/* Instructor and Rating */}
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center space-x-2">
-                              <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-800 flex items-center justify-center overflow-hidden">
-                                <img
-                                  src={course.instructor.avatar || '/default-avatar.png'}
-                                  alt={course.instructor.username}
-                                  className="w-full h-full object-cover"
-                                  onError={(e) => {
-                                    const target = e.target as HTMLImageElement
-                                    target.src = '/default-avatar.png'
-                                  }}
-                                />
-                              </div>
-                              <span className="text-sm font-medium">
-                                {course.instructor.firstName}
-                              </span>
+                        {/* Featured Badge */}
+                        {course.isFeatured && (
+                          <div className="absolute bottom-3 left-3">
+                            <Badge className="rounded-lg bg-gradient-to-r from-yellow-500 to-amber-500 text-white border-0 shadow-lg backdrop-blur-sm">
+                              <TrendingIcon className="w-3 h-3 mr-1" />
+                              Featured
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
+                      
+                      <CardHeader className="pb-4 px-5 pt-5">
+                        <CardTitle className="text-lg font-bold mb-2 line-clamp-2 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors">
+                          {course.title}
+                        </CardTitle>
+                        <CardDescription className="line-clamp-2 text-gray-600 dark:text-gray-400 text-sm">
+                          {course.shortDescription}
+                        </CardDescription>
+                      </CardHeader>
+                      
+                      <CardContent className="pb-5 px-5">
+                        {/* Instructor Info */}
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center space-x-2">
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-200 to-pink-200 dark:from-purple-900 dark:to-pink-900 flex items-center justify-center overflow-hidden ring-2 ring-white dark:ring-gray-800">
+                              <img
+                                src={course.instructor.avatar || '/default-avatar.png'}
+                                alt={course.instructor.username}
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  const target = e.target as HTMLImageElement
+                                  target.src = '/default-avatar.png'
+                                }}
+                              />
                             </div>
-                            <div className="flex items-center space-x-1">
-                              <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                              <span className="text-sm font-medium">{course.averageRating > 0 ? course.averageRating.toFixed(1) : 'New'}</span>
-                            </div>
+                            <span className="text-sm font-semibold">
+                              {course.instructor.firstName} {course.instructor.lastName.charAt(0)}.
+                            </span>
                           </div>
                           
-                          {/* Enrollment Button */}
-                          {getEnrollmentButton(course)}
-                        </CardContent>
-                      </Card>
-                    )
-                  })}
+                          {/* Rating */}
+                          <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-800/50 px-2 py-1 rounded-lg">
+                            <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+                            <span className="text-sm font-semibold">
+                              {course.averageRating > 0 ? course.averageRating.toFixed(1) : 'New'}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        {/* Enrollment Button */}
+                        {getEnrollmentButton(course)}
+                      </CardContent>
+                    </Card>
+                  ))}
                 </div>
 
                 {/* Load More */}
-                {!loading && (
+                {pagination.hasMore && !error && (
                   <div ref={observerTarget} className="flex justify-center mt-12">
-                    {streaming ? (
+                    {loadingMore ? (
                       <div className="flex items-center space-x-3 px-6 py-3 rounded-lg bg-gray-100 dark:bg-gray-900">
                         <Loader2 className="w-5 h-5 animate-spin text-gray-500" />
                         <span className="text-sm text-gray-500">Loading more courses...</span>
@@ -1423,19 +1341,19 @@ const enrollInCourse = async (course: Course) => {
                     )}
                   </div>
                 )}
+                
+                {!pagination.hasMore && courses.length > 0 && !error && (
+                  <div className="text-center mt-12 py-8 border-t border-gray-200 dark:border-gray-800">
+                    <p className="text-gray-500">
+                      You've reached the end • {pagination.total} courses
+                    </p>
+                  </div>
+                )}
               </>
             )}
           </div>
         </div>
       </div>
-
-      {/* Quick View Modal */}
-      {selectedCourse && (
-        <QuickViewModal 
-          course={selectedCourse} 
-          onClose={() => setSelectedCourse(null)} 
-        />
-      )}
 
       {/* Payment Modal */}
       {enrollingCourse && (

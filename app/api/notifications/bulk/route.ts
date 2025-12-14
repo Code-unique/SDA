@@ -4,7 +4,7 @@ import { NotificationService } from '@/lib/services/notificationService';
 import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
 import mongoose from 'mongoose';
-
+import "@/lib/loadmodels";
 export async function POST(request: NextRequest) {
   try {
     await connectToDatabase();

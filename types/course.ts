@@ -1,5 +1,3 @@
-// types/course.ts
-
 export interface S3Asset {
   key: string
   url: string
@@ -14,7 +12,7 @@ export interface UploadProgress {
   [key: string]: {
     progress: number
     fileName: string
-    type: 'thumbnail' | 'previewVideo' | 'lessonVideo'
+    type: 'thumbnail' | 'previewVideo' | 'lessonVideo' | 'moduleThumbnail'
     status: 'generating-url' | 'uploading' | 'processing' | 'completed' | 'error'
     error?: string
   }
@@ -36,14 +34,29 @@ export interface Lesson {
   isPreview: boolean
   resources: LessonResource[]
   order: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface Chapter {
+  _id?: string
+  title: string
+  description: string
+  order: number
+  lessons: Lesson[]
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface Module {
   _id?: string
   title: string
   description: string
-  lessons: Lesson[]
+  thumbnailUrl?: string // NEW FIELD
+  chapters: Chapter[] // Changed from lessons to chapters
   order: number
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface CourseInstructor {

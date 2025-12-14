@@ -45,7 +45,7 @@ interface UploadProgress {
   [key: string]: {
     progress: number
     fileName: string
-    type: 'thumbnail' | 'previewVideo' | 'lessonVideo'
+    type: 'thumbnail' | 'previewVideo' | 'lessonVideo' | 'moduleThumbnail'
     status: 'generating-url' | 'uploading' | 'processing' | 'completed' | 'error'
     error?: string
   }
@@ -66,10 +66,18 @@ interface Lesson {
   order: number
 }
 
+interface Chapter {
+  title: string
+  description: string
+  order: number
+  lessons: Lesson[]
+}
+
 interface Module {
   title: string
   description: string
-  lessons: Lesson[]
+  thumbnailUrl?: string // NEW FIELD
+  chapters: Chapter[] // Changed from lessons to chapters
   order: number
 }
 
@@ -106,13 +114,14 @@ const useS3Upload = () => {
 
   const uploadFile = async (
     file: File,
-    type: 'thumbnail' | 'previewVideo' | 'lessonVideo',
-    identifier: string
+    type: 'thumbnail' | 'previewVideo' | 'lessonVideo' | 'moduleThumbnail',
+    identifier: string,
+    moduleIndex?: number
   ) => {
-    const maxSize = type === 'thumbnail' ? 5 * 1024 * 1024 : 5 * 1024 * 1024 * 1024
+    const maxSize = type === 'thumbnail' || type === 'moduleThumbnail' ? 5 * 1024 * 1024 : 5 * 1024 * 1024 * 1024
     if (file.size > maxSize) {
       throw new Error(
-        `File too large. Maximum size: ${type === 'thumbnail' ? '5MB' : '5GB'}`
+        `File too large. Maximum size: ${type === 'thumbnail' || type === 'moduleThumbnail' ? '5MB' : '5GB'}`
       )
     }
 
@@ -235,8 +244,8 @@ const useS3Upload = () => {
               key: fileKey,
               url: fileUrl,
               size: file.size,
-              type: type === 'thumbnail' ? 'image' : 'video',
-              duration: type !== 'thumbnail' ? 0 : undefined
+              type: type === 'thumbnail' || type === 'moduleThumbnail' ? 'image' : 'video',
+              duration: type !== 'thumbnail' && type !== 'moduleThumbnail' ? 0 : undefined
             })
           } else {
             console.error('❌ Upload failed with status:', xhr.status)
@@ -321,7 +330,7 @@ const FileUploadArea = ({
   uploadProgress,
   onCancelUpload
 }: {
-  type: 'thumbnail' | 'previewVideo' | 'lessonVideo'
+  type: 'thumbnail' | 'previewVideo' | 'lessonVideo' | 'moduleThumbnail'
   label: string
   acceptedFiles: string
   maxSize: string
@@ -333,7 +342,8 @@ const FileUploadArea = ({
   onCancelUpload?: (identifier: string) => void
 }) => {
   const inputRef = useRef<HTMLInputElement>(null)
-  const uploadId = type === 'lessonVideo' ? `lesson-${moduleIndex}-${lessonIndex}` : type
+  const uploadId = type === 'lessonVideo' ? `lesson-${moduleIndex}-${lessonIndex}` : 
+                  type === 'moduleThumbnail' ? `module-${moduleIndex}-thumbnail` : type
   const upload = uploadProgress?.[uploadId]
   const isUploading = upload?.status === 'generating-url' || upload?.status === 'uploading'
 
@@ -381,7 +391,7 @@ const FileUploadArea = ({
   return (
     <div className="space-y-4">
       <label className="text-sm font-medium flex items-center space-x-2">
-        {type === 'thumbnail' ? <Image className="w-4 h-4" /> : <Video className="w-4 h-4" />}
+        {type === 'thumbnail' || type === 'moduleThumbnail' ? <Image className="w-4 h-4" /> : <Video className="w-4 h-4" />}
         <span>{label}</span>
       </label>
       
@@ -404,7 +414,7 @@ const FileUploadArea = ({
       >
         {currentFile ? (
           <div className="space-y-2">
-            {type === 'thumbnail' ? (
+            {type === 'thumbnail' || type === 'moduleThumbnail' ? (
               <img
                 src={currentFile.url}
                 alt="Preview"
@@ -421,23 +431,23 @@ const FileUploadArea = ({
             <p className="text-sm text-slate-600">Click to change</p>
             <p className="text-xs text-slate-500">
               {formatFileSize(currentFile.size)}
-              {currentFile.duration && type !== 'thumbnail' && ` • ${currentFile.duration}s`}
+              {currentFile.duration && type !== 'thumbnail' && type !== 'moduleThumbnail' && ` • ${currentFile.duration}s`}
             </p>
           </div>
         ) : (
           <div className="space-y-2">
-            {type === 'thumbnail' ? (
+            {type === 'thumbnail' || type === 'moduleThumbnail' ? (
               <Image className="w-8 h-8 text-slate-400 mx-auto" />
             ) : (
               <Video className="w-8 h-8 text-slate-400 mx-auto" />
             )}
             <p className="text-sm font-medium">
-              {isUploading ? 'Uploading...' : `Upload ${type === 'thumbnail' ? 'Thumbnail' : 'Video'}`}
+              {isUploading ? 'Uploading...' : `Upload ${type === 'thumbnail' || type === 'moduleThumbnail' ? 'Thumbnail' : 'Video'}`}
             </p>
             <p className="text-xs text-slate-500">
               {acceptedFiles.split(',').join(', ')} up to {maxSize}
             </p>
-            {type !== 'thumbnail' && (
+            {type !== 'thumbnail' && type !== 'moduleThumbnail' && (
               <p className="text-xs text-blue-500 mt-1">
                 Large files supported (up to 5GB)
               </p>
@@ -586,14 +596,16 @@ export default function CreateCoursePage() {
   // Enhanced File Upload Handler
   const handleFileUpload = async (
     file: File, 
-    type: 'thumbnail' | 'previewVideo' | 'lessonVideo', 
+    type: 'thumbnail' | 'previewVideo' | 'lessonVideo' | 'moduleThumbnail', 
     moduleIndex?: number, 
-    lessonIndex?: number
+    lessonIndex?: number,
+    chapterIndex?: number
   ) => {
-    const uploadId = type === 'lessonVideo' ? `lesson-${moduleIndex}-${lessonIndex}` : type
+    const uploadId = type === 'lessonVideo' ? `lesson-${moduleIndex}-${chapterIndex}-${lessonIndex}` : 
+                    type === 'moduleThumbnail' ? `module-${moduleIndex}-thumbnail` : type
     
     try {
-      const result = await uploadFile(file, type, uploadId)
+      const result = await uploadFile(file, type, uploadId, moduleIndex)
 
       // Update form data based on upload type
       if (type === 'thumbnail') {
@@ -606,9 +618,13 @@ export default function CreateCoursePage() {
           ...prev,
           previewVideo: result
         }))
-      } else if (type === 'lessonVideo' && moduleIndex !== undefined && lessonIndex !== undefined) {
+      } else if (type === 'moduleThumbnail' && moduleIndex !== undefined) {
         const updatedModules = [...formData.modules]
-        updatedModules[moduleIndex].lessons[lessonIndex].video = result
+        updatedModules[moduleIndex].thumbnailUrl = result.url
+        setFormData(prev => ({ ...prev, modules: updatedModules }))
+      } else if (type === 'lessonVideo' && moduleIndex !== undefined && chapterIndex !== undefined && lessonIndex !== undefined) {
+        const updatedModules = [...formData.modules]
+        updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].video = result
         setFormData(prev => ({ ...prev, modules: updatedModules }))
       }
 
@@ -633,10 +649,17 @@ export default function CreateCoursePage() {
     }
   }
 
-  const handleLessonVideoChange = (e: React.ChangeEvent<HTMLInputElement>, moduleIndex: number, lessonIndex: number) => {
+  const handleModuleThumbnailChange = (e: React.ChangeEvent<HTMLInputElement>, moduleIndex: number) => {
     const file = e.target.files?.[0]
     if (file) {
-      handleFileUpload(file, 'lessonVideo', moduleIndex, lessonIndex)
+      handleFileUpload(file, 'moduleThumbnail', moduleIndex)
+    }
+  }
+
+  const handleLessonVideoChange = (e: React.ChangeEvent<HTMLInputElement>, moduleIndex: number, chapterIndex: number, lessonIndex: number) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      handleFileUpload(file, 'lessonVideo', moduleIndex, lessonIndex, chapterIndex)
     }
   }
 
@@ -700,7 +723,8 @@ export default function CreateCoursePage() {
       modules: [...prev.modules, {
         title: '',
         description: '',
-        lessons: [],
+        thumbnailUrl: undefined,
+        chapters: [],
         order: prev.modules.length
       }]
     }))
@@ -713,31 +737,52 @@ export default function CreateCoursePage() {
     }))
   }
 
-  const addLesson = (moduleIndex: number) => {
+  // Chapter Management
+  const addChapter = (moduleIndex: number) => {
     const updatedModules = [...formData.modules]
-    updatedModules[moduleIndex].lessons.push({
+    updatedModules[moduleIndex].chapters.push({
+      title: '',
+      description: '',
+      order: updatedModules[moduleIndex].chapters.length,
+      lessons: []
+    })
+    setFormData(prev => ({ ...prev, modules: updatedModules }))
+  }
+
+  const removeChapter = (moduleIndex: number, chapterIndex: number) => {
+    const updatedModules = [...formData.modules]
+    updatedModules[moduleIndex].chapters = updatedModules[moduleIndex].chapters.filter(
+      (_, index) => index !== chapterIndex
+    )
+    setFormData(prev => ({ ...prev, modules: updatedModules }))
+  }
+
+  // Lesson Management
+  const addLesson = (moduleIndex: number, chapterIndex: number) => {
+    const updatedModules = [...formData.modules]
+    updatedModules[moduleIndex].chapters[chapterIndex].lessons.push({
       title: '',
       description: '',
       content: '',
       duration: 0,
       isPreview: false,
       resources: [],
-      order: updatedModules[moduleIndex].lessons.length
+      order: updatedModules[moduleIndex].chapters[chapterIndex].lessons.length
     })
     setFormData(prev => ({ ...prev, modules: updatedModules }))
   }
 
-  const removeLesson = (moduleIndex: number, lessonIndex: number) => {
+  const removeLesson = (moduleIndex: number, chapterIndex: number, lessonIndex: number) => {
     const updatedModules = [...formData.modules]
-    updatedModules[moduleIndex].lessons = updatedModules[moduleIndex].lessons.filter(
+    updatedModules[moduleIndex].chapters[chapterIndex].lessons = updatedModules[moduleIndex].chapters[chapterIndex].lessons.filter(
       (_, index) => index !== lessonIndex
     )
     setFormData(prev => ({ ...prev, modules: updatedModules }))
   }
 
-  const addResource = (moduleIndex: number, lessonIndex: number) => {
+  const addResource = (moduleIndex: number, chapterIndex: number, lessonIndex: number) => {
     const updatedModules = [...formData.modules]
-    updatedModules[moduleIndex].lessons[lessonIndex].resources.push({
+    updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].resources.push({
       title: '',
       url: '',
       type: 'pdf'
@@ -745,10 +790,10 @@ export default function CreateCoursePage() {
     setFormData(prev => ({ ...prev, modules: updatedModules }))
   }
 
-  const removeResource = (moduleIndex: number, lessonIndex: number, resourceIndex: number) => {
+  const removeResource = (moduleIndex: number, chapterIndex: number, lessonIndex: number, resourceIndex: number) => {
     const updatedModules = [...formData.modules]
-    updatedModules[moduleIndex].lessons[lessonIndex].resources = 
-      updatedModules[moduleIndex].lessons[lessonIndex].resources.filter(
+    updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].resources = 
+      updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].resources.filter(
         (_, index) => index !== resourceIndex
       )
     setFormData(prev => ({ ...prev, modules: updatedModules }))
@@ -783,7 +828,9 @@ export default function CreateCoursePage() {
 
       // Validate all lessons have videos
       const missingVideos = formData.modules.some(module => 
-        module.lessons.some(lesson => !lesson.video)
+        module.chapters.some(chapter => 
+          chapter.lessons.some(lesson => !lesson.video)
+        )
       )
 
       if (missingVideos) {
@@ -821,10 +868,16 @@ export default function CreateCoursePage() {
 
   // Calculate totals
   const totalDuration = formData.modules.reduce((total, module) => {
-    return total + module.lessons.reduce((moduleTotal, lesson) => moduleTotal + lesson.duration, 0)
+    return total + module.chapters.reduce((chapterTotal, chapter) => {
+      return chapterTotal + chapter.lessons.reduce((lessonTotal, lesson) => lessonTotal + lesson.duration, 0)
+    }, 0)
   }, 0)
 
-  const totalLessons = formData.modules.reduce((total, module) => total + module.lessons.length, 0)
+  const totalLessons = formData.modules.reduce((total, module) => {
+    return total + module.chapters.reduce((chapterTotal, chapter) => chapterTotal + chapter.lessons.length, 0)
+  }, 0)
+
+  const totalChapters = formData.modules.reduce((total, module) => total + module.chapters.length, 0)
 
   // Show loading state while checking auth and role
   if (!isLoaded || !isClient || checkingAuth) {
@@ -1136,7 +1189,7 @@ export default function CreateCoursePage() {
                   <div>
                     <CardTitle>Course Content</CardTitle>
                     <CardDescription>
-                      Add modules and lessons to your course
+                      Add modules, chapters and lessons to your course
                     </CardDescription>
                   </div>
                   <Button type="button" onClick={addModule} variant="outline" className="rounded-2xl">
@@ -1176,6 +1229,26 @@ export default function CreateCoursePage() {
                       </Button>
                     </div>
                     
+                    {/* Module thumbnail upload */}
+                    <div className="mb-4">
+                      <FileUploadArea
+                        type="moduleThumbnail"
+                        label="Module Thumbnail (Optional)"
+                        acceptedFiles="image/jpeg,image/jpg,image/png,image/webp"
+                        maxSize="5MB"
+                        currentFile={module.thumbnailUrl ? {
+                          key: `module-${moduleIndex}-thumbnail`,
+                          url: module.thumbnailUrl,
+                          size: 0,
+                          type: 'image'
+                        } : null}
+                        onFileChange={(e) => handleModuleThumbnailChange(e, moduleIndex)}
+                        moduleIndex={moduleIndex}
+                        uploadProgress={uploadProgress}
+                        onCancelUpload={cancelUpload}
+                      />
+                    </div>
+                    
                     <Textarea
                       placeholder="Module Description *"
                       value={module.description}
@@ -1188,20 +1261,21 @@ export default function CreateCoursePage() {
                       required
                     />
                     
+                    {/* Chapters instead of direct lessons */}
                     <div className="space-y-4">
-                      {module.lessons.map((lesson, lessonIndex) => (
-                        <div key={lessonIndex} className="border border-slate-200 dark:border-slate-600 rounded-2xl p-4">
+                      {module.chapters.map((chapter, chapterIndex) => (
+                        <div key={chapterIndex} className="border border-slate-200 dark:border-slate-600 rounded-2xl p-4">
                           <div className="flex items-center justify-between mb-3">
                             <div className="flex items-center space-x-3 flex-1">
-                              <div className="w-6 h-6 bg-slate-100 dark:bg-slate-700 rounded-md flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold text-xs">
-                                {lessonIndex + 1}
+                              <div className="w-6 h-6 bg-blue-100 dark:bg-blue-900/30 rounded-md flex items-center justify-center text-blue-600 font-bold text-xs">
+                                {chapterIndex + 1}
                               </div>
                               <Input
-                                placeholder="Lesson Title *"
-                                value={lesson.title}
+                                placeholder="Chapter Title *"
+                                value={chapter.title}
                                 onChange={(e) => {
                                   const updatedModules = [...formData.modules]
-                                  updatedModules[moduleIndex].lessons[lessonIndex].title = e.target.value
+                                  updatedModules[moduleIndex].chapters[chapterIndex].title = e.target.value
                                   setFormData(prev => ({ ...prev, modules: updatedModules }))
                                 }}
                                 className="rounded-2xl flex-1"
@@ -1212,7 +1286,7 @@ export default function CreateCoursePage() {
                               type="button" 
                               variant="ghost" 
                               size="icon"
-                              onClick={() => removeLesson(moduleIndex, lessonIndex)}
+                              onClick={() => removeChapter(moduleIndex, chapterIndex)}
                               className="text-red-500 rounded-2xl hover:text-red-600 hover:bg-red-50"
                             >
                               <X className="w-4 h-4" />
@@ -1220,155 +1294,213 @@ export default function CreateCoursePage() {
                           </div>
 
                           <Textarea
-                            placeholder="Lesson Description *"
-                            value={lesson.description}
+                            placeholder="Chapter Description *"
+                            value={chapter.description}
                             onChange={(e) => {
                               const updatedModules = [...formData.modules]
-                              updatedModules[moduleIndex].lessons[lessonIndex].description = e.target.value
+                              updatedModules[moduleIndex].chapters[chapterIndex].description = e.target.value
                               setFormData(prev => ({ ...prev, modules: updatedModules }))
                             }}
                             className="rounded-2xl mb-3 min-h-[60px]"
                             required
                           />
-
-                          {/* Video Upload */}
-                          <div className="mb-3">
-                            <FileUploadArea
-                              type="lessonVideo"
-                              label="Lesson Video *"
-                              acceptedFiles="video/mp4,video/webm,video/ogg,video/quicktime,video/x-msvideo,video/avi,video/mkv,video/mov"
-                              maxSize="5GB"
-                              currentFile={lesson.video || null}
-                              onFileChange={(e) => handleLessonVideoChange(e, moduleIndex, lessonIndex)}
-                              moduleIndex={moduleIndex}
-                              lessonIndex={lessonIndex}
-                              uploadProgress={uploadProgress}
-                              onCancelUpload={cancelUpload}
-                            />
-                          </div>
-
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-                            <div>
-                              <label className="text-sm font-medium mb-1 block">Duration (minutes)</label>
-                              <Input
-                                type="number"
-                                placeholder="Duration"
-                                value={lesson.duration}
-                                onChange={(e) => {
-                                  const updatedModules = [...formData.modules]
-                                  updatedModules[moduleIndex].lessons[lessonIndex].duration = parseInt(e.target.value) || 0
-                                  setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                }}
-                                className="rounded-2xl"
-                                min="0"
-                              />
-                            </div>
-                          </div>
-
-                          <Textarea
-                            placeholder="Lesson Content *"
-                            value={lesson.content}
-                            onChange={(e) => {
-                              const updatedModules = [...formData.modules]
-                              updatedModules[moduleIndex].lessons[lessonIndex].content = e.target.value
-                              setFormData(prev => ({ ...prev, modules: updatedModules }))
-                            }}
-                            className="rounded-2xl mb-3 min-h-[100px]"
-                            required
-                          />
-
-                          <div className="flex items-center justify-between mb-3">
-                            <label className="flex items-center space-x-2">
-                              <input
-                                type="checkbox"
-                                checked={lesson.isPreview}
-                                onChange={(e) => {
-                                  const updatedModules = [...formData.modules]
-                                  updatedModules[moduleIndex].lessons[lessonIndex].isPreview = e.target.checked
-                                  setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                }}
-                                className="rounded"
-                              />
-                              <span className="text-sm">Preview Lesson (Free to watch)</span>
-                            </label>
-                          </div>
-
-                          {/* Resources */}
+                          
+                          {/* Lessons inside chapter */}
                           <div className="space-y-3">
-                            <div className="flex items-center justify-between">
-                              <h4 className="text-sm font-medium">Resources</h4>
-                              <Button 
-                                type="button" 
-                                onClick={() => addResource(moduleIndex, lessonIndex)} 
-                                variant="outline" 
-                                size="sm" 
-                                className="rounded-2xl"
-                              >
-                                <Plus className="w-3 h-3 mr-1" />
-                                Add Resource
-                              </Button>
-                            </div>
-                            
-                            {lesson.resources.map((resource, resourceIndex) => (
-                              <div key={resourceIndex} className="grid grid-cols-1 md:grid-cols-12 gap-2 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl">
-                                <Input
-                                  placeholder="Resource Title"
-                                  value={resource.title}
+                            {chapter.lessons.map((lesson, lessonIndex) => (
+                              <div key={lessonIndex} className="border border-slate-200 dark:border-slate-600 rounded-2xl p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="flex items-center space-x-3 flex-1">
+                                    <div className="w-6 h-6 bg-slate-100 dark:bg-slate-700 rounded-md flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold text-xs">
+                                      {lessonIndex + 1}
+                                    </div>
+                                    <Input
+                                      placeholder="Lesson Title *"
+                                      value={lesson.title}
+                                      onChange={(e) => {
+                                        const updatedModules = [...formData.modules]
+                                        updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].title = e.target.value
+                                        setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                      }}
+                                      className="rounded-2xl flex-1"
+                                      required
+                                    />
+                                  </div>
+                                  <Button 
+                                    type="button" 
+                                    variant="ghost" 
+                                    size="icon"
+                                    onClick={() => removeLesson(moduleIndex, chapterIndex, lessonIndex)}
+                                    className="text-red-500 rounded-2xl hover:text-red-600 hover:bg-red-50"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </Button>
+                                </div>
+
+                                <Textarea
+                                  placeholder="Lesson Description *"
+                                  value={lesson.description}
                                   onChange={(e) => {
                                     const updatedModules = [...formData.modules]
-                                    updatedModules[moduleIndex].lessons[lessonIndex].resources[resourceIndex].title = e.target.value
+                                    updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].description = e.target.value
                                     setFormData(prev => ({ ...prev, modules: updatedModules }))
                                   }}
-                                  className="rounded-xl md:col-span-4"
+                                  className="rounded-2xl mb-3 min-h-[60px]"
+                                  required
                                 />
-                                <Input
-                                  placeholder="URL"
-                                  value={resource.url}
+
+                                {/* Video Upload */}
+                                <div className="mb-3">
+                                  <FileUploadArea
+                                    type="lessonVideo"
+                                    label="Lesson Video *"
+                                    acceptedFiles="video/mp4,video/webm,video/ogg,video/quicktime,video/x-msvideo,video/avi,video/mkv,video/mov"
+                                    maxSize="5GB"
+                                    currentFile={lesson.video || null}
+                                    onFileChange={(e) => handleLessonVideoChange(e, moduleIndex, chapterIndex, lessonIndex)}
+                                    moduleIndex={moduleIndex}
+                                    lessonIndex={lessonIndex}
+                                    uploadProgress={uploadProgress}
+                                    onCancelUpload={cancelUpload}
+                                  />
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                                  <div>
+                                    <label className="text-sm font-medium mb-1 block">Duration (minutes)</label>
+                                    <Input
+                                      type="number"
+                                      placeholder="Duration"
+                                      value={lesson.duration}
+                                      onChange={(e) => {
+                                        const updatedModules = [...formData.modules]
+                                        updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].duration = parseInt(e.target.value) || 0
+                                        setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                      }}
+                                      className="rounded-2xl"
+                                      min="0"
+                                    />
+                                  </div>
+                                </div>
+
+                                <Textarea
+                                  placeholder="Lesson Content *"
+                                  value={lesson.content}
                                   onChange={(e) => {
                                     const updatedModules = [...formData.modules]
-                                    updatedModules[moduleIndex].lessons[lessonIndex].resources[resourceIndex].url = e.target.value
+                                    updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].content = e.target.value
                                     setFormData(prev => ({ ...prev, modules: updatedModules }))
                                   }}
-                                  className="rounded-xl md:col-span-5"
+                                  className="rounded-2xl mb-3 min-h-[100px]"
+                                  required
                                 />
-                                <select
-                                  value={resource.type}
-                                  onChange={(e) => {
-                                    const updatedModules = [...formData.modules]
-                                    updatedModules[moduleIndex].lessons[lessonIndex].resources[resourceIndex].type = e.target.value as any
-                                    setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                  }}
-                                  className="rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 px-2 py-1 text-sm md:col-span-2"
-                                >
-                                  <option value="pdf">PDF</option>
-                                  <option value="document">Document</option>
-                                  <option value="link">Link</option>
-                                  <option value="video">Video</option>
-                                </select>
-                                <Button 
-                                  type="button" 
-                                  variant="ghost" 
-                                  size="icon"
-                                  onClick={() => removeResource(moduleIndex, lessonIndex, resourceIndex)}
-                                  className="text-red-500 rounded-xl hover:text-red-600 md:col-span-1"
-                                >
-                                  <X className="w-3 h-3" />
-                                </Button>
+
+                                <div className="flex items-center justify-between mb-3">
+                                  <label className="flex items-center space-x-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={lesson.isPreview}
+                                      onChange={(e) => {
+                                        const updatedModules = [...formData.modules]
+                                        updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].isPreview = e.target.checked
+                                        setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                      }}
+                                      className="rounded"
+                                    />
+                                    <span className="text-sm">Preview Lesson (Free to watch)</span>
+                                  </label>
+                                </div>
+
+                                {/* Resources */}
+                                <div className="space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <h4 className="text-sm font-medium">Resources</h4>
+                                    <Button 
+                                      type="button" 
+                                      onClick={() => addResource(moduleIndex, chapterIndex, lessonIndex)} 
+                                      variant="outline" 
+                                      size="sm" 
+                                      className="rounded-2xl"
+                                    >
+                                      <Plus className="w-3 h-3 mr-1" />
+                                      Add Resource
+                                    </Button>
+                                  </div>
+                                  
+                                  {lesson.resources.map((resource, resourceIndex) => (
+                                    <div key={resourceIndex} className="grid grid-cols-1 md:grid-cols-12 gap-2 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl">
+                                      <Input
+                                        placeholder="Resource Title"
+                                        value={resource.title}
+                                        onChange={(e) => {
+                                          const updatedModules = [...formData.modules]
+                                          updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].resources[resourceIndex].title = e.target.value
+                                          setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                        }}
+                                        className="rounded-xl md:col-span-4"
+                                      />
+                                      <Input
+                                        placeholder="URL"
+                                        value={resource.url}
+                                        onChange={(e) => {
+                                          const updatedModules = [...formData.modules]
+                                          updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].resources[resourceIndex].url = e.target.value
+                                          setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                        }}
+                                        className="rounded-xl md:col-span-5"
+                                      />
+                                      <select
+                                        value={resource.type}
+                                        onChange={(e) => {
+                                          const updatedModules = [...formData.modules]
+                                          updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].resources[resourceIndex].type = e.target.value as any
+                                          setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                        }}
+                                        className="rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 px-2 py-1 text-sm md:col-span-2"
+                                      >
+                                        <option value="pdf">PDF</option>
+                                        <option value="document">Document</option>
+                                        <option value="link">Link</option>
+                                        <option value="video">Video</option>
+                                      </select>
+                                      <Button 
+                                        type="button" 
+                                        variant="ghost" 
+                                        size="icon"
+                                        onClick={() => removeResource(moduleIndex, chapterIndex, lessonIndex, resourceIndex)}
+                                        className="text-red-500 rounded-xl hover:text-red-600 md:col-span-1"
+                                      >
+                                        <X className="w-3 h-3" />
+                                      </Button>
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
                             ))}
+                            
+                            <Button 
+                              type="button" 
+                              onClick={() => addLesson(moduleIndex, chapterIndex)} 
+                              variant="outline" 
+                              size="sm" 
+                              className="rounded-2xl"
+                            >
+                              <Plus className="w-4 h-4 mr-2" />
+                              Add Lesson
+                            </Button>
                           </div>
                         </div>
                       ))}
                       
                       <Button 
                         type="button" 
-                        onClick={() => addLesson(moduleIndex)} 
+                        onClick={() => addChapter(moduleIndex)} 
                         variant="outline" 
                         size="sm" 
                         className="rounded-2xl"
                       >
                         <Plus className="w-4 h-4 mr-2" />
-                        Add Lesson
+                        Add Chapter
                       </Button>
                     </div>
                   </div>
@@ -1447,6 +1579,10 @@ export default function CreateCoursePage() {
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-slate-600">Modules</span>
                   <span className="font-semibold">{formData.modules.length}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-600">Chapters</span>
+                  <span className="font-semibold">{totalChapters}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-slate-600">Lessons</span>

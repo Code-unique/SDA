@@ -2,7 +2,7 @@
 import { NextRequest } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import Course from '@/lib/models/Course';
-
+import "@/lib/loadmodels";
 export async function GET(request: NextRequest) {
   try {
     await connectToDatabase();

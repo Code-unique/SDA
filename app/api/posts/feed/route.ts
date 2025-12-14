@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/api-handler';
 import { PostService } from '@/lib/services/post-service';
 import User from '@/lib/models/User';
-
+import "@/lib/loadmodels";
 const getFeed = async (request: NextRequest, userId: string) => {
   const { searchParams } = new URL(request.url);
   const page = Math.max(1, parseInt(searchParams.get('page') || '1'));

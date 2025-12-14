@@ -7,7 +7,7 @@ import Post from '@/lib/models/Post';
 import { ApiResponse } from '@/types/post';
 import { NotificationService } from '@/lib/services/notificationService';
 import mongoose from 'mongoose';
-
+import "@/lib/loadmodels";
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

@@ -1,4 +1,3 @@
-// lib/models/Course.ts
 import mongoose, { Document, Schema, Model } from 'mongoose';
 
 // S3 Asset Interface
@@ -30,12 +29,25 @@ export interface ILesson {
   order: number;
 }
 
+export interface IChapter {
+  _id?: mongoose.Types.ObjectId;
+  title: string;
+  description: string;
+  order: number;
+  lessons: ILesson[];
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
 export interface IModule {
   _id?: mongoose.Types.ObjectId;
   title: string;
   description: string;
-  lessons: ILesson[];
+  thumbnailUrl?: string; // NEW FIELD
   order: number;
+  chapters: IChapter[]; // Changed from lessons to chapters
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export interface IRating {
@@ -112,14 +124,22 @@ const LessonSchema = new Schema<ILesson>({
   isPreview: { type: Boolean, default: false },
   resources: [LessonResourceSchema],
   order: { type: Number, required: true, min: 0 }
-});
+}, { timestamps: true });
+
+const ChapterSchema = new Schema<IChapter>({
+  title: { type: String, required: true, maxlength: 200 },
+  description: { type: String, required: true, maxlength: 1000 },
+  order: { type: Number, required: true, min: 0 },
+  lessons: [LessonSchema]
+}, { timestamps: true });
 
 const ModuleSchema = new Schema<IModule>({
   title: { type: String, required: true, maxlength: 200 },
   description: { type: String, required: true, maxlength: 1000 },
-  lessons: [LessonSchema],
-  order: { type: Number, required: true, min: 0 }
-});
+  thumbnailUrl: { type: String }, // NEW FIELD
+  order: { type: Number, required: true, min: 0 },
+  chapters: [ChapterSchema] // Changed from lessons to chapters
+}, { timestamps: true });
 
 const RatingSchema = new Schema<IRating>({
   user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
@@ -245,15 +265,19 @@ const CourseSchema = new Schema<ICourse>(
 CourseSchema.pre('save', function (next) {
   const course = this as ICourse;
 
-  // Calculate total lessons
+  // Calculate total lessons across all chapters in all modules
   course.totalLessons = course.modules.reduce((total, module) =>
-    total + module.lessons.length, 0
+    total + module.chapters.reduce((chapterTotal, chapter) =>
+      chapterTotal + chapter.lessons.length, 0
+    ), 0
   );
 
-  // Calculate total duration
+  // Calculate total duration across all lessons in all chapters in all modules
   course.totalDuration = course.modules.reduce((total, module) =>
-    total + module.lessons.reduce((moduleTotal, lesson) =>
-      moduleTotal + (lesson.duration || 0), 0
+    total + module.chapters.reduce((chapterTotal, chapter) =>
+      chapterTotal + chapter.lessons.reduce((lessonTotal, lesson) =>
+        lessonTotal + (lesson.duration || 0), 0
+      ), 0
     ), 0
   );
 
@@ -283,7 +307,6 @@ CourseSchema.index({ isPublished: 1, isFeatured: 1 });
 CourseSchema.index({ category: 1 });
 CourseSchema.index({ 'students.user': 1 });
 CourseSchema.index({ createdAt: -1 });
-
 
 // Static method to find published courses
 CourseSchema.statics.findPublished = function () {
