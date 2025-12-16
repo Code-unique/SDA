@@ -1,44 +1,52 @@
-// lib/rate-limit.ts
-import { LRUCache } from 'lru-cache';
+import { LRUCache } from 'lru-cache'
 
-interface RateLimitCache {
-  count: number;
-  resetTime: number;
+interface RateLimitOptions {
+  interval: number // Time window in milliseconds
+  uniqueTokenPerInterval: number // Max unique tokens per interval
 }
 
-const rateLimitCache = new LRUCache<string, RateLimitCache>({
-  max: 500,
-  ttl: 60 * 1000 // 1 minute
-});
+interface RateLimitResult {
+  isRateLimited: boolean
+  headers: Headers
+}
 
-export const rateLimit = (identifier: string, limit: number = 10) => {
-  const now = Date.now();
-  const windowMs = 60 * 1000; // 1 minute
+export function rateLimit(key: string, limit: number = 10): RateLimitResult {
+  // Create a simple cache for rate limiting
+  const tokenCache = new LRUCache<string, number[]>({
+    max: 500,
+    ttl: 60000, // 1 minute
+  })
 
-  const cacheEntry = rateLimitCache.get(identifier);
-  let count = cacheEntry?.count || 0;
-  let resetTime = cacheEntry?.resetTime || now + windowMs;
-
-  // Reset if window has passed
-  if (now > resetTime) {
-    count = 0;
-    resetTime = now + windowMs;
+  // Get or initialize token count
+  const tokenCount = tokenCache.get(key) || []
+  const currentTime = Date.now()
+  
+  // Remove timestamps older than 1 minute
+  const validTokenCount = tokenCount.filter(
+    (timestamp) => currentTime - timestamp < 60000
+  )
+  
+  // Check if rate limited
+  const isRateLimited = validTokenCount.length >= limit
+  
+  // Add current timestamp if not rate limited
+  if (!isRateLimited) {
+    validTokenCount.push(currentTime)
+    tokenCache.set(key, validTokenCount)
   }
-
-  // Increment count
-  count += 1;
-
-  // Update cache
-  rateLimitCache.set(identifier, { count, resetTime });
-
-  const isRateLimited = count > limit;
-
+  
+  // Create headers
+  const headers = new Headers()
+  headers.set('X-RateLimit-Limit', limit.toString())
+  headers.set('X-RateLimit-Remaining', Math.max(0, limit - validTokenCount.length).toString())
+  headers.set('X-RateLimit-Reset', Math.ceil((currentTime + 60000) / 1000).toString())
+  
+  if (isRateLimited) {
+    headers.set('Retry-After', '60')
+  }
+  
   return {
     isRateLimited,
-    headers: {
-      'X-RateLimit-Limit': limit.toString(),
-      'X-RateLimit-Remaining': isRateLimited ? '0' : (limit - count).toString(),
-      'X-RateLimit-Reset': Math.ceil(resetTime / 1000).toString()
-    }
-  };
-};
+    headers
+  }
+}

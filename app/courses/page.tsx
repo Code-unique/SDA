@@ -183,6 +183,33 @@ export default function CoursesPage() {
     sort: 'popular'
   })
 
+  // Helper function to get course URL
+  const getCourseUrl = useCallback((course: Course): string => {
+    if (course.slug && typeof course.slug === 'string' && course.slug.trim() !== '') {
+      return `/courses/${course.slug}`
+    }
+    console.warn('Invalid or missing slug for course:', course._id, 'Using ID instead')
+    return `/courses/id/${course._id}`
+  }, [])
+
+  // Helper function to safely navigate to course
+  const navigateToCourse = useCallback((course: Course) => {
+    const url = getCourseUrl(course)
+    router.push(url)
+  }, [getCourseUrl, router])
+
+  // Debug course data
+  useEffect(() => {
+    if (courses.length > 0) {
+      const invalidSlugs = courses.filter(c => 
+        !c.slug || typeof c.slug !== 'string' || c.slug.includes('object')
+      )
+      if (invalidSlugs.length > 0) {
+        console.warn('Courses with invalid slugs:', invalidSlugs.map(c => ({ id: c._id, slug: c.slug })))
+      }
+    }
+  }, [courses])
+
   // Debounce search input
   useEffect(() => {
     if (searchTimeoutRef.current) {
@@ -435,11 +462,9 @@ export default function CoursesPage() {
             description: 'You can now start learning immediately',
           })
 
-          if (course.slug) {
-            setTimeout(() => {
-              router.push(`/courses/${course.slug}`)
-            }, 1500)
-          }
+          setTimeout(() => {
+            navigateToCourse(course)
+          }, 1500)
         } 
         // Handle already enrolled case
         else if (result.alreadyEnrolled) {
@@ -533,9 +558,9 @@ export default function CoursesPage() {
 
     // Find the course to redirect
     const enrolledCourse = courses.find(c => c._id === courseId)
-    if (enrolledCourse?.slug) {
+    if (enrolledCourse) {
       setTimeout(() => {
-        router.push(`/courses/${enrolledCourse.slug}`)
+        navigateToCourse(enrolledCourse)
       }, 1200)
     }
   }
@@ -633,7 +658,7 @@ export default function CoursesPage() {
             className="w-full rounded-lg bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition-all shadow-sm hover:shadow"
             onClick={(e) => {
               e.stopPropagation()
-              router.push(`/courses/${course.slug}`)
+              navigateToCourse(course)
             }}
           >
             <Play className="w-4 h-4 mr-2" />
@@ -649,7 +674,7 @@ export default function CoursesPage() {
         className="w-full rounded-lg bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition-all shadow-sm hover:shadow"
         onClick={(e) => {
           e.stopPropagation()
-          router.push(`/courses/${course.slug}`)
+          navigateToCourse(course)
         }}
       >
         <Play className="w-4 h-4 mr-2" />
@@ -714,6 +739,7 @@ export default function CoursesPage() {
       }
 
       const data = await response.json()
+      console.log('API Response:', data) // Debug the response
       
       // Handle different API response formats
       let coursesData: Course[] = []
@@ -723,21 +749,39 @@ export default function CoursesPage() {
         totalPages: 1
       }
 
+      // Helper function to normalize course data
+      const normalizeCourse = (course: any): Course => {
+        // Ensure slug is a string and not an object
+        let slug = course.slug
+        if (slug && typeof slug === 'object') {
+          console.warn('Course slug is an object, converting to string:', course._id, slug)
+          slug = String(slug)
+        } else if (!slug || typeof slug !== 'string') {
+          console.warn('Course slug is invalid, using ID:', course._id, slug)
+          slug = course._id
+        }
+        
+        return {
+          ...course,
+          slug: slug
+        }
+      }
+
       if (Array.isArray(data)) {
-        coursesData = data
+        coursesData = data.map(normalizeCourse)
         paginationData.total = data.length
       } else if (data.courses && Array.isArray(data.courses)) {
-        coursesData = data.courses
+        coursesData = data.courses.map(normalizeCourse)
         paginationData = {
           page: data.pagination?.page || page,
           total: data.pagination?.total || data.courses.length,
           totalPages: data.pagination?.totalPages || 1
         }
       } else if (data.data && Array.isArray(data.data)) {
-        coursesData = data.data
+        coursesData = data.data.map(normalizeCourse)
         paginationData.total = data.data.length
       } else if (data.items && Array.isArray(data.items)) {
-        coursesData = data.items
+        coursesData = data.items.map(normalizeCourse)
         paginationData.total = data.items.length
       }
 
@@ -1224,7 +1268,7 @@ export default function CoursesPage() {
                         const target = e.target as HTMLElement;
                         const isButtonClick = target.closest('button');
                         if (!isButtonClick) {
-                          router.push(`/courses/${course.slug}`);
+                          navigateToCourse(course);
                         }
                       }}
                     >
