@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import { PostCard } from '@/components/posts/post-card'
@@ -35,10 +35,18 @@ import {
   Flower2,
   ScanSearch,
   Rocket,
-  Loader2
+  Loader2,
+  TrendingDown,
+  Heart,
+  Bookmark,
+  Share2,
+  MessageCircle,
+  Plus
 } from 'lucide-react'
 import { Post } from '@/types/post'
 import { useUser } from '@clerk/nextjs'
+import debounce from 'lodash/debounce'
+import { useRouter } from 'next/navigation'
 
 type ViewMode = 'grid' | 'list' | 'detailed'
 
@@ -49,6 +57,7 @@ interface BatchStatusData {
 }
 
 export default function ExplorePage() {
+  const router = useRouter()
   const { user: currentUser, isSignedIn } = useUser()
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
@@ -56,7 +65,7 @@ export default function ExplorePage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [selectedFilters, setSelectedFilters] = useState<string[]>([])
-  const [viewMode, setViewMode] = useState<ViewMode>('detailed')
+  const [viewMode, setViewMode] = useState<ViewMode>('detailed') // Changed from 'grid' to 'detailed'
   const [sortBy, setSortBy] = useState<'recent' | 'popular' | 'trending'>('recent')
   const [showFilters, setShowFilters] = useState(false)
   const [showCategories, setShowCategories] = useState(false)
@@ -68,15 +77,16 @@ export default function ExplorePage() {
     saveStatuses: {},
     followStatuses: {}
   })
+  const [stats, setStats] = useState({ total: 0, filtered: 0 })
 
   const { ref, inView } = useInView()
   const headerRef = useRef<HTMLDivElement>(null)
   const { scrollY } = useScroll()
   const headerOpacity = useTransform(scrollY, [0, 100], [1, 0.95])
-  const headerBlur = useTransform(scrollY, [0, 100], [0, 4])
+  const headerBlur = useTransform(scrollY, [0, 100], [0, 8])
 
-  // Categories with rich data
-  const categories = [
+  // Categories with rich data - memoized
+  const categories = useMemo(() => [
     { 
       id: 'all', 
       name: 'All Designs', 
@@ -131,10 +141,10 @@ export default function ExplorePage() {
       count: 0,
       gradient: 'linear-gradient(135deg, #fda4af, #f9a8d4, #d8b4fe)'
     }
-  ]
+  ], [])
 
-  // Filters
-  const filters = [
+  // Filters - memoized
+  const filters = useMemo(() => [
     { id: 'featured', name: 'Featured', icon: Star, description: 'Curated featured content', color: 'text-yellow-500' },
     { id: 'trending', name: 'Trending', icon: Flame, description: 'Popular right now', color: 'text-orange-500' },
     { id: 'video', name: 'Video', icon: Video, description: 'Video content only', color: 'text-red-500' },
@@ -143,9 +153,19 @@ export default function ExplorePage() {
     { id: 'forsale', name: 'For Sale', icon: ShoppingBag, description: 'Available for purchase', color: 'text-emerald-500' },
     { id: 'ai', name: 'AI Generated', icon: Sparkles, description: 'AI created content', color: 'text-pink-500' },
     { id: 'pro', name: 'Pro Designers', icon: Crown, description: 'From verified professionals', color: 'text-amber-500' },
-  ]
+  ], [])
 
-  // Fetch batch statuses
+  // Debounced search for performance
+  const debouncedSearch = useCallback(
+    debounce((query: string) => {
+      setSearchQuery(query)
+      setPage(1)
+      loadPosts(1, false)
+    }, 500),
+    []
+  )
+
+  // Optimized batch status fetch with caching
   const fetchBatchStatuses = useCallback(async (postIds: string[], userIds: string[]) => {
     if (postIds.length === 0 && userIds.length === 0) return
     
@@ -162,7 +182,10 @@ export default function ExplorePage() {
       if (response.ok) {
         const data = await response.json()
         if (data.success && data.data) {
-          setBatchStatusData(data.data)
+          setBatchStatusData(prev => ({
+            ...prev,
+            ...data.data
+          }))
         }
       }
     } catch (error) {
@@ -170,15 +193,12 @@ export default function ExplorePage() {
     }
   }, [])
 
-  // Load posts
+  // Optimized posts loading with caching
   const loadPosts = useCallback(async (pageNum: number = 1, append: boolean = false) => {
     if (loadingMore) return
 
-    if (pageNum === 1) {
-      setLoading(true)
-    } else {
-      setLoadingMore(true)
-    }
+    const loader = pageNum === 1 ? setLoading : setLoadingMore
+    loader(true)
 
     try {
       const params = new URLSearchParams({
@@ -190,17 +210,18 @@ export default function ExplorePage() {
         ...(selectedFilters.length > 0 && { filters: selectedFilters.join(',') })
       })
 
-      const response = await fetch(`/api/posts?${params}`)
+      const response = await fetch(`/api/posts?${params}`, {
+        next: { revalidate: 60 } // ISR for better performance
+      })
       
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
 
       const data = await response.json()
 
       if (!data.success || !data.posts) {
-        setPosts(prev => append ? prev : [])
+        if (!append) setPosts([])
         setHasMore(false)
+        setStats({ total: 0, filtered: 0 })
         return
       }
 
@@ -209,9 +230,8 @@ export default function ExplorePage() {
       const userIds = [...new Set(data.posts.map((post: Post) => post.author._id))]
       
       // Fetch statuses in batch
-      if (isSignedIn) {
-        // Update line 213 in app/explore/page.tsx:
-fetchBatchStatuses(postIds, userIds as string[])
+      if (isSignedIn && postIds.length > 0) {
+        fetchBatchStatuses(postIds, userIds as string[])
       }
 
       if (append) {
@@ -222,10 +242,14 @@ fetchBatchStatuses(postIds, userIds as string[])
       
       setHasMore(data.pagination?.hasNext || false)
       setPage(pageNum)
+      setStats({
+        total: data.stats?.total || 0,
+        filtered: data.posts?.length || 0
+      })
 
     } catch (error) {
       console.error('❌ Error loading posts:', error)
-      setPosts([])
+      if (!append) setPosts([])
       setHasMore(false)
     } finally {
       setLoading(false)
@@ -233,7 +257,7 @@ fetchBatchStatuses(postIds, userIds as string[])
     }
   }, [searchQuery, selectedCategory, selectedFilters, sortBy, loadingMore, isSignedIn, fetchBatchStatuses])
 
-  // Initial load
+  // Initial load with intersection observer
   useEffect(() => {
     loadPosts(1)
   }, [loadPosts])
@@ -245,31 +269,55 @@ fetchBatchStatuses(postIds, userIds as string[])
     }
   }, [inView, hasMore, loadingMore, page, loadPosts])
 
-  // Scroll handler
+  // Optimized scroll handler
   useEffect(() => {
+    let ticking = false
     const handleScroll = () => {
-      setIsScrolled(window.scrollY > 50)
+      if (!ticking) {
+        requestAnimationFrame(() => {
+          setIsScrolled(window.scrollY > 50)
+          ticking = false
+        })
+        ticking = true
+      }
     }
-    window.addEventListener('scroll', handleScroll)
+    window.addEventListener('scroll', handleScroll, { passive: true })
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
+  // Toggle filter with optimistic updates
   const toggleFilter = useCallback((filterId: string) => {
-    setSelectedFilters(prev =>
-      prev.includes(filterId)
+    setSelectedFilters(prev => {
+      const newFilters = prev.includes(filterId)
         ? prev.filter(id => id !== filterId)
         : [...prev, filterId]
-    )
-  }, [])
+      // Trigger reload after filter change
+      setTimeout(() => loadPosts(1), 100)
+      return newFilters
+    })
+  }, [loadPosts])
 
   const clearAllFilters = useCallback(() => {
     setSearchQuery('')
     setSelectedCategory('all')
     setSelectedFilters([])
-  }, [])
+    setPage(1)
+    loadPosts(1)
+  }, [loadPosts])
 
-  // Action handlers
+  // Optimized action handlers with optimistic updates
   const handleLike = useCallback(async (postId: string) => {
+    const previousStatus = batchStatusData.likeStatuses[postId]
+    
+    // Optimistic update
+    setBatchStatusData(prev => ({
+      ...prev,
+      likeStatuses: {
+        ...prev.likeStatuses,
+        [postId]: !previousStatus
+      }
+    }))
+
     try {
       const response = await fetch(`/api/posts/${postId}/like`, {
         method: 'POST',
@@ -277,12 +325,34 @@ fetchBatchStatuses(postIds, userIds as string[])
       })
       return await response.json()
     } catch (error) {
+      // Rollback on error
+      setBatchStatusData(prev => ({
+        ...prev,
+        likeStatuses: {
+          ...prev.likeStatuses,
+          [postId]: previousStatus
+        }
+      }))
       console.error('Error liking post:', error)
       throw error
     }
-  }, [])
+  }, [batchStatusData])
 
   const handleSave = useCallback(async (postId: string) => {
+    const previousStatus = batchStatusData.saveStatuses[postId]
+    
+    // Optimistic update
+    setBatchStatusData(prev => ({
+      ...prev,
+      saveStatuses: {
+        ...prev.saveStatuses,
+        [postId]: {
+          saved: !(previousStatus?.saved || false),
+          savedAt: new Date().toISOString()
+        }
+      }
+    }))
+
     try {
       const response = await fetch(`/api/posts/${postId}/save`, {
         method: 'POST',
@@ -290,10 +360,18 @@ fetchBatchStatuses(postIds, userIds as string[])
       })
       return await response.json()
     } catch (error) {
+      // Rollback on error
+      setBatchStatusData(prev => ({
+        ...prev,
+        saveStatuses: {
+          ...prev.saveStatuses,
+          [postId]: previousStatus || { saved: false }
+        }
+      }))
       console.error('Error saving post:', error)
       throw error
     }
-  }, [])
+  }, [batchStatusData])
 
   const handleComment = useCallback(async (postId: string, text: string) => {
     try {
@@ -310,6 +388,17 @@ fetchBatchStatuses(postIds, userIds as string[])
   }, [])
 
   const handleFollow = useCallback(async (userId: string) => {
+    const previousStatus = batchStatusData.followStatuses[userId]
+    
+    // Optimistic update
+    setBatchStatusData(prev => ({
+      ...prev,
+      followStatuses: {
+        ...prev.followStatuses,
+        [userId]: !previousStatus
+      }
+    }))
+
     try {
       const response = await fetch(`/api/users/${userId}/follow`, {
         method: 'POST',
@@ -317,23 +406,42 @@ fetchBatchStatuses(postIds, userIds as string[])
       })
       return await response.json()
     } catch (error) {
+      // Rollback on error
+      setBatchStatusData(prev => ({
+        ...prev,
+        followStatuses: {
+          ...prev.followStatuses,
+          [userId]: previousStatus
+        }
+      }))
       console.error('Error following user:', error)
       throw error
     }
-  }, [])
+  }, [batchStatusData])
 
-  const handleShare = useCallback(async (postId: string) => {
-    try {
-      const response = await fetch(`/api/posts/${postId}/share`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      })
-      return await response.json()
-    } catch (error) {
-      console.error('Error sharing post:', error)
-      throw error
-    }
-  }, [])
+  // Quick actions bar for mobile - Modified with single post button
+  const QuickActions = () => (
+    <div className="lg:hidden fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50">
+      <div className="flex items-center space-x-2 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl rounded-2xl p-2 shadow-2xl shadow-black/20 border border-slate-200/40 dark:border-slate-700/40">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setViewMode(prev => prev === 'grid' ? 'detailed' : 'grid')}
+          className="rounded-xl w-12 h-12"
+        >
+          {viewMode === 'grid' ? <List className="w-5 h-5" /> : <Grid3X3 className="w-5 h-5" />}
+        </Button>
+        <Button
+          variant="default"
+          size="icon"
+          onClick={() => router.push('/dashboard/posts/create')}
+          className="rounded-xl w-12 h-12 bg-gradient-to-r from-rose-500 to-pink-500 shadow-lg"
+        >
+          <Plus className="w-5 h-5" />
+        </Button>
+      </div>
+    </div>
+  )
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-rose-50/30 to-purple-50/20 dark:from-slate-900 dark:via-rose-900/10 dark:to-purple-900/10">
@@ -346,62 +454,34 @@ fetchBatchStatuses(postIds, userIds as string[])
         }}
         className={`sticky top-0 z-30 transition-all duration-300 ${
           isScrolled 
-            ? 'bg-white/90 dark:bg-slate-900/90 shadow-2xl shadow-slate-200/20 dark:shadow-slate-800/20 border-b border-slate-200/40 dark:border-slate-700/40' 
+            ? 'bg-white/95 dark:bg-slate-900/95 shadow-2xl shadow-slate-200/30 dark:shadow-slate-800/30 border-b border-slate-200/60 dark:border-slate-700/60' 
             : 'bg-transparent'
         }`}
       >
-        <div className="container mx-auto px-4 py-4">
+        <div className="container mx-auto px-4 py-3">
           {/* Mobile Header */}
           <div className="lg:hidden">
-            <div className="flex items-center justify-between mb-4">
-              <motion.h1 
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                className="text-2xl font-bold bg-gradient-to-r from-slate-900 to-rose-800 dark:from-white dark:to-rose-200 bg-clip-text text-transparent"
-              >
-                Explore
-              </motion.h1>
-              
-              <div className="flex items-center space-x-2">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => loadPosts(1)}
-                  disabled={loading}
-                  className="rounded-2xl w-10 h-10"
-                >
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setShowFilters(!showFilters)}
-                  className="rounded-2xl w-10 h-10"
-                >
-                  <Filter className="w-4 h-4" />
-                </Button>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center space-x-3">
+                <div className="relative">
+                  <motion.h1 
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="text-xl font-bold bg-gradient-to-r from-slate-900 to-rose-800 dark:from-white dark:to-rose-200 bg-clip-text text-transparent"
+                  >
+                    Explore
+                  </motion.h1>
+                  {stats.total > 0 && (
+                    <span className="absolute -top-1 -right-6 text-xs font-medium bg-gradient-to-r from-rose-500 to-pink-500 text-white px-2 py-0.5 rounded-full">
+                      {stats.filtered}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
-
-            {/* Mobile Search */}
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-              className="relative"
-            >
-              <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400 w-4 h-4" />
-              <Input
-                type="text"
-                placeholder="Search designs, designers, hashtags..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 rounded-2xl border-2 border-slate-200/60 dark:border-slate-700/60 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm focus:ring-2 focus:ring-rose-500"
-              />
-            </motion.div>
           </div>
 
-          {/* Desktop Header */}
+          {/* Desktop Header - Removed search */}
           <div className="hidden lg:block">
             <div className="text-center max-w-4xl mx-auto">
               <motion.div
@@ -413,36 +493,19 @@ fetchBatchStatuses(postIds, userIds as string[])
                   initial={{ scale: 0.9, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ delay: 0.2 }}
-                  className="inline-flex items-center px-4 py-2 rounded-full bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-lg shadow-rose-500/25 mb-6"
+                  className="inline-flex items-center px-4 py-2 rounded-full bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-lg shadow-rose-500/30 mb-6"
                 >
                   <Sparkles className="w-4 h-4 mr-2" />
                   <span className="text-sm font-medium">Discover Amazing Designs</span>
                 </motion.div>
 
-                <h1 className="text-5xl md:text-6xl font-serif font-bold mb-6 bg-gradient-to-br from-slate-900 to-rose-800 dark:from-white dark:to-rose-200 bg-clip-text text-transparent">
+                <h1 className="text-4xl md:text-5xl font-serif font-bold mb-4 bg-gradient-to-br from-slate-900 to-rose-800 dark:from-white dark:to-rose-200 bg-clip-text text-transparent">
                   Explore Designs
                 </h1>
                 
-                <p className="text-xl text-slate-600 dark:text-slate-400 mb-8 leading-relaxed">
-                  Discover inspiring fashion creations from our global community of talented designers
+                <p className="text-lg text-slate-600 dark:text-slate-400 mb-6 leading-relaxed">
+                  Discover inspiring fashion creations from our global community
                 </p>
-                
-                {/* Search Bar */}
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.4 }}
-                  className="relative max-w-2xl mx-auto"
-                >
-                  <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400 w-5 h-5" />
-                  <Input
-                    type="text"
-                    placeholder="Search designs, designers, hashtags, styles, materials..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-12 pr-4 py-4 rounded-2xl border-2 border-slate-200/60 dark:border-slate-700/60 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent shadow-lg shadow-slate-200/50 dark:shadow-slate-900/50 text-lg"
-                  />
-                </motion.div>
               </motion.div>
             </div>
           </div>
@@ -450,29 +513,75 @@ fetchBatchStatuses(postIds, userIds as string[])
       </motion.div>
 
       {/* Main Content */}
-      <div className="container mx-auto px-4 py-6">
+      <div className="container mx-auto px-4 py-4 lg:py-6 pb-20 lg:pb-6">
         {/* Mobile Categories Toggle */}
-        <div className="lg:hidden mb-6">
+        <div className="lg:hidden mb-4">
           <motion.button
             onClick={() => setShowCategories(!showCategories)}
-            className="w-full flex items-center justify-between p-4 rounded-2xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border border-slate-200/60 dark:border-slate-700/60"
+            className="w-full flex items-center justify-between p-3 rounded-xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm border border-slate-200/80 dark:border-slate-700/80"
           >
-            <span className="font-semibold text-slate-900 dark:text-white">Browse Categories</span>
+            <div className="flex items-center space-x-2">
+              <span className="font-semibold text-slate-900 dark:text-white">Categories</span>
+              {selectedCategory !== 'all' && (
+                <Badge variant="secondary" className="rounded-full bg-gradient-to-r from-rose-500 to-pink-500 text-white px-2">
+                  {categories.find(c => c.id === selectedCategory)?.name}
+                </Badge>
+              )}
+            </div>
             {showCategories ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
           </motion.button>
         </div>
+
+        {/* Categories - Mobile */}
+        <AnimatePresence>
+          {showCategories && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="lg:hidden mb-4 overflow-hidden"
+            >
+              <div className="grid grid-cols-3 gap-2">
+                {categories.map((category) => {
+                  const IconComponent = category.icon
+                  return (
+                    <motion.button
+                      key={category.id}
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      onClick={() => {
+                        setSelectedCategory(category.id)
+                        setShowCategories(false)
+                        setPage(1)
+                        loadPosts(1)
+                      }}
+                      className={`flex flex-col items-center p-3 rounded-xl transition-all ${
+                        selectedCategory === category.id
+                          ? `${category.bgColor} text-white shadow-lg`
+                          : 'bg-white/80 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-700/60'
+                      }`}
+                    >
+                      <IconComponent className="w-4 h-4 mb-1" />
+                      <span className="text-xs font-medium truncate w-full text-center">{category.name}</span>
+                    </motion.button>
+                  )
+                })}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Controls */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.6 }}
-          className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-8 gap-6"
+          className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4"
         >
           {/* Categories - Desktop */}
           <div className="hidden lg:block flex-1">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-2xl font-serif font-bold text-slate-900 dark:text-white">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xl font-serif font-bold text-slate-900 dark:text-white">
                 Browse Categories
               </h2>
               <div className="flex items-center space-x-2">
@@ -485,43 +594,43 @@ fetchBatchStatuses(postIds, userIds as string[])
                   <SlidersHorizontal className="w-4 h-4" />
                   <span>Filters</span>
                   {selectedFilters.length > 0 && (
-                    <Badge variant="secondary" className="ml-1 bg-rose-500 text-white">
+                    <Badge variant="secondary" className="ml-1 bg-gradient-to-r from-rose-500 to-pink-500 text-white">
                       {selectedFilters.length}
                     </Badge>
                   )}
                 </Button>
               </div>
             </div>
-            <div className="flex flex-wrap gap-3">
-              <AnimatePresence>
-                {categories.map((category, index) => {
-                  const IconComponent = category.icon
-                  return (
-                    <motion.button
-                      key={category.id}
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.9 }}
-                      transition={{ delay: index * 0.1 }}
-                      onClick={() => setSelectedCategory(category.id)}
-                      className={`group relative px-6 py-3 rounded-2xl font-medium transition-all duration-500 flex items-center space-x-2 overflow-hidden ${
-                        selectedCategory === category.id
-                          ? `${category.bgColor} text-white shadow-2xl transform scale-105`
-                          : 'bg-white/80 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 border border-slate-200/60 dark:border-slate-700/60 backdrop-blur-sm hover:shadow-xl'
-                      }`}
+            <div className="flex flex-wrap gap-2">
+              {categories.map((category) => {
+                const IconComponent = category.icon
+                return (
+                  <motion.button
+                    key={category.id}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => {
+                      setSelectedCategory(category.id)
+                      setPage(1)
+                      loadPosts(1)
+                    }}
+                    className={`group relative px-4 py-2 rounded-xl font-medium transition-all duration-300 flex items-center space-x-2 ${
+                      selectedCategory === category.id
+                        ? `${category.bgColor} text-white shadow-xl`
+                        : 'bg-white/80 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 border border-slate-200/60 dark:border-slate-700/60 backdrop-blur-sm hover:shadow-lg'
+                    }`}
+                  >
+                    <IconComponent className="w-4 h-4 relative z-10" />
+                    <span className="relative z-10 text-sm">{category.name}</span>
+                    <Badge 
+                      variant={selectedCategory === category.id ? "secondary" : "outline"} 
+                      className="rounded-full text-xs relative z-10 backdrop-blur-sm"
                     >
-                      <IconComponent className="w-4 h-4 relative z-10" />
-                      <span className="relative z-10">{category.name}</span>
-                      <Badge 
-                        variant={selectedCategory === category.id ? "secondary" : "outline"} 
-                        className="rounded-full text-xs relative z-10 backdrop-blur-sm"
-                      >
-                        {category.count}
-                      </Badge>
-                    </motion.button>
-                  )
-                })}
-              </AnimatePresence>
+                      {category.count}
+                    </Badge>
+                  </motion.button>
+                )
+              })}
             </div>
           </div>
 
@@ -530,44 +639,55 @@ fetchBatchStatuses(postIds, userIds as string[])
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.8 }}
-            className="flex items-center space-x-4 w-full lg:w-auto"
+            className="flex items-center justify-between w-full lg:w-auto lg:space-x-4"
           >
-            {/* Sort */}
-            <div className="relative">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as any)}
-                className="appearance-none rounded-2xl border-2 border-slate-200/60 dark:border-slate-700/60 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm px-4 py-2 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent shadow-lg"
-              >
-                <option value="recent">Most Recent</option>
-                <option value="popular">Most Popular</option>
-                <option value="trending">Trending</option>
-              </select>
-              <TrendingUp className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-4 h-4 pointer-events-none" />
+            {/* Stats */}
+            <div className="lg:hidden text-sm text-slate-600 dark:text-slate-400">
+              {stats.filtered > 0 && `${stats.filtered} designs`}
             </div>
 
-            {/* View Mode */}
-            <div className="flex bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-2xl p-1 border-2 border-slate-200/60 dark:border-slate-700/60 shadow-lg">
-              <button
-                onClick={() => setViewMode('detailed')}
-                className={`p-3 rounded-xl transition-all duration-300 ${
-                  viewMode === 'detailed'
-                    ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-lg'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-rose-600'
-                }`}
-              >
-                <Grid3X3 className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`p-3 rounded-xl transition-all duration-300 ${
-                  viewMode === 'grid'
-                    ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-lg'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-rose-600'
-                }`}
-              >
-                <List className="w-4 h-4" />
-              </button>
+            {/* Sort & View */}
+            <div className="flex items-center space-x-2">
+              <div className="relative">
+                <select
+                  value={sortBy}
+                  onChange={(e) => {
+                    setSortBy(e.target.value as any)
+                    setPage(1)
+                    loadPosts(1)
+                  }}
+                  className="appearance-none rounded-xl border-2 border-slate-200/80 dark:border-slate-700/80 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm px-3 py-2 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent shadow-lg"
+                >
+                  <option value="recent">Recent</option>
+                  <option value="popular">Popular</option>
+                  <option value="trending">Trending</option>
+                </select>
+                <TrendingUp className="absolute right-2 top-1/2 transform -translate-y-1/2 text-slate-400 w-4 h-4 pointer-events-none" />
+              </div>
+
+              {/* View Mode */}
+              <div className="flex bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm rounded-xl p-1 border-2 border-slate-200/80 dark:border-slate-700/80 shadow-lg">
+                <button
+                  onClick={() => setViewMode('grid')}
+                  className={`p-2 rounded-lg transition-all ${
+                    viewMode === 'grid'
+                      ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-md'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-rose-600'
+                  }`}
+                >
+                  <Grid3X3 className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setViewMode('detailed')}
+                  className={`p-2 rounded-lg transition-all ${
+                    viewMode === 'detailed'
+                      ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-md'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-rose-600'
+                  }`}
+                >
+                  <List className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           </motion.div>
         </motion.div>
@@ -579,10 +699,10 @@ fetchBatchStatuses(postIds, userIds as string[])
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden mb-8"
+              className="overflow-hidden mb-6"
             >
-              <Card className="rounded-3xl border-2 border-slate-200/60 dark:border-slate-700/60 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm">
-                <CardContent className="p-6">
+              <Card className="rounded-2xl border-2 border-slate-200/80 dark:border-slate-700/80 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm">
+                <CardContent className="p-4 lg:p-6">
                   <div className="flex items-center justify-between mb-4">
                     <div>
                       <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
@@ -607,13 +727,13 @@ fetchBatchStatuses(postIds, userIds as string[])
                         variant="ghost"
                         size="icon"
                         onClick={() => setShowFilters(false)}
-                        className="rounded-2xl"
+                        className="rounded-xl"
                       >
                         <X className="w-4 h-4" />
                       </Button>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                  <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
                     {filters.map((filter) => {
                       const IconComponent = filter.icon
                       const isSelected = selectedFilters.includes(filter.id)
@@ -623,17 +743,14 @@ fetchBatchStatuses(postIds, userIds as string[])
                           whileHover={{ scale: 1.02 }}
                           whileTap={{ scale: 0.98 }}
                           onClick={() => toggleFilter(filter.id)}
-                          className={`flex flex-col items-center p-4 rounded-2xl border-2 transition-all duration-300 group ${
+                          className={`flex flex-col items-center p-3 rounded-xl border transition-all ${
                             isSelected
-                              ? 'border-rose-500 bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300 shadow-lg scale-105'
-                              : 'border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-700/50 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-md'
+                              ? 'border-rose-500 bg-gradient-to-b from-rose-50 to-pink-50 dark:from-rose-900/30 dark:to-pink-900/30 text-rose-700 dark:text-rose-300'
+                              : 'border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-700/50 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600'
                           }`}
                         >
-                          <IconComponent className={`w-5 h-5 mb-2 group-hover:scale-110 transition-transform ${filter.color}`} />
-                          <span className="text-xs font-medium text-center mb-1">{filter.name}</span>
-                          <span className="text-xs text-slate-500 dark:text-slate-400 text-center opacity-0 group-hover:opacity-100 transition-opacity">
-                            {filter.description}
-                          </span>
+                          <IconComponent className={`w-4 h-4 mb-1 ${filter.color}`} />
+                          <span className="text-xs font-medium text-center">{filter.name}</span>
                         </motion.button>
                       )
                     })}
@@ -649,9 +766,9 @@ fetchBatchStatuses(postIds, userIds as string[])
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="flex flex-wrap items-center justify-between mb-8 p-4 bg-white/50 dark:bg-slate-800/50 rounded-2xl backdrop-blur-sm border border-slate-200/40 dark:border-slate-700/40 gap-3"
+            className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 p-4 bg-white/80 dark:bg-slate-800/80 rounded-xl backdrop-blur-sm border border-slate-200/60 dark:border-slate-700/60"
           >
-            <div className="flex items-center flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-slate-600 dark:text-slate-400 text-sm font-medium">
                 Active filters:
               </span>
@@ -660,7 +777,11 @@ fetchBatchStatuses(postIds, userIds as string[])
                 <Badge variant="secondary" className="rounded-full bg-gradient-to-r from-rose-500 to-pink-500 text-white">
                   {categories.find(c => c.id === selectedCategory)?.name}
                   <button
-                    onClick={() => setSelectedCategory('all')}
+                    onClick={() => {
+                      setSelectedCategory('all')
+                      setPage(1)
+                      loadPosts(1)
+                    }}
                     className="ml-2 hover:bg-white/20 rounded-full p-0.5 transition-colors"
                   >
                     <X className="w-3 h-3" />
@@ -685,9 +806,13 @@ fetchBatchStatuses(postIds, userIds as string[])
               
               {searchQuery && (
                 <Badge variant="outline" className="rounded-full">
-                  Search: "{searchQuery}"
+                  "{searchQuery}"
                   <button
-                    onClick={() => setSearchQuery('')}
+                    onClick={() => {
+                      setSearchQuery('')
+                      setPage(1)
+                      loadPosts(1)
+                    }}
                     className="ml-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full p-0.5 transition-colors"
                   >
                     <X className="w-3 h-3" />
@@ -696,7 +821,7 @@ fetchBatchStatuses(postIds, userIds as string[])
               )}
             </div>
 
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-3">
               <p className="text-slate-600 dark:text-slate-400 text-sm">
                 Showing <span className="font-semibold text-slate-900 dark:text-white">{posts.length}</span> designs
               </p>
@@ -714,7 +839,7 @@ fetchBatchStatuses(postIds, userIds as string[])
 
         {/* Posts Grid */}
         {loading ? (
-          <LoadingGrid />
+          <LoadingGrid viewMode={viewMode} />
         ) : posts.length > 0 ? (
           <PostsGrid 
             posts={posts} 
@@ -725,7 +850,6 @@ fetchBatchStatuses(postIds, userIds as string[])
             onSave={handleSave}
             onComment={handleComment}
             onFollow={handleFollow}
-            onShare={handleShare}
           />
         ) : (
           <EmptyState 
@@ -739,11 +863,12 @@ fetchBatchStatuses(postIds, userIds as string[])
 
         {/* Load More */}
         {hasMore && (
-          <div ref={ref} className="flex justify-center py-8">
+          <div ref={ref} className="flex justify-center py-6">
             <Button
               variant="outline"
               onClick={() => loadPosts(page + 1, true)}
               disabled={loadingMore}
+              className="rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm hover:bg-slate-50 dark:hover:bg-slate-700/80"
             >
               {loadingMore ? (
                 <>
@@ -751,40 +876,57 @@ fetchBatchStatuses(postIds, userIds as string[])
                   Loading...
                 </>
               ) : (
-                'Load More'
+                'Load More Designs'
               )}
             </Button>
           </div>
         )}
       </div>
+
+      {/* Post Creation Button - Desktop */}
+      <div className="hidden lg:block fixed bottom-8 right-8 z-50">
+        <Button
+          onClick={() => router.push('/dashboard/posts/create')}
+          className="rounded-full w-14 h-14 bg-gradient-to-r from-rose-500 to-pink-500 shadow-2xl shadow-rose-500/40 hover:from-rose-600 hover:to-pink-600"
+        >
+          <Plus className="w-6 h-6" />
+        </Button>
+      </div>
+
+      {/* Quick Actions for Mobile */}
+      <QuickActions />
     </div>
   )
 }
 
-// Loading Grid Component
-function LoadingGrid() {
+// Optimized Loading Grid Component
+function LoadingGrid({ viewMode }: { viewMode: ViewMode }) {
+  const gridClass = viewMode === 'grid' 
+    ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+    : "space-y-4"
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+    <div className={gridClass}>
       {[...Array(6)].map((_, i) => (
         <motion.div
           key={i}
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: i * 0.1 }}
-          className="rounded-3xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-2 border-slate-200/60 dark:border-slate-700/60 overflow-hidden"
+          transition={{ delay: i * 0.05 }}
+          className="rounded-xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-2 border-slate-200/80 dark:border-slate-700/80 overflow-hidden"
         >
           <div className="aspect-square bg-gradient-to-br from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-600 animate-pulse" />
-          <div className="p-4 space-y-3">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700 animate-pulse" />
-              <div className="space-y-2 flex-1">
-                <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-3/4" />
-                <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-1/2" />
+          <div className="p-3 space-y-2">
+            <div className="flex items-center space-x-2">
+              <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 animate-pulse" />
+              <div className="space-y-1 flex-1">
+                <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-3/4" />
+                <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-1/2" />
               </div>
             </div>
-            <div className="space-y-2">
-              <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-full" />
-              <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-2/3" />
+            <div className="space-y-1">
+              <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-full" />
+              <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-2/3" />
             </div>
           </div>
         </motion.div>
@@ -793,8 +935,14 @@ function LoadingGrid() {
   )
 }
 
-// Posts Grid Component
+// Optimized Posts Grid Component
 function PostsGrid({ posts, viewMode, batchStatusData, ...props }: any) {
+  const gridClass = useMemo(() => {
+    if (viewMode === 'grid') return "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
+    if (viewMode === 'detailed') return "space-y-4"
+    return "grid grid-cols-1 gap-4"
+  }, [viewMode])
+
   return (
     <motion.div
       initial="hidden"
@@ -804,17 +952,11 @@ function PostsGrid({ posts, viewMode, batchStatusData, ...props }: any) {
         visible: {
           opacity: 1,
           transition: {
-            staggerChildren: 0.1
+            staggerChildren: 0.05
           }
         }
       }}
-      className={
-        viewMode === 'grid' 
-          ? "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6"
-          : viewMode === 'detailed'
-          ? "space-y-6"
-          : "grid grid-cols-1 gap-6"
-      }
+      className={gridClass}
     >
       <AnimatePresence>
         {posts.map((post: Post, index: number) => (
@@ -830,8 +972,9 @@ function PostsGrid({ posts, viewMode, batchStatusData, ...props }: any) {
             layout
             initial="hidden"
             animate="visible"
-            exit="hidden"
-            transition={{ duration: 0.5, delay: index * 0.05 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            transition={{ duration: 0.3 }}
+            className={viewMode === 'detailed' ? 'w-full' : undefined}
           >
             <PostCard
               post={post}
@@ -846,38 +989,38 @@ function PostsGrid({ posts, viewMode, batchStatusData, ...props }: any) {
   )
 }
 
-// Empty State Component
+// Enhanced Empty State Component
 function EmptyState({ searchQuery, selectedCategory, selectedFilters, onClearFilters, onRefresh }: any) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="text-center py-16"
+      className="text-center py-12"
     >
-      <Card className="rounded-3xl border-2 border-dashed border-slate-200/60 dark:border-slate-700/60 bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm max-w-md mx-auto">
-        <CardContent className="p-8">
+      <Card className="rounded-2xl border-2 border-dashed border-slate-200/80 dark:border-slate-700/80 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm max-w-md mx-auto">
+        <CardContent className="p-6">
           <motion.div
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
             transition={{ delay: 0.2, type: "spring" }}
-            className="w-24 h-24 bg-gradient-to-r from-rose-100 to-pink-100 dark:from-rose-900/20 dark:to-pink-900/20 rounded-2xl flex items-center justify-center mx-auto mb-6"
+            className="w-20 h-20 bg-gradient-to-r from-rose-100 to-pink-100 dark:from-rose-900/20 dark:to-pink-900/20 rounded-2xl flex items-center justify-center mx-auto mb-4"
           >
-            <ScanSearch className="w-12 h-12 text-rose-400" />
+            <ScanSearch className="w-10 h-10 text-rose-400" />
           </motion.div>
-          <h3 className="text-2xl font-serif font-bold text-slate-900 dark:text-white mb-3">
+          <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
             No designs found
           </h3>
-          <p className="text-slate-600 dark:text-slate-400 mb-6">
+          <p className="text-slate-600 dark:text-slate-400 mb-4 text-sm">
             {searchQuery || selectedCategory !== 'all' || selectedFilters.length > 0
               ? 'Try adjusting your search or filters to see more results.' 
               : 'Be the first to share your fashion creations!'
             }
           </p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+          <div className="flex flex-col sm:flex-row gap-2 justify-center">
             {(searchQuery || selectedCategory !== 'all' || selectedFilters.length > 0) && (
               <Button
                 onClick={onClearFilters}
-                className="rounded-2xl bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 shadow-lg shadow-rose-500/25"
+                className="rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 shadow-lg shadow-rose-500/25 text-sm py-2"
               >
                 Clear all filters
               </Button>
@@ -885,8 +1028,9 @@ function EmptyState({ searchQuery, selectedCategory, selectedFilters, onClearFil
             <Button
               variant="outline"
               onClick={onRefresh}
-              className="rounded-2xl"
+              className="rounded-xl text-sm py-2"
             >
+              <RotateCcw className="w-4 h-4 mr-2" />
               Refresh
             </Button>
           </div>

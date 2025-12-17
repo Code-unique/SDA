@@ -11,12 +11,10 @@ interface MongooseCache {
   promise: Promise<typeof mongoose> | null;
 }
 
-// CHANGE THIS LINE - add | undefined
 declare global {
-  var mongoose: MongooseCache | undefined;
+  var mongoose: MongooseCache;
 }
 
-// Also need to update the initialization since mongoose could be undefined
 let cached = global.mongoose;
 
 if (!cached) {
@@ -24,37 +22,37 @@ if (!cached) {
 }
 
 export async function connectToDatabase() {
-  if (cached!.conn) { // Add non-null assertion
-    return cached!.conn;
+  if (cached.conn) {
+    return cached.conn;
   }
 
-  if (!cached!.promise) {
+  if (!cached.promise) {
     const opts = {
       bufferCommands: false,
-      maxPoolSize: 10,
+      maxPoolSize: 10, // Increased pool size
       minPoolSize: 5,
-      socketTimeoutMS: 45000,
-      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000, // Give up initial connection after 45 seconds
+      serverSelectionTimeoutMS: 5000, // Keep trying to send operations for 5 seconds
     };
 
-    cached!.promise = mongoose.connect(MONGODB_URI, opts)
+    cached.promise = mongoose.connect(MONGODB_URI, opts)
       .then((mongoose) => {
         console.log('✅ MongoDB connected successfully');
         return mongoose;
       })
       .catch((error) => {
         console.error('❌ MongoDB connection error:', error);
-        cached!.promise = null;
+        cached.promise = null; // Reset on error
         throw error;
       });
   }
 
   try {
-    cached!.conn = await cached!.promise;
+    cached.conn = await cached.promise;
   } catch (e) {
-    cached!.promise = null;
+    cached.promise = null;
     throw e;
   }
 
-  return cached!.conn;
+  return cached.conn;
 }

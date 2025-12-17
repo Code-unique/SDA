@@ -1,12 +1,13 @@
 // app/api/users/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
-import dbConnect from '@/lib/db';
+import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
 import "@/lib/loadmodels";
+
 export async function GET(request: NextRequest) {
   try {
-    await dbConnect();
+    await connectToDatabase();
     const user = await currentUser();
 
     if (!user) {
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    await dbConnect();
+    await connectToDatabase();
     const user = await currentUser();
 
     if (!user) {
@@ -110,7 +111,7 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    await dbConnect();
+    await connectToDatabase();
     const user = await currentUser();
 
     if (!user) {
