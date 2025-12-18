@@ -624,17 +624,11 @@ function SearchModal({
 interface MobileBottomNavProps {
   items: NavItem[]
   isActive: (href: string) => boolean
-  onSearchClick: () => void
-  onMoreClick: () => void
-  mobileMenuOpen: boolean
 }
 
 function MobileBottomNav({
   items,
   isActive,
-  onSearchClick,
-  onMoreClick,
-  mobileMenuOpen
 }: MobileBottomNavProps) {
   return (
     <nav 
@@ -678,40 +672,17 @@ function MobileBottomNav({
           )
         })}
 
-        {/* Search Button */}
-        <button
-          onClick={onSearchClick}
-          className="flex flex-col items-center p-2 rounded-xl text-slate-500 hover:text-slate-900 min-w-[56px]"
-          aria-label="Search"
+        {/* Plus Button - Replaces Search and More buttons */}
+        <Link
+          href="/dashboard/posts/create"
+          className="flex flex-col items-center p-2 rounded-xl text-rose-600 hover:text-rose-700 min-w-[56px]"
+          aria-label="Create post"
         >
-          <div className="p-2 rounded-lg mb-1 hover:bg-slate-100">
-            <Search className="w-5 h-5" aria-hidden="true" />
+          <div className="p-2 rounded-lg mb-1 bg-gradient-to-r from-rose-50 to-pink-50 hover:from-rose-100 hover:to-pink-100">
+            <Plus className="w-5 h-5" aria-hidden="true" />
           </div>
-          <span className="text-xs font-medium">Search</span>
-        </button>
-
-        {/* More Button */}
-        <button
-          onClick={onMoreClick}
-          className={cn(
-            "flex flex-col items-center p-2 rounded-xl transition-all min-w-[56px]",
-            mobileMenuOpen
-              ? "text-rose-600"
-              : "text-slate-500 hover:text-slate-900"
-          )}
-          aria-label="More menu"
-          aria-expanded={mobileMenuOpen}
-        >
-          <div className={cn(
-            "p-2 rounded-lg mb-1 transition-all",
-            mobileMenuOpen
-              ? "bg-gradient-to-r from-rose-50 to-pink-50"
-              : "hover:bg-slate-100"
-          )}>
-            <MoreHorizontal className="w-5 h-5" aria-hidden="true" />
-          </div>
-          <span className="text-xs font-medium">More</span>
-        </button>
+          <span className="text-xs font-medium">Create</span>
+        </Link>
       </div>
     </nav>
   )
@@ -869,13 +840,13 @@ function MobileMenu({
               
               <div className="mt-4 grid grid-cols-2 gap-2">
                 <Link 
-                  href="/create"
+                  href="/dashboard/posts/create"
                   className="block"
                   onClick={onClose}
                 >
                   <Button className="w-full rounded-xl bg-rose-600 hover:bg-rose-700 text-white transition-all duration-200">
                     <Plus className="w-4 h-4 mr-2" />
-                    Create
+                    Create Post
                   </Button>
                 </Link>
                 
@@ -990,19 +961,8 @@ export function Navbar() {
         <nav className="mx-auto px-4 sm:px-6 py-3 max-w-7xl" aria-label="Main navigation">
           <div className="flex items-center justify-between">
             
-            {/* Left: Logo & Mobile Menu */}
+            {/* Left: Logo (removed hamburger menu button) */}
             <div className="flex items-center space-x-2 sm:space-x-4">
-              <button
-                type="button"
-                className="lg:hidden p-2 text-slate-600 rounded-xl hover:bg-slate-100 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-rose-500"
-                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
-                aria-expanded={mobileMenuOpen}
-                aria-controls="mobile-menu"
-              >
-                {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-              </button>
-
               <Link 
                 href="/" 
                 className="flex items-center space-x-2 group shrink-0 focus:outline-none focus:ring-2 focus:ring-rose-500 rounded-lg"
@@ -1139,17 +1099,6 @@ export function Navbar() {
                   )}
                 </Link>
 
-                {/* Create Button */}
-                <Link href="/create" className="hidden sm:block">
-                  <Button 
-                    size="sm"
-                    className="rounded-xl items-center space-x-1 bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 text-white transition-all duration-200 focus:ring-2 focus:ring-rose-500 shadow-sm hover:shadow"
-                  >
-                    <Plus className="w-4 h-4" aria-hidden="true" />
-                    <span className="hidden lg:inline">Create</span>
-                  </Button>
-                </Link>
-
                 {/* User Menu */}
                 <div className="relative group">
                   <button 
@@ -1283,13 +1232,10 @@ export function Navbar() {
         notificationsCount={notificationsCount}
       />
 
-      {/* Bottom Navigation (Mobile Only) - ENHANCED: AI Coach added */}
+      {/* Bottom Navigation (Mobile Only) - ENHANCED: Single Plus button */}
       <MobileBottomNav
         items={mobileMainItems}
         isActive={isActive}
-        onSearchClick={() => setSearchOpen(true)}
-        onMoreClick={() => setMobileMenuOpen(true)}
-        mobileMenuOpen={mobileMenuOpen}
       />
 
       {/* Content padding for mobile bottom nav */}

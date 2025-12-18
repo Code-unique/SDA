@@ -32,7 +32,6 @@ import {
   TrendingUp,
   Tag,
   Compass,
-  Search,
   BookOpen,
   Zap
 } from 'lucide-react'
@@ -56,7 +55,6 @@ export default function ExplorePage() {
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [selectedFilters, setSelectedFilters] = useState<string[]>([])
   const [viewMode, setViewMode] = useState<ViewMode>('detailed')
@@ -148,16 +146,6 @@ export default function ExplorePage() {
     { id: 'forsale', name: 'For Sale', icon: ShoppingBag, description: 'Available for purchase', color: 'text-emerald-500' }
   ], [])
 
-  // Debounced search for performance
-  const debouncedSearch = useCallback(
-    debounce((query: string) => {
-      setSearchQuery(query)
-      setPage(1)
-      loadPosts(1, false)
-    }, 500),
-    []
-  )
-
   // Optimized batch status fetch with caching
   const fetchBatchStatuses = useCallback(async (postIds: string[], userIds: string[]) => {
     if (postIds.length === 0 && userIds.length === 0) return
@@ -198,7 +186,6 @@ export default function ExplorePage() {
         page: pageNum.toString(),
         limit: '12',
         sort: sortBy,
-        ...(searchQuery && { search: searchQuery }),
         ...(selectedCategory !== 'all' && { category: selectedCategory }),
         ...(selectedFilters.length > 0 && { filters: selectedFilters.join(',') })
       })
@@ -248,7 +235,7 @@ export default function ExplorePage() {
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [searchQuery, selectedCategory, selectedFilters, sortBy, loadingMore, isSignedIn, fetchBatchStatuses])
+  }, [selectedCategory, selectedFilters, sortBy, loadingMore, isSignedIn, fetchBatchStatuses])
 
   // Manual load more function
   const handleLoadMore = useCallback(() => {
@@ -298,7 +285,6 @@ export default function ExplorePage() {
   }, [loadPosts])
 
   const clearAllFilters = useCallback(() => {
-    setSearchQuery('')
     setSelectedCategory('all')
     setSelectedFilters([])
     setPage(1)
@@ -415,28 +401,6 @@ export default function ExplorePage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-rose-50/10 dark:from-slate-900 dark:via-slate-950 dark:to-rose-900/5">
-      {/* Stunning Floating Plus Button - Enhanced Visibility */}
-      <motion.div
-        initial={{ opacity: 0, scale: 0, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ 
-          delay: 0.3, 
-          type: "spring", 
-          stiffness: 300,
-          damping: 25
-        }}
-        className="fixed right-6 bottom-24 lg:bottom-28 z-50"
-      >
-        <Button
-          onClick={() => router.push('/dashboard/posts/create')}
-          className="relative rounded-full w-16 h-16 bg-gradient-to-br from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 shadow-2xl shadow-rose-500/30 hover:shadow-rose-500/50 transition-all duration-300 group border-0"
-        >
-          <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-          <Plus className="w-7 h-7 text-white relative z-10" />
-          <div className="absolute -inset-4 bg-gradient-to-br from-rose-500/20 to-pink-500/20 rounded-full blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-        </Button>
-      </motion.div>
-
       {/* Enhanced Glassmorphism Header */}
       <motion.div
         ref={headerRef}
@@ -453,7 +417,7 @@ export default function ExplorePage() {
       >
         <div className="container mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
-            {/* Left: Brand with Search */}
+            {/* Left: Brand */}
             <motion.div
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
@@ -466,17 +430,6 @@ export default function ExplorePage() {
                 <span className="text-lg font-semibold bg-gradient-to-r from-slate-900 to-rose-800 dark:from-white dark:to-rose-200 bg-clip-text text-transparent">
                   Discover
                 </span>
-              </div>
-              
-              {/* Search Bar */}
-              <div className="relative hidden lg:block">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-4 h-4" />
-                <input
-                  type="text"
-                  placeholder="Search designs..."
-                  onChange={(e) => debouncedSearch(e.target.value)}
-                  className="pl-10 pr-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/30 focus:border-transparent w-64"
-                />
               </div>
             </motion.div>
 
@@ -536,19 +489,6 @@ export default function ExplorePage() {
 
       {/* Main Content with Enhanced Spacing */}
       <div className="container mx-auto px-4 py-8 pb-32 lg:pb-8">
-        {/* Mobile Search */}
-        <div className="lg:hidden mb-6">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-4 h-4" />
-            <input
-              type="text"
-              placeholder="Search designs..."
-              onChange={(e) => debouncedSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/30 focus:border-transparent"
-            />
-          </div>
-        </div>
-
         {/* Enhanced Hideable Categories Section */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -813,7 +753,6 @@ export default function ExplorePage() {
           />
         ) : (
           <EmptyState 
-            searchQuery={searchQuery}
             selectedCategory={selectedCategory}
             selectedFilters={selectedFilters}
             onClearFilters={clearAllFilters}
@@ -974,7 +913,7 @@ function PostsGrid({ posts, viewMode, batchStatusData, ...props }: any) {
 }
 
 // Enhanced Empty State Component
-function EmptyState({ searchQuery, selectedCategory, selectedFilters, onClearFilters, onRefresh }: any) {
+function EmptyState({ selectedCategory, selectedFilters, onClearFilters, onRefresh }: any) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.9 }}
@@ -1002,14 +941,14 @@ function EmptyState({ searchQuery, selectedCategory, selectedFilters, onClearFil
         No designs found
       </h3>
       <p className="text-slate-600 dark:text-slate-400 mb-8 text-center max-w-md">
-        {searchQuery || selectedCategory !== 'all' || selectedFilters.length > 0
+        {selectedCategory !== 'all' || selectedFilters.length > 0
           ? 'Try adjusting your filters or explore different categories.' 
           : 'Be the first to create something amazing!'
         }
       </p>
       
       <div className="flex flex-col sm:flex-row gap-3 justify-center">
-        {(searchQuery || selectedCategory !== 'all' || selectedFilters.length > 0) && (
+        {(selectedCategory !== 'all' || selectedFilters.length > 0) && (
           <Button
             onClick={onClearFilters}
             className="rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white shadow-lg shadow-rose-500/25 px-6"

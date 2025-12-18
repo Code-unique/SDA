@@ -1,32 +1,26 @@
-// middleware.ts
+// middleware.ts - FIXED VERSION
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
 
 const isProtectedRoute = createRouteMatcher([
   '/admin(.*)',
   '/dashboard(.*)',
-  '/courses(.*)/learn',
   '/profile(.*)',
-  '/messages(.*)',
+  '/orders(.*)',
+  '/cart',
+  '/checkout',
   '/api/admin(.*)',
-  '/api/courses(.*)/progress',
-  '/api/courses(.*)/enroll',
-  '/api/courses(.*)/notes',
-  '/api/users(.*)',
-  '/api/messages(.*)',
-  '/api/notifications(.*)',
-  '/api/upload(.*)',
+  '/api/orders(.*)',
+  '/api/products(.*)', // POST, PUT, DELETE
 ])
 
 const isPublicRoute = createRouteMatcher([
   '/',
   '/sign-in(.*)',
   '/sign-up(.*)',
+  '/shop(.*)',
+  '/api/products', // GET is public
   '/api/webhooks(.*)',
-  '/api/courses(.*)',
-  '/api/explore(.*)',
-  '/api/search(.*)',
-  '/api/stats(.*)',
   '/api/placeholder(.*)',
 ])
 
@@ -65,10 +59,8 @@ export default clerkMiddleware(async (auth, req) => {
       )
     }
     
-    // Admin API routes require admin role
-    if (req.nextUrl.pathname.startsWith('/api/admin') && userId) {
-      // Note: You'll need to check user role in the actual API route
-      // This is just a basic check
+    // Admin API routes - authorization checked in route handlers
+    if (req.nextUrl.pathname.startsWith('/api/admin')) {
       return NextResponse.next({
         request: {
           headers: requestHeaders,
@@ -84,7 +76,7 @@ export default clerkMiddleware(async (auth, req) => {
     return NextResponse.redirect(signInUrl)
   }
   
-  // Handle public pages - allow everyone
+  // Handle public pages
   if (isPublicRoute(req)) {
     return NextResponse.next({
       request: {
@@ -92,6 +84,13 @@ export default clerkMiddleware(async (auth, req) => {
       },
     })
   }
+  
+  // Default: allow access
+  return NextResponse.next({
+    request: {
+      headers: requestHeaders,
+    },
+  })
 })
 
 export const config = {
