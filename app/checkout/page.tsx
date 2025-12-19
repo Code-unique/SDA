@@ -1,4 +1,4 @@
-// app/checkout/page.tsx - FIXED CART CLEARING
+// app/checkout/page.tsx - FULL UPDATED VERSION
 'use client'
 
 import { useState, useEffect } from 'react'
@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Separator } from '@/components/ui/separator'
-import { Upload, ShoppingCart , Shield, CreditCard, Building, Truck, Lock, CheckCircle } from 'lucide-react'
+import { Upload, ShoppingCart , Shield, CreditCard, Building, Truck, Lock, CheckCircle, AlertCircle } from 'lucide-react'
 import { useAuth } from '@clerk/nextjs'
 import { toast } from 'sonner'
 import { useCart } from '@/lib/cart-context'
@@ -21,6 +21,22 @@ interface CheckoutItem {
   price: number
   quantity: number
   images: string[]
+  designer?: {
+    username: string
+    avatar: string
+  }
+}
+
+interface CartItem {
+  _id: string
+  name: string
+  price: number
+  quantity: number
+  images: string[]
+  designer?: {
+    username: string
+    avatar: string
+  }
 }
 
 export default function CheckoutPage() {
@@ -29,9 +45,10 @@ export default function CheckoutPage() {
   const [uploading, setUploading] = useState(false)
   const [paymentMethod, setPaymentMethod] = useState('bank_transfer')
   const [paymentProof, setPaymentProof] = useState<File | null>(null)
+  const [uploadProgress, setUploadProgress] = useState(0)
   const { getToken, isSignedIn } = useAuth()
   const router = useRouter()
-  const { clearCart } = useCart() // Import clearCart from cart context
+  const { clearCart } = useCart()
 
   const [shippingAddress, setShippingAddress] = useState({
     fullName: '',
@@ -44,69 +61,138 @@ export default function CheckoutPage() {
     notes: '',
   })
 
+  const [formErrors, setFormErrors] = useState({
+    fullName: '',
+    street: '',
+    city: '',
+    state: '',
+    postalCode: '',
+    phone: '',
+  })
+
   useEffect(() => {
     if (!isSignedIn) {
       router.push('/sign-in?redirect=/checkout')
       return
     }
 
-    // Try multiple sources for cart data
-    let cartData = null
-    
-    // First try localStorage (most reliable)
+    loadCartItems()
+  }, [isSignedIn, router])
+
+  const loadCartItems = () => {
     try {
+      let cartData = null
+      
+      // Try localStorage first
       const savedCart = localStorage.getItem('cart')
       if (savedCart) {
         cartData = JSON.parse(savedCart)
       }
-    } catch (e) {
-      console.error('Error reading cart from localStorage:', e)
-    }
-    
-    // Then try sessionStorage
-    if (!cartData || !Array.isArray(cartData) || cartData.length === 0) {
-      try {
+      
+      // Then try sessionStorage
+      if (!cartData || !Array.isArray(cartData) || cartData.length === 0) {
         const savedItems = sessionStorage.getItem('checkoutItems')
         if (savedItems) {
           cartData = JSON.parse(savedItems)
         }
-      } catch (e) {
-        console.error('Error reading cart from sessionStorage:', e)
       }
-    }
-    
-    if (!cartData || !Array.isArray(cartData) || cartData.length === 0) {
-      toast.error('Your cart is empty')
+      
+      if (!cartData || !Array.isArray(cartData) || cartData.length === 0) {
+        toast.error('Your cart is empty')
+        router.push('/cart')
+        return
+      }
+      
+      // Transform cart items to checkout format
+      const transformedItems = cartData.map((item: CartItem) => ({
+        _id: item._id,
+        name: item.name || 'Unnamed Product',
+        price: item.price || 0,
+        quantity: item.quantity || 1,
+        images: item.images || ['/api/placeholder/400/500'],
+        designer: item.designer || {
+          username: 'Unknown Designer',
+          avatar: '/api/placeholder/100/100'
+        }
+      }))
+      
+      setItems(transformedItems)
+      
+      // Store in sessionStorage for consistency
+      sessionStorage.setItem('checkoutItems', JSON.stringify(transformedItems))
+      
+    } catch (error) {
+      console.error('Error loading cart items:', error)
+      toast.error('Failed to load cart items')
       router.push('/cart')
-      return
+    }
+  }
+
+  const validateForm = () => {
+    const errors = {
+      fullName: '',
+      street: '',
+      city: '',
+      state: '',
+      postalCode: '',
+      phone: '',
     }
     
-    // Transform cart items to checkout format
-    const transformedItems = cartData.map((item: any) => ({
-      _id: item._id,
-      name: item.name,
-      price: item.price,
-      quantity: item.quantity,
-      images: item.images || ['/api/placeholder/400/500'],
-    }))
+    let isValid = true
     
-    setItems(transformedItems)
+    if (!shippingAddress.fullName.trim()) {
+      errors.fullName = 'Full name is required'
+      isValid = false
+    }
     
-    // Store in sessionStorage for consistency
-    sessionStorage.setItem('checkoutItems', JSON.stringify(transformedItems))
-  }, [isSignedIn, router])
+    if (!shippingAddress.street.trim()) {
+      errors.street = 'Street address is required'
+      isValid = false
+    }
+    
+    if (!shippingAddress.city.trim()) {
+      errors.city = 'City is required'
+      isValid = false
+    }
+    
+    if (!shippingAddress.state.trim()) {
+      errors.state = 'State/Province is required'
+      isValid = false
+    }
+    
+    if (!shippingAddress.postalCode.trim()) {
+      errors.postalCode = 'Postal code is required'
+      isValid = false
+    }
+    
+    if (!shippingAddress.phone.trim()) {
+      errors.phone = 'Phone number is required'
+      isValid = false
+    } else if (!/^[\+]?[1-9][\d]{0,15}$/.test(shippingAddress.phone.replace(/[\s\-\(\)]/g, ''))) {
+      errors.phone = 'Please enter a valid phone number'
+      isValid = false
+    }
+    
+    setFormErrors(errors)
+    return isValid
+  }
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
+      // Validate file size
       if (file.size > 5 * 1024 * 1024) {
         toast.error('File size must be less than 5MB')
         return
       }
-      if (!file.type.startsWith('image/')) {
-        toast.error('Please upload an image file (PNG, JPG, JPEG)')
+      
+      // Validate file type
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp']
+      if (!allowedTypes.includes(file.type)) {
+        toast.error('Please upload an image file (JPEG, PNG, or WebP)')
         return
       }
+      
       setPaymentProof(file)
       toast.success('Payment proof uploaded successfully')
     }
@@ -116,52 +202,118 @@ export default function CheckoutPage() {
     return items.reduce((total, item) => total + (item.price * item.quantity), 0)
   }
 
-  const calculateShipping = () => items.length > 0 ? 5.99 : 0
-  const calculateTax = () => calculateSubtotal() * 0.08
-  const calculateTotal = () => calculateSubtotal() + calculateShipping() + calculateTax()
+  const calculateShipping = () => {
+    if (items.length === 0) return 0
+    const subtotal = calculateSubtotal()
+    // Free shipping for orders over $100
+    return subtotal > 100 ? 0 : 5.99
+  }
+
+  const calculateTax = () => {
+    return calculateSubtotal() * 0.08 // 8% tax rate
+  }
+
+  const calculateTotal = () => {
+    return calculateSubtotal() + calculateShipping() + calculateTax()
+  }
+
+  const uploadPaymentProof = async (orderId: string, token: string): Promise<boolean> => {
+    if (!paymentProof) return false
+    
+    setUploading(true)
+    setUploadProgress(0)
+    
+    try {
+      const formData = new FormData()
+      formData.append('file', paymentProof)
+      
+      // Simulate upload progress
+      const progressInterval = setInterval(() => {
+        setUploadProgress(prev => {
+          if (prev >= 90) {
+            clearInterval(progressInterval)
+            return 90
+          }
+          return prev + 10
+        })
+      }, 200)
+      
+      const proofRes = await fetch(`/api/orders/${orderId}/payment-proof`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      })
+      
+      clearInterval(progressInterval)
+      setUploadProgress(100)
+      
+      if (!proofRes.ok) {
+        const errorData = await proofRes.json()
+        throw new Error(errorData.error || 'Failed to upload payment proof')
+      }
+      
+      const proofData = await proofRes.json()
+      console.log('Payment proof uploaded:', proofData)
+      
+      return true
+    } catch (error: any) {
+      console.error('Payment proof upload error:', error)
+      throw error
+    } finally {
+      setTimeout(() => {
+        setUploading(false)
+        setUploadProgress(0)
+      }, 500)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // Validate form
+    if (!validateForm()) {
+      toast.error('Please fill in all required fields correctly')
+      return
+    }
+    
+    // Validate payment method
+    if (paymentMethod === 'bank_transfer' && !paymentProof) {
+      toast.error('Please upload payment proof for bank transfer')
+      return
+    }
+    
     setLoading(true)
-
+    
     try {
-      // Validate required fields
-      if (!shippingAddress.fullName || !shippingAddress.street || !shippingAddress.city || 
-          !shippingAddress.state || !shippingAddress.postalCode || !shippingAddress.phone) {
-        throw new Error('Please fill in all required shipping information')
-      }
-
-      if (paymentMethod === 'bank_transfer' && !paymentProof) {
-        throw new Error('Please upload payment proof for bank transfer')
-      }
-
       const token = await getToken()
       if (!token) {
         throw new Error('Authentication required. Please sign in again.')
       }
 
-      // Prepare order data with product details
+      // Prepare order data
       const orderData = {
         items: items.map(item => ({
           productId: item._id,
           quantity: item.quantity,
         })),
         shippingAddress: {
-          fullName: shippingAddress.fullName,
-          street: shippingAddress.street,
-          city: shippingAddress.city,
-          state: shippingAddress.state,
-          postalCode: shippingAddress.postalCode,
+          fullName: shippingAddress.fullName.trim(),
+          street: shippingAddress.street.trim(),
+          city: shippingAddress.city.trim(),
+          state: shippingAddress.state.trim(),
+          postalCode: shippingAddress.postalCode.trim(),
           country: shippingAddress.country,
-          phone: shippingAddress.phone,
-          notes: shippingAddress.notes || '',
+          phone: shippingAddress.phone.trim(),
+          notes: shippingAddress.notes.trim(),
         },
         paymentMethod,
         shippingFee: calculateShipping(),
         tax: calculateTax(),
       }
 
-      console.log('Sending order data:', orderData)
+      console.log('Creating order with data:', orderData)
 
       // Create order
       const orderRes = await fetch('/api/orders', {
@@ -171,6 +323,7 @@ export default function CheckoutPage() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(orderData),
+        signal: AbortSignal.timeout(30000) // 30 second timeout
       })
 
       const responseData = await orderRes.json()
@@ -187,42 +340,25 @@ export default function CheckoutPage() {
       }
 
       const order = responseData
-
-      // If bank transfer, upload payment proof
+      
+      // Upload payment proof if needed
+      let paymentProofUploaded = false
       if (paymentMethod === 'bank_transfer' && paymentProof) {
-        setUploading(true)
         try {
-          const formData = new FormData()
-          formData.append('file', paymentProof)
-
-          const proofRes = await fetch(`/api/orders/${order._id}/payment-proof`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-            body: formData,
-          })
-
-          if (!proofRes.ok) {
-            console.warn('Payment proof upload failed, but order was created')
-            toast.warning('Order created but payment proof upload failed. Please contact support.')
-          }
-        } catch (uploadError) {
-          console.error('Payment proof upload error:', uploadError)
-          // Don't fail the order if upload fails
-          toast.warning('Order created but payment proof upload failed. Please contact support.')
+          paymentProofUploaded = await uploadPaymentProof(order._id, token)
+        } catch (uploadError: any) {
+          console.warn('Payment proof upload failed:', uploadError)
+          // Don't fail the order, just warn the user
+          toast.warning('Order created but payment proof upload failed. Please contact support with your order number.')
         }
       }
 
-      // ✅ FIXED: Clear cart using cart context
+      // Clear cart and storage
       clearCart()
-      
-      // Clear session storage
       sessionStorage.removeItem('checkoutItems')
-      
-      // Clear localStorage for cart
       localStorage.removeItem('cart')
 
+      // Show success message
       toast.success('Order placed successfully!', {
         description: `Order #${order.orderNumber} has been confirmed.`,
         action: {
@@ -232,17 +368,24 @@ export default function CheckoutPage() {
         duration: 5000,
       })
       
-      // Redirect to orders page
+      // Redirect to order details page
       setTimeout(() => {
         router.push(`/orders/${order._id}`)
       }, 2000)
 
     } catch (error: any) {
       console.error('Checkout error:', error)
-      toast.error(error.message || 'Checkout failed. Please try again.')
+      
+      if (error.name === 'AbortError' || error.name === 'TimeoutError') {
+        toast.error('Request timeout. Please try again.')
+      } else if (error.message.includes('stock')) {
+        toast.error('Insufficient stock. Please update your cart and try again.')
+        router.push('/cart')
+      } else {
+        toast.error(error.message || 'Checkout failed. Please try again.')
+      }
     } finally {
       setLoading(false)
-      setUploading(false)
     }
   }
 
@@ -276,10 +419,10 @@ export default function CheckoutPage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Left Column - Form */}
-            <div>
-              <form onSubmit={handleSubmit} className="space-y-8">
+          <form onSubmit={handleSubmit}>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* Left Column - Form */}
+              <div className="space-y-8">
                 {/* Shipping Address */}
                 <Card className="border-0 shadow-lg">
                   <CardContent className="p-6">
@@ -295,80 +438,140 @@ export default function CheckoutPage() {
                     
                     <div className="space-y-4">
                       <div>
-                        <Label htmlFor="fullName">Full Name *</Label>
+                        <Label htmlFor="fullName">
+                          Full Name *
+                          {formErrors.fullName && (
+                            <span className="text-red-500 text-sm ml-2">
+                              <AlertCircle className="inline w-3 h-3 mr-1" />
+                              {formErrors.fullName}
+                            </span>
+                          )}
+                        </Label>
                         <Input
                           id="fullName"
                           value={shippingAddress.fullName}
-                          onChange={(e) => setShippingAddress(prev => ({
-                            ...prev,
-                            fullName: e.target.value
-                          }))}
-                          required
+                          onChange={(e) => {
+                            setShippingAddress(prev => ({
+                              ...prev,
+                              fullName: e.target.value
+                            }))
+                            if (formErrors.fullName) {
+                              setFormErrors(prev => ({ ...prev, fullName: '' }))
+                            }
+                          }}
                           placeholder="John Doe"
-                          className="mt-1"
+                          className={`mt-1 ${formErrors.fullName ? 'border-red-500' : ''}`}
                         />
                       </div>
                       
                       <div>
-                        <Label htmlFor="street">Street Address *</Label>
+                        <Label htmlFor="street">
+                          Street Address *
+                          {formErrors.street && (
+                            <span className="text-red-500 text-sm ml-2">
+                              <AlertCircle className="inline w-3 h-3 mr-1" />
+                              {formErrors.street}
+                            </span>
+                          )}
+                        </Label>
                         <Input
                           id="street"
                           value={shippingAddress.street}
-                          onChange={(e) => setShippingAddress(prev => ({
-                            ...prev,
-                            street: e.target.value
-                          }))}
-                          required
+                          onChange={(e) => {
+                            setShippingAddress(prev => ({
+                              ...prev,
+                              street: e.target.value
+                            }))
+                            if (formErrors.street) {
+                              setFormErrors(prev => ({ ...prev, street: '' }))
+                            }
+                          }}
                           placeholder="123 Main St"
-                          className="mt-1"
+                          className={`mt-1 ${formErrors.street ? 'border-red-500' : ''}`}
                         />
                       </div>
                       
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <Label htmlFor="city">City *</Label>
+                          <Label htmlFor="city">
+                            City *
+                            {formErrors.city && (
+                              <span className="text-red-500 text-sm ml-2">
+                                <AlertCircle className="inline w-3 h-3 mr-1" />
+                                {formErrors.city}
+                              </span>
+                            )}
+                          </Label>
                           <Input
                             id="city"
                             value={shippingAddress.city}
-                            onChange={(e) => setShippingAddress(prev => ({
-                              ...prev,
-                              city: e.target.value
-                            }))}
-                            required
+                            onChange={(e) => {
+                              setShippingAddress(prev => ({
+                                ...prev,
+                                city: e.target.value
+                              }))
+                              if (formErrors.city) {
+                                setFormErrors(prev => ({ ...prev, city: '' }))
+                              }
+                            }}
                             placeholder="New York"
-                            className="mt-1"
+                            className={`mt-1 ${formErrors.city ? 'border-red-500' : ''}`}
                           />
                         </div>
                         
                         <div>
-                          <Label htmlFor="state">State/Province *</Label>
+                          <Label htmlFor="state">
+                            State/Province *
+                            {formErrors.state && (
+                              <span className="text-red-500 text-sm ml-2">
+                                <AlertCircle className="inline w-3 h-3 mr-1" />
+                                {formErrors.state}
+                              </span>
+                            )}
+                          </Label>
                           <Input
                             id="state"
                             value={shippingAddress.state}
-                            onChange={(e) => setShippingAddress(prev => ({
-                              ...prev,
-                              state: e.target.value
-                            }))}
-                            required
+                            onChange={(e) => {
+                              setShippingAddress(prev => ({
+                                ...prev,
+                                state: e.target.value
+                              }))
+                              if (formErrors.state) {
+                                setFormErrors(prev => ({ ...prev, state: '' }))
+                              }
+                            }}
                             placeholder="NY"
-                            className="mt-1"
+                            className={`mt-1 ${formErrors.state ? 'border-red-500' : ''}`}
                           />
                         </div>
                       </div>
                       
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <Label htmlFor="postalCode">Postal Code *</Label>
+                          <Label htmlFor="postalCode">
+                            Postal Code *
+                            {formErrors.postalCode && (
+                              <span className="text-red-500 text-sm ml-2">
+                                <AlertCircle className="inline w-3 h-3 mr-1" />
+                                {formErrors.postalCode}
+                              </span>
+                            )}
+                          </Label>
                           <Input
                             id="postalCode"
                             value={shippingAddress.postalCode}
-                            onChange={(e) => setShippingAddress(prev => ({
-                              ...prev,
-                              postalCode: e.target.value
-                            }))}
-                            required
+                            onChange={(e) => {
+                              setShippingAddress(prev => ({
+                                ...prev,
+                                postalCode: e.target.value
+                              }))
+                              if (formErrors.postalCode) {
+                                setFormErrors(prev => ({ ...prev, postalCode: '' }))
+                              }
+                            }}
                             placeholder="10001"
-                            className="mt-1"
+                            className={`mt-1 ${formErrors.postalCode ? 'border-red-500' : ''}`}
                           />
                         </div>
                         
@@ -381,25 +584,36 @@ export default function CheckoutPage() {
                               ...prev,
                               country: e.target.value
                             }))}
-                            required
                             className="mt-1"
                           />
                         </div>
                       </div>
                       
                       <div>
-                        <Label htmlFor="phone">Phone Number *</Label>
+                        <Label htmlFor="phone">
+                          Phone Number *
+                          {formErrors.phone && (
+                            <span className="text-red-500 text-sm ml-2">
+                              <AlertCircle className="inline w-3 h-3 mr-1" />
+                              {formErrors.phone}
+                            </span>
+                          )}
+                        </Label>
                         <Input
                           id="phone"
                           type="tel"
                           value={shippingAddress.phone}
-                          onChange={(e) => setShippingAddress(prev => ({
-                            ...prev,
-                            phone: e.target.value
-                          }))}
-                          required
+                          onChange={(e) => {
+                            setShippingAddress(prev => ({
+                              ...prev,
+                              phone: e.target.value
+                            }))
+                            if (formErrors.phone) {
+                              setFormErrors(prev => ({ ...prev, phone: '' }))
+                            }
+                          }}
                           placeholder="+1 (555) 123-4567"
-                          className="mt-1"
+                          className={`mt-1 ${formErrors.phone ? 'border-red-500' : ''}`}
                         />
                       </div>
                       
@@ -472,6 +686,23 @@ export default function CheckoutPage() {
                           </p>
                         </div>
                       </div>
+                      
+                      <div className={`flex items-center space-x-3 p-4 border rounded-xl cursor-pointer transition-all ${
+                        paymentMethod === 'card' ? 'border-rose-500 bg-rose-50' : ''
+                      }`}>
+                        <RadioGroupItem value="card" id="card" />
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between">
+                            <Label htmlFor="card" className="font-medium cursor-pointer">
+                              Credit/Debit Card
+                            </Label>
+                            <CreditCard className="w-5 h-5 text-slate-400" />
+                          </div>
+                          <p className="text-sm text-slate-500 mt-1">
+                            Pay securely with your card
+                          </p>
+                        </div>
+                      </div>
                     </RadioGroup>
 
                     {/* Payment Proof Upload */}
@@ -497,7 +728,7 @@ export default function CheckoutPage() {
                                     <Upload className="w-8 h-8 mx-auto text-slate-400 mb-2" />
                                     <p className="text-sm text-slate-500">Click to upload payment screenshot</p>
                                     <p className="text-xs text-slate-400 mt-1">
-                                      PNG, JPG up to 5MB
+                                      PNG, JPG, WebP up to 5MB
                                     </p>
                                   </div>
                                 )}
@@ -521,11 +752,28 @@ export default function CheckoutPage() {
                                   toast.info('Payment proof removed')
                                 }}
                                 className="text-rose-500 hover:text-rose-600"
+                                disabled={uploading}
                               >
                                 Remove
                               </Button>
                             )}
                           </div>
+                          
+                          {/* Upload Progress */}
+                          {uploading && (
+                            <div className="space-y-2">
+                              <div className="flex justify-between text-sm">
+                                <span>Uploading...</span>
+                                <span>{uploadProgress}%</span>
+                              </div>
+                              <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full bg-green-500 transition-all duration-300"
+                                  style={{ width: `${uploadProgress}%` }}
+                                />
+                              </div>
+                            </div>
+                          )}
                           
                           <div className="text-sm text-slate-600 dark:text-slate-400 space-y-2">
                             <p className="font-medium">Bank Details:</p>
@@ -541,113 +789,139 @@ export default function CheckoutPage() {
                     )}
                   </CardContent>
                 </Card>
-              </form>
-            </div>
+              </div>
 
-            {/* Right Column - Order Summary */}
-            <div>
-              <Card className="border-0 shadow-lg sticky top-24">
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-3 mb-6">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-r from-rose-100 to-pink-100 flex items-center justify-center">
-                      <Truck className="w-5 h-5 text-rose-500" />
+              {/* Right Column - Order Summary */}
+              <div>
+                <Card className="border-0 shadow-lg sticky top-24">
+                  <CardContent className="p-6">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-r from-rose-100 to-pink-100 flex items-center justify-center">
+                        <Truck className="w-5 h-5 text-rose-500" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold">Order Summary</h3>
+                        <p className="text-sm text-slate-500">{items.reduce((total, item) => total + item.quantity, 0)} items</p>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="text-xl font-bold">Order Summary</h3>
-                      <p className="text-sm text-slate-500">{items.reduce((total, item) => total + item.quantity, 0)} items</p>
+                    
+                    {/* Order Items */}
+                    <div className="space-y-4 mb-6 max-h-64 overflow-y-auto pr-2">
+                      {items.map((item) => (
+                        <div key={item._id} className="flex items-center gap-3 p-3 border rounded-lg">
+                          <div className="w-16 h-20 flex-shrink-0">
+                            <img
+                              src={item.images?.[0] || '/api/placeholder/100/150'}
+                              alt={item.name}
+                              className="w-full h-full object-cover rounded"
+                              onError={(e) => {
+                                const target = e.target as HTMLImageElement
+                                target.src = `/api/placeholder/100/150?text=${encodeURIComponent(item.name)}`
+                              }}
+                            />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium truncate">{item.name}</p>
+                            <p className="text-sm text-slate-500">
+                              {item.designer?.username ? `by @${item.designer.username}` : ''}
+                            </p>
+                            <p className="text-sm text-slate-500">Qty: {item.quantity}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-semibold">${item.price.toFixed(2)}</p>
+                            <p className="text-sm text-slate-500">
+                              ${(item.price * item.quantity).toFixed(2)}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                  
-                  {/* Order Items */}
-                  <div className="space-y-4 mb-6 max-h-64 overflow-y-auto pr-2">
-                    {items.map((item) => (
-                      <div key={item._id} className="flex items-center gap-3 p-3 border rounded-lg">
-                        <div className="w-16 h-20 flex-shrink-0">
-                          <img
-                            src={item.images?.[0] || '/api/placeholder/100/150'}
-                            alt={item.name}
-                            className="w-full h-full object-cover rounded"
-                            onError={(e) => {
-                              const target = e.target as HTMLImageElement
-                              target.src = `/api/placeholder/100/150?text=${encodeURIComponent(item.name)}`
-                            }}
-                          />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium truncate">{item.name}</p>
-                          <p className="text-sm text-slate-500">Qty: {item.quantity}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-semibold">${item.price.toFixed(2)}</p>
-                          <p className="text-sm text-slate-500">
-                            ${(item.price * item.quantity).toFixed(2)}
+                    
+                    <Separator className="my-6" />
+                    
+                    {/* Price Breakdown */}
+                    <div className="space-y-3">
+                      <div className="flex justify-between">
+                        <span className="text-slate-600">Subtotal</span>
+                        <span className="font-semibold">${calculateSubtotal().toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-600">Shipping</span>
+                        <span className="font-semibold">
+                          {calculateShipping() === 0 ? (
+                            <span className="text-green-500">Free</span>
+                          ) : (
+                            `$${calculateShipping().toFixed(2)}`
+                          )}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-600">Tax (8%)</span>
+                        <span className="font-semibold">${calculateTax().toFixed(2)}</span>
+                      </div>
+                      <Separator />
+                      <div className="flex justify-between text-lg font-bold">
+                        <span>Total</span>
+                        <span>${calculateTotal().toFixed(2)}</span>
+                      </div>
+                    </div>
+                    
+                    {/* Free Shipping Notice */}
+                    {calculateSubtotal() < 100 && calculateSubtotal() > 0 && (
+                      <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                        <p className="text-sm text-amber-700 dark:text-amber-300">
+                          Add ${(100 - calculateSubtotal()).toFixed(2)} more for free shipping!
+                        </p>
+                      </div>
+                    )}
+                    
+                    {/* Security Badge */}
+                    <div className="mt-6 p-4 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 rounded-xl">
+                      <div className="flex items-center gap-3">
+                        <Lock className="w-5 h-5 text-green-500" />
+                        <div>
+                          <p className="font-semibold">Secure Checkout</p>
+                          <p className="text-sm text-slate-600 dark:text-slate-400">
+                            Your payment is encrypted and secure
                           </p>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                  
-                  <Separator className="my-6" />
-                  
-                  {/* Price Breakdown */}
-                  <div className="space-y-3">
-                    <div className="flex justify-between">
-                      <span className="text-slate-600">Subtotal</span>
-                      <span className="font-semibold">${calculateSubtotal().toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-600">Shipping</span>
-                      <span className="font-semibold">${calculateShipping().toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-600">Tax</span>
-                      <span className="font-semibold">${calculateTax().toFixed(2)}</span>
-                    </div>
-                    <Separator />
-                    <div className="flex justify-between text-lg font-bold">
-                      <span>Total</span>
-                      <span>${calculateTotal().toFixed(2)}</span>
-                    </div>
-                  </div>
-                  
-                  {/* Security Badge */}
-                  <div className="mt-6 p-4 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 rounded-xl">
-                    <div className="flex items-center gap-3">
-                      <Lock className="w-5 h-5 text-green-500" />
-                      <div>
-                        <p className="font-semibold">Secure Checkout</p>
-                        <p className="text-sm text-slate-600 dark:text-slate-400">
-                          Your payment is encrypted and secure
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* Place Order Button */}
-                  <Button
-                    type="submit"
-                    className="w-full mt-6 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white"
-                    size="lg"
-                    onClick={handleSubmit}
-                    disabled={loading || uploading || (paymentMethod === 'bank_transfer' && !paymentProof)}
-                  >
-                    {loading || uploading ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                        Processing...
-                      </>
-                    ) : (
-                      'Place Order'
-                    )}
-                  </Button>
-                  
-                  <p className="text-xs text-center text-slate-500 mt-4">
-                    By placing your order, you agree to our Terms of Service and Privacy Policy
-                  </p>
-                </CardContent>
-              </Card>
+                    
+                    {/* Place Order Button */}
+                    <Button
+                      type="submit"
+                      className="w-full mt-6 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white shadow-lg"
+                      size="lg"
+                      disabled={
+                        loading || 
+                        uploading || 
+                        (paymentMethod === 'bank_transfer' && !paymentProof)
+                      }
+                    >
+                      {loading ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                          Processing...
+                        </>
+                      ) : uploading ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                          Uploading...
+                        </>
+                      ) : (
+                        'Place Order'
+                      )}
+                    </Button>
+                    
+                    <p className="text-xs text-center text-slate-500 mt-4">
+                      By placing your order, you agree to our Terms of Service and Privacy Policy
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
             </div>
-          </div>
+          </form>
         </div>
       </div>
     </div>

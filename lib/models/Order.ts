@@ -1,7 +1,8 @@
-import mongoose, { Schema, Document } from 'mongoose';
+// lib/models/Order.ts - UPDATED TYPE FIXES
+import mongoose, { Schema, Document, Types } from 'mongoose';
 
 export interface IOrderItem {
-  productId: mongoose.Types.ObjectId;
+  productId: Types.ObjectId;
   name: string;
   price: number;
   quantity: number;
@@ -44,7 +45,11 @@ export interface IOrder extends Document {
   total: number;
   status: OrderStatus;
   paymentMethod: 'bank_transfer' | 'cash_on_delivery' | 'card';
-  paymentScreenshot?: string;
+  paymentScreenshot?: {
+    publicId: string;
+    url: string;
+    uploadedAt: Date;
+  };
   paymentVerified: boolean;
   trackingNumber?: string;
   adminNotes?: string;
@@ -211,7 +216,17 @@ const OrderSchema = new Schema<IOrder>({
     required: [true, 'Payment method is required'],
   },
   paymentScreenshot: {
-    type: String,
+    publicId: {
+      type: String,
+      trim: true,
+    },
+    url: {
+      type: String,
+      trim: true,
+    },
+    uploadedAt: {
+      type: Date,
+    },
   },
   paymentVerified: {
     type: Boolean,
@@ -303,6 +318,13 @@ OrderSchema.statics.findRecent = function(days: number = 30) {
   return this.find({ createdAt: { $gte: date } }).sort({ createdAt: -1 });
 };
 
+// Add statics interface
+interface IOrderModel extends mongoose.Model<IOrder> {
+  findByUser(clerkId: string): Promise<IOrder[]>;
+  findByStatus(status: OrderStatus): Promise<IOrder[]>;
+  findRecent(days?: number): Promise<IOrder[]>;
+}
+
 // Instance method for updating status
 OrderSchema.methods.updateStatus = async function(
   newStatus: OrderStatus, 
@@ -325,4 +347,4 @@ OrderSchema.methods.updateStatus = async function(
   return this.save();
 };
 
-export default mongoose.models.Order || mongoose.model<IOrder>('Order', OrderSchema);
+export default (mongoose.models.Order as IOrderModel) || mongoose.model<IOrder, IOrderModel>('Order', OrderSchema);
