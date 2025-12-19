@@ -14,6 +14,7 @@ import {
   Link,
   Users,
   UserPlus,
+  Loader2,
   Mail,
   Camera,
   Edit3,
@@ -23,7 +24,8 @@ import {
   Bookmark,
   Palette,
   Heart,
-  MessageCircle
+  MessageCircle,
+  MessageSquare
 } from 'lucide-react'
 import Image from 'next/image'
 
@@ -84,6 +86,118 @@ const AvatarPlaceholder = () => (
 const getSafeImageUrl = (url: string | undefined): string => {
   if (!url) return ''
   return url
+}
+
+// Update the MessageButton component in your profile page
+function MessageButton({ userId, userName }: { userId: string, userName: string }) {
+  const router = useRouter()
+  const { toast } = useToast()
+  const [loading, setLoading] = useState(false)
+
+  const startConversation = async () => {
+    if (!userId) return
+    
+    try {
+      setLoading(true)
+      
+      // First, check if we're signed in
+      const currentUserResponse = await fetch('/api/users/me')
+      if (!currentUserResponse.ok) {
+        toast({
+          title: "Sign in required",
+          description: "Please sign in to send messages",
+          variant: "destructive"
+        })
+        router.push('/sign-in')
+        return
+      }
+
+      const currentUserData = await currentUserResponse.json()
+      if (!currentUserData.success) {
+        toast({
+          title: "Error",
+          description: "Failed to get user information",
+          variant: "destructive"
+        })
+        return
+      }
+
+      const currentUserId = currentUserData.user._id
+      
+      // Check if conversation already exists
+      try {
+        const convResponse = await fetch(`/api/messages/conversation/${userId}`)
+        if (convResponse.ok) {
+          const convData = await convResponse.json()
+          if (convData.conversation) {
+            // FIXED: Redirect to /messages (plural) not /message
+            router.push(`/messages?conversation=${convData.conversation._id}`)
+            return
+          }
+        }
+      } catch (convError) {
+        console.log('No existing conversation found, creating new one...')
+      }
+
+      // Send a first message to create conversation
+      const sendResponse = await fetch('/api/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          receiverId: userId,
+          content: `Hi ${userName}! I'd like to connect with you.`
+        }),
+      })
+
+      if (sendResponse.ok) {
+        const data = await sendResponse.json()
+        toast({
+          title: "Message sent!",
+          description: `You've started a conversation with ${userName}`
+        })
+        // FIXED: Redirect to /messages (plural)
+        router.push(`/messages?conversation=${data.conversation._id}`)
+      } else {
+        const error = await sendResponse.json()
+        toast({
+          title: "Error",
+          description: error.error || "Failed to start conversation",
+          variant: "destructive"
+        })
+      }
+    } catch (error) {
+      console.error('Error starting conversation:', error)
+      toast({
+        title: "Error",
+        description: "Failed to start conversation",
+        variant: "destructive"
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="rounded-full"
+      onClick={startConversation}
+      disabled={loading}
+    >
+      <MessageSquare className="w-4 h-4 mr-2" />
+      {loading ? (
+        <>
+          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          Loading...
+        </>
+      ) : (
+        'Message'
+      )}
+    </Button>
+  )
 }
 
 export default function UserProfilePage() {
@@ -503,10 +617,15 @@ export default function UserProfilePage() {
               <Share2 className="w-4 h-4 mr-2" />
               Share
             </Button>
-            <Button variant="outline" size="sm" className="rounded-full">
-              <Mail className="w-4 h-4 mr-2" />
-              Message
-            </Button>
+            
+            {/* Message Button - only show if not current user */}
+            {!isCurrentUser && (
+              <MessageButton 
+                userId={userData._id} 
+                userName={userData.firstName} 
+              />
+            )}
+            
             {!isCurrentUser && (
               <Button 
                 variant={isFollowing ? "outline" : "default"} 

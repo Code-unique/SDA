@@ -21,6 +21,14 @@ export interface IConversation extends Document {
   createdAt: Date
   updatedAt: Date
 }
+// lib/models/Message.ts - Add this interface
+export interface IConversationParticipant {
+  _id: mongoose.Types.ObjectId;
+  username: string;
+  firstName: string;
+  lastName: string;
+  avatar?: string;
+}
 
 const MessageSchema = new Schema<IMessage>(
   {
