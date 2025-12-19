@@ -1,4 +1,3 @@
-// components/layout/navbar.tsx
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
@@ -39,10 +38,14 @@ import {
   GraduationCap,
   Star,
   Target,
-  Flame
+  Flame,
+  ShoppingCart,
+  Package,
+  ExternalLink
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import { useCart } from '@/lib/cart-context'
 
 // Types
 interface UserData {
@@ -78,7 +81,7 @@ type QuickCategory = {
   icon: React.ComponentType<{ className?: string }>
 }
 
-// Navigation configuration - ENHANCED: Removed Community, AI Coach, Explore from side nav
+// Navigation configuration - REORDERED: Plus/Create is now 3rd, AI Coach is 5th
 const navigationConfig = {
   main: [
     { 
@@ -105,6 +108,18 @@ const navigationConfig = {
       badge: 'New'
     },
     { 
+      name: 'Create', 
+      href: '/dashboard/posts/create', 
+      icon: Plus,
+      description: 'Create new content',
+      roles: ['user', 'admin', 'designer'] as readonly UserRole[],
+      showInDesktop: true,
+      showInMobileMain: true,
+      showInMobileMenu: false,
+      mobileOrder: 3,
+      badge: 'New'
+    },
+    { 
       name: 'Shop', 
       href: '/shop', 
       icon: ShoppingBag,
@@ -113,7 +128,7 @@ const navigationConfig = {
       showInDesktop: true,
       showInMobileMain: true,
       showInMobileMenu: false,
-      mobileOrder: 3
+      mobileOrder: 4
     },
     { 
       name: 'AI Coach', 
@@ -124,7 +139,7 @@ const navigationConfig = {
       showInDesktop: false,
       showInMobileMain: true,
       showInMobileMenu: false,
-      mobileOrder: 4,
+      mobileOrder: 5,
       badge: 'AI'
     },
   ],
@@ -138,7 +153,7 @@ const navigationConfig = {
       showInDesktop: false,
       showInMobileMain: false,
       showInMobileMenu: true,
-      mobileOrder: 5
+      mobileOrder: 6
     },
     { 
       name: 'Explore', 
@@ -149,7 +164,7 @@ const navigationConfig = {
       showInDesktop: false,
       showInMobileMain: false,
       showInMobileMenu: true,
-      mobileOrder: 6
+      mobileOrder: 7
     },
   ],
   admin: [
@@ -162,7 +177,29 @@ const navigationConfig = {
       showInDesktop: false,
       showInMobileMain: false,
       showInMobileMenu: true,
-      mobileOrder: 7
+      mobileOrder: 8
+    },
+    { 
+      name: 'Products', 
+      href: '/admin/products', 
+      icon: Package,
+      description: 'Manage products',
+      roles: ['admin'] as readonly UserRole[],
+      showInDesktop: false,
+      showInMobileMain: false,
+      showInMobileMenu: true,
+      mobileOrder: 9
+    },
+    { 
+      name: 'Orders', 
+      href: '/admin/orders', 
+      icon: ShoppingBag,
+      description: 'Manage orders',
+      roles: ['admin'] as readonly UserRole[],
+      showInDesktop: false,
+      showInMobileMain: false,
+      showInMobileMenu: true,
+      mobileOrder: 10
     },
   ],
   designer: [
@@ -175,7 +212,7 @@ const navigationConfig = {
       showInDesktop: false,
       showInMobileMain: false,
       showInMobileMenu: true,
-      mobileOrder: 8
+      mobileOrder: 11
     },
     { 
       name: 'Create Design', 
@@ -186,7 +223,7 @@ const navigationConfig = {
       showInDesktop: false,
       showInMobileMain: false,
       showInMobileMenu: true,
-      mobileOrder: 9
+      mobileOrder: 12
     },
   ]
 } as const
@@ -215,6 +252,18 @@ const userNavigationItems = [
     href: '/saved', 
     icon: Bookmark,
     description: 'Your saved items',
+  },
+  { 
+    name: 'Cart', 
+    href: '/cart', 
+    icon: ShoppingCart,
+    description: 'Shopping cart',
+  },
+  { 
+    name: 'My Orders', 
+    href: '/orders', 
+    icon: Package,
+    description: 'Your orders',
   },
   { 
     name: 'Messages', 
@@ -260,9 +309,16 @@ function useNavbar() {
   const router = useRouter()
   const { user, isLoaded } = useUser()
   const isDesktop = useMediaQuery('(min-width: 1024px)')
+  const { cart } = useCart()
   
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const moreMenuRef = useRef<HTMLDivElement>(null)
+
+  // Calculate cart items count
+  const cartItemsCount = useMemo(() => {
+    if (!cart || !Array.isArray(cart)) return 0
+    return cart.reduce((total, item) => total + (item.quantity || 1), 0)
+  }, [cart])
 
   // Close mobile menu when route changes
   useEffect(() => {
@@ -362,16 +418,17 @@ function useNavbar() {
     getAllNavigationItems(userData?.role), [userData?.role, getAllNavigationItems]
   )
 
-  const desktopMainItems = useMemo(() => 
-    navigationItems.filter(item => item.showInDesktop), [navigationItems]
-  )
-
+  // Updated: Get exactly 5 items for mobile bottom nav (Home, Courses, Create, Shop, AI Coach)
   const mobileMainItems = useMemo(() => 
     navigationItems
       .filter(item => item.showInMobileMain)
       .sort((a, b) => (a.mobileOrder || 99) - (b.mobileOrder || 99))
-      .slice(0, 4),
+      .slice(0, 5), // Changed from 4 to 5
     [navigationItems]
+  )
+
+  const desktopMainItems = useMemo(() => 
+    navigationItems.filter(item => item.showInDesktop), [navigationItems]
   )
 
   const mobileMenuItems = useMemo(() => 
@@ -438,7 +495,8 @@ function useNavbar() {
       userData,
       loading,
       notificationsCount,
-      isDesktop
+      isDesktop,
+      cartItemsCount
     },
     actions: {
       setMobileMenuOpen,
@@ -624,11 +682,13 @@ function SearchModal({
 interface MobileBottomNavProps {
   items: NavItem[]
   isActive: (href: string) => boolean
+  cartItemsCount: number
 }
 
 function MobileBottomNav({
   items,
   isActive,
+  cartItemsCount
 }: MobileBottomNavProps) {
   return (
     <nav 
@@ -671,18 +731,6 @@ function MobileBottomNav({
             </Link>
           )
         })}
-
-        {/* Plus Button - Replaces Search and More buttons */}
-        <Link
-          href="/dashboard/posts/create"
-          className="flex flex-col items-center p-2 rounded-xl text-rose-600 hover:text-rose-700 min-w-[56px]"
-          aria-label="Create post"
-        >
-          <div className="p-2 rounded-lg mb-1 bg-gradient-to-r from-rose-50 to-pink-50 hover:from-rose-100 hover:to-pink-100">
-            <Plus className="w-5 h-5" aria-hidden="true" />
-          </div>
-          <span className="text-xs font-medium">Create</span>
-        </Link>
       </div>
     </nav>
   )
@@ -699,6 +747,7 @@ interface MobileMenuProps {
   isActive: (href: string) => boolean
   getRoleBadge: (role: UserRole) => React.ReactNode | null
   notificationsCount: number
+  cartItemsCount: number
 }
 
 function MobileMenu({
@@ -710,7 +759,8 @@ function MobileMenu({
   userNavigationItems,
   isActive,
   getRoleBadge,
-  notificationsCount
+  notificationsCount,
+  cartItemsCount
 }: MobileMenuProps) {
   if (!open) return null
 
@@ -798,6 +848,11 @@ function MobileMenu({
                         <div className="font-medium">{item.name}</div>
                         <div className="text-xs text-slate-500">{item.description}</div>
                       </div>
+                      {item.badge && (
+                        <span className="text-xs px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded-full">
+                          {item.badge}
+                        </span>
+                      )}
                     </Link>
                   )
                 })}
@@ -833,6 +888,11 @@ function MobileMenu({
                     >
                       <Icon className="w-4 h-4 transition-transform group-hover:scale-110" aria-hidden="true" />
                       <span>{item.name}</span>
+                      {item.name === 'Cart' && cartItemsCount > 0 && (
+                        <span className="ml-auto w-5 h-5 bg-rose-500 text-white text-xs rounded-full flex items-center justify-center">
+                          {cartItemsCount > 9 ? '9+' : cartItemsCount}
+                        </span>
+                      )}
                     </Link>
                   )
                 })}
@@ -913,7 +973,8 @@ export function Navbar() {
       userData,
       loading,
       notificationsCount,
-      isDesktop
+      isDesktop,
+      cartItemsCount
     },
     actions: {
       setMobileMenuOpen,
@@ -961,7 +1022,7 @@ export function Navbar() {
         <nav className="mx-auto px-4 sm:px-6 py-3 max-w-7xl" aria-label="Main navigation">
           <div className="flex items-center justify-between">
             
-            {/* Left: Logo (removed hamburger menu button) */}
+            {/* Left: Logo */}
             <div className="flex items-center space-x-2 sm:space-x-4">
               <Link 
                 href="/" 
@@ -979,7 +1040,7 @@ export function Navbar() {
               </Link>
             </div>
 
-            {/* Desktop Navigation - ENHANCED: Clean, focused items */}
+            {/* Desktop Navigation - Plus/Create is now 3rd position */}
             <div className="hidden lg:flex items-center space-x-1">
               {desktopMainItems.map((item) => {
                 const Icon = item.icon
@@ -1085,6 +1146,21 @@ export function Navbar() {
               </button>
 
               <SignedIn>
+                {/* Cart Button */}
+                <Link
+                  href="/cart"
+                  className="relative p-2 rounded-xl hover:bg-slate-100 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  aria-label={`Shopping cart ${cartItemsCount > 0 ? `(${cartItemsCount} items)` : ''}`}
+                >
+                  <ShoppingCart className="w-5 h-5 text-slate-600" aria-hidden="true" />
+                  {cartItemsCount > 0 && (
+                    <span className="absolute top-1 right-1 w-5 h-5 bg-rose-500 text-white text-xs rounded-full flex items-center justify-center">
+                      {cartItemsCount > 9 ? '9+' : cartItemsCount}
+                      <span className="sr-only">{cartItemsCount} items in cart</span>
+                    </span>
+                  )}
+                </Link>
+
                 {/* Notifications */}
                 <Link
                   href="/notifications"
@@ -1156,6 +1232,11 @@ export function Navbar() {
                           >
                             <Icon className="w-4 h-4" aria-hidden="true" />
                             <span>{item.name}</span>
+                            {item.name === 'Cart' && cartItemsCount > 0 && (
+                              <span className="ml-auto w-5 h-5 bg-rose-500 text-white text-xs rounded-full flex items-center justify-center">
+                                {cartItemsCount > 9 ? '9+' : cartItemsCount}
+                              </span>
+                            )}
                           </Link>
                         )
                       })}
@@ -1230,12 +1311,14 @@ export function Navbar() {
         isActive={isActive}
         getRoleBadge={getRoleBadge}
         notificationsCount={notificationsCount}
+        cartItemsCount={cartItemsCount}
       />
 
-      {/* Bottom Navigation (Mobile Only) - ENHANCED: Single Plus button */}
+      {/* Bottom Navigation (Mobile Only) - Now has 5 items: Home, Courses, Create, Shop, AI Coach */}
       <MobileBottomNav
         items={mobileMainItems}
         isActive={isActive}
+        cartItemsCount={cartItemsCount}
       />
 
       {/* Content padding for mobile bottom nav */}

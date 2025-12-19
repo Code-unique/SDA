@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import Product from '@/lib/models/Product';
+import { requireAdmin } from '@/lib/utils/role-check';
 
 // GET all products (public)
 export async function GET(request: NextRequest) {
@@ -76,43 +77,153 @@ export async function GET(request: NextRequest) {
 // POST create product (admin only)
 export async function POST(request: NextRequest) {
   try {
+    // FIRST check if user is admin
+    await requireAdmin();
+    
     await connectToDatabase();
-    
-    const { userId } = await auth();
-    
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
     
     const body = await request.json();
     
-    const product = new Product({
+    console.log('Admin creating new product:', {
       ...body,
-      designer: {
-        clerkId: userId,
-        username: body.designer?.username || 'Admin',
-        avatar: body.designer?.avatar || '/avatars/default.png',
-      },
+      price: body.price,
+      originalPrice: body.originalPrice,
+      image: body.image ? 'image provided' : 'no image'
     });
     
+    // Validate required fields
+    if (!body.name || !body.name.trim()) {
+      return NextResponse.json(
+        { error: 'Product name is required' },
+        { status: 400 }
+      );
+    }
+    
+    if (!body.description || !body.description.trim() || body.description.trim().length < 10) {
+      return NextResponse.json(
+        { error: 'Description must be at least 10 characters' },
+        { status: 400 }
+      );
+    }
+    
+    const price = parseFloat(body.price);
+    if (!body.price || isNaN(price) || price <= 0) {
+      return NextResponse.json(
+        { error: 'Valid price is required (must be greater than 0)' },
+        { status: 400 }
+      );
+    }
+    
+    if (!body.category) {
+      return NextResponse.json(
+        { error: 'Category is required' },
+        { status: 400 }
+      );
+    }
+    
+    if (!body.image || !body.image.trim()) {
+      return NextResponse.json(
+        { error: 'Product image is required' },
+        { status: 400 }
+      );
+    }
+    
+    // FIX: Check if originalPrice exists and handle it properly
+    let originalPrice: number | undefined;
+    if (body.originalPrice !== undefined && body.originalPrice !== null) {
+      // Convert to string first to check if it's empty, then parse
+      const originalPriceStr = String(body.originalPrice);
+      
+      if (originalPriceStr.trim() !== '') {
+        originalPrice = parseFloat(originalPriceStr);
+        if (isNaN(originalPrice) || originalPrice < 0) {
+          return NextResponse.json(
+            { error: 'Original price must be a valid number' },
+            { status: 400 }
+          );
+        }
+        if (originalPrice < price) {
+          return NextResponse.json(
+            { error: 'Original price must be greater than or equal to sale price' },
+            { status: 400 }
+          );
+        }
+      }
+    }
+    
+    const cleanedImage = body.image.trim();
+    
+    if (cleanedImage.length === 0) {
+      return NextResponse.json(
+        { error: 'Product image is required' },
+        { status: 400 }
+      );
+    }
+    
+    // Get the user ID from auth for the designer field
+    const { userId } = await auth();
+    
+    const productData = {
+      name: body.name.trim(),
+      description: body.description.trim(),
+      price: price,
+      originalPrice: originalPrice,
+      category: body.category,
+      stock: parseInt(body.stock) || 1,
+      tags: Array.isArray(body.tags) 
+        ? body.tags.filter((tag: any) => tag && typeof tag === 'string' && tag.trim().length > 0)
+        : body.tags && typeof body.tags === 'string' 
+          ? body.tags.split(',').map((tag: string) => tag.trim()).filter((tag: string) => tag.length > 0)
+          : [],
+      image: cleanedImage,
+      rating: body.rating || 0,
+      reviews: body.reviews || 0,
+      isActive: body.isActive !== undefined ? body.isActive : true,
+      featured: body.featured || false,
+      designer: {
+        clerkId: userId || 'admin_user',
+        username: body.designer?.username || 'Admin',
+        avatar: body.designer?.avatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=Admin',
+      },
+    };
+    
+    console.log('Creating product with data:', productData.name);
+    
+    const product = new Product(productData);
     await product.save();
     
     return NextResponse.json(product, { status: 201 });
   } catch (error: any) {
     console.error('POST product error:', error);
     
-    if (error.name === 'ValidationError') {
+    if (error.message === 'Admin access required') {
       return NextResponse.json(
-        { error: 'Validation failed', details: error.errors },
+        { error: 'Unauthorized: Admin access required' },
+        { status: 401 }
+      );
+    }
+    
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map((err: any) => ({
+        field: err.path,
+        message: err.message
+      }));
+      
+      return NextResponse.json(
+        { 
+          error: 'Validation failed', 
+          details: errors,
+          message: error.message 
+        },
         { status: 400 }
       );
     }
     
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { 
+        error: 'Internal server error',
+        message: error.message || 'Unknown error occurred'
+      },
       { status: 500 }
     );
   }

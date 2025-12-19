@@ -1,10 +1,10 @@
-// app/api/users/saved/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
 import { SavedItem } from '@/lib/models/UserInteractions';
 import "@/lib/loadmodels";
+
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

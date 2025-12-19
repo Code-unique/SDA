@@ -17,7 +17,7 @@ interface Product {
   description: string
   price: number
   originalPrice?: number
-  images: string[]
+  image: string
   designer?: {
     username: string
     avatar: string
@@ -36,7 +36,7 @@ export default function ShopPage() {
   const [sortBy, setSortBy] = useState('newest')
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
-  const [showFilters, setShowFilters] = useState(false) // NEW: Hide filters by default
+  const [showFilters, setShowFilters] = useState(false)
   const { isSignedIn } = useAuth()
   const router = useRouter()
   const { addToCart, getCartCount } = useCart()
@@ -64,17 +64,16 @@ export default function ShopPage() {
       
       const data = await res.json()
       
-      // Transform data to ensure all required fields exist
       const transformedProducts = (data.products || []).map((product: any) => ({
         _id: product._id || Math.random().toString(),
         name: product.name || 'Unnamed Product',
         description: product.description || 'No description available',
         price: product.price || 0,
         originalPrice: product.originalPrice,
-        images: product.images || ['/api/placeholder/400/500'],
+        image: product.image || '/api/placeholder/400/500', // Use your placeholder API
         designer: product.designer || { 
           username: 'Designer', 
-          avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + (product.name || 'Product')
+          avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${product.name || 'Product'}`
         },
         category: product.category || 'uncategorized',
         rating: product.rating || 0,
@@ -104,14 +103,13 @@ export default function ShopPage() {
       return
     }
 
-    // FIXED: Added the required quantity property
     addToCart({
       _id: product._id,
       name: product.name,
       price: product.price,
-      images: product.images,
+      images: [product.image],
       stock: product.stock,
-      quantity: 1, // Added this required property
+      quantity: 1,
       designer: product.designer
     })
   }
@@ -128,15 +126,13 @@ export default function ShopPage() {
     { value: 'rating', label: 'Top Rated' },
   ]
 
-  // Get safe image URL
-  const getSafeImageUrl = (images: string[]) => {
-    if (images && images.length > 0 && images[0]) {
-      return images[0]
+  const getSafeImageUrl = (image: string) => {
+    if (image && image.trim().length > 0) {
+      return image.trim()
     }
-    return `/api/placeholder/400/500`
+    return '/api/placeholder/400/500' // Use your placeholder API
   }
 
-  // Get safe designer info
   const getSafeDesigner = (product: Product) => {
     return {
       username: product.designer?.username || 'Designer',
@@ -146,33 +142,20 @@ export default function ShopPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
-      <div className="container mx-auto px-6 py-8">
+      <div className="container mx-auto px-4 sm:px-6 py-8">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-serif font-bold mb-4">Fashion Marketplace</h1>
-          <p className="text-lg text-slate-600 dark:text-slate-400">
+          <h1 className="text-3xl sm:text-4xl font-serif font-bold mb-4">Fashion Marketplace</h1>
+          <p className="text-base sm:text-lg text-slate-600 dark:text-slate-400">
             Discover unique fashion pieces from independent designers
           </p>
         </div>
 
-        {/* Cart Button */}
-        <div className="fixed top-4 right-4 z-50">
-          <Button 
-            variant="outline" 
-            size="icon" 
-            className="relative bg-white shadow-lg rounded-full w-12 h-12"
-            onClick={() => router.push('/cart')}
-          >
-            <ShoppingCart className="w-5 h-5" />
-            <span className="absolute -top-1 -right-1 bg-rose-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-              {getCartCount()}
-            </span>
-          </Button>
-        </div>
+        {/* REMOVED: Floating Cart Button - This section has been deleted */}
 
         {/* Search and Filters */}
         <Card className="rounded-2xl mb-8">
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             <div className="flex flex-col space-y-4">
               {/* Search Bar */}
               <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-4">
@@ -192,7 +175,7 @@ export default function ShopPage() {
 
               {/* Sort and Filter Toggle */}
               <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {/* Filter Toggle Button */}
                   <Button
                     variant="outline"
@@ -319,7 +302,7 @@ export default function ShopPage() {
                     </div>
                     <div className="text-center p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg">
                       <div className="font-semibold text-emerald-600">
-                        {Math.max(...products.map(p => p.rating)) || 0}
+                        {Math.max(...products.map(p => p.rating), 0)}
                       </div>
                       <div className="text-slate-600 dark:text-slate-400">Top Rating</div>
                     </div>
@@ -419,7 +402,7 @@ export default function ShopPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {products.map((product) => {
                 const designer = getSafeDesigner(product)
-                const imageUrl = getSafeImageUrl(product.images)
+                const imageUrl = getSafeImageUrl(product.image)
                 const hasDiscount = product.originalPrice && product.originalPrice > product.price
                 const discountPercent = hasDiscount 
                   ? Math.round(((product.originalPrice! - product.price) / product.originalPrice!) * 100)
@@ -434,7 +417,7 @@ export default function ShopPage() {
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                         onError={(e) => {
                           const target = e.target as HTMLImageElement
-                          target.src = `/api/placeholder/400/500?text=${encodeURIComponent(product.name)}`
+                          target.src = `/api/placeholder/400/500?text=${encodeURIComponent(product.name)}` // Use your placeholder API with text
                         }}
                       />
                       

@@ -1,4 +1,4 @@
-// app/api/orders/route.ts - ADD PRODUCT VALIDATION FIX
+// app/api/orders/route.ts - UPDATED WITH FIXES
 import { NextRequest, NextResponse } from 'next/server';
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';
@@ -25,9 +25,8 @@ function validateProductData(product: any) {
     description: product.description || 'No description available',
     price: product.price || 0,
     originalPrice: product.originalPrice,
-    images: Array.isArray(product.images) && product.images.length > 0 
-      ? product.images 
-      : ['/api/placeholder/400/500'],
+    // FIX: Use product.image (singular) and create array for order items
+    images: product.image ? [product.image] : ['/api/placeholder/400/500'],
     designer: product.designer || {
       clerkId: 'admin_user', // Fallback clerkId
       username: 'Admin',
@@ -151,7 +150,8 @@ export async function POST(request: NextRequest) {
         description: product.description,
         price: product.price,
         originalPrice: product.originalPrice,
-        images: product.images,
+        // FIX: Pass product.image (singular) to validator
+        image: product.image,
         designer: product.designer,
         category: product.category,
         rating: product.rating,
@@ -164,6 +164,7 @@ export async function POST(request: NextRequest) {
         name: validatedProduct.name,
         price: validatedProduct.price,
         quantity: item.quantity,
+        // FIX: Use the first image from the validated images array
         image: validatedProduct.images[0],
         designer: validatedProduct.designer,
       });
@@ -254,6 +255,64 @@ export async function POST(request: NextRequest) {
       );
     }
     
+    return NextResponse.json(
+      { error: 'Internal server error', message: error.message },
+      { status: 500 }
+    );
+  }
+}
+
+// GET all orders for the authenticated user
+export async function GET(request: NextRequest) {
+  try {
+    await connectToDatabase();
+    
+    const { userId } = await auth();
+    
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+    
+    // Get query parameters
+    const { searchParams } = new URL(request.url);
+    const status = searchParams.get('status');
+    const limit = parseInt(searchParams.get('limit') || '10');
+    const page = parseInt(searchParams.get('page') || '1');
+    const skip = (page - 1) * limit;
+    
+    // Build query
+    const query: any = { 'user.clerkId': userId };
+    
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+    
+    // Get total count for pagination
+    const total = await Order.countDocuments(query);
+    
+    // Get orders with pagination
+    const orders = await Order.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+    
+    return NextResponse.json({
+      orders,
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+        hasNext: page * limit < total,
+        hasPrev: page > 1,
+      }
+    });
+  } catch (error: any) {
+    console.error('GET orders error:', error);
     return NextResponse.json(
       { error: 'Internal server error', message: error.message },
       { status: 500 }

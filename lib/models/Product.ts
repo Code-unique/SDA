@@ -1,11 +1,11 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 
 export interface IProduct extends Document {
   name: string;
   description: string;
   price: number;
   originalPrice?: number;
-  images: string[];
+  image: string;
   category: string;
   designer: {
     clerkId: string;
@@ -20,11 +20,16 @@ export interface IProduct extends Document {
   featured: boolean;
   createdAt: Date;
   updatedAt: Date;
-  // Virtual for discount percentage
   discountPercentage: number;
 }
 
-const ProductSchema = new Schema<IProduct>({
+interface IProductModel extends Model<IProduct> {
+  findActive(): Promise<IProduct[]>;
+  findFeatured(): Promise<IProduct[]>;
+  findByCategory(category: string): Promise<IProduct[]>;
+}
+
+const ProductSchema = new Schema<IProduct, IProductModel>({
   name: {
     type: String,
     required: [true, 'Product name is required'],
@@ -41,28 +46,50 @@ const ProductSchema = new Schema<IProduct>({
   price: {
     type: Number,
     required: [true, 'Price is required'],
-    min: [0, 'Price cannot be negative'],
+    min: [0.01, 'Price must be greater than 0'],
   },
   originalPrice: {
     type: Number,
     min: [0, 'Original price cannot be negative'],
     validate: {
-      validator: function(this: IProduct, value: number) {
-        return value >= this.price;
+      validator: function(value: number) {
+        // If originalPrice is not provided or is 0, it's valid
+        if (!value || value === 0) return true;
+        
+        // Get the current price from the document
+        const doc = this as any;
+        const price = doc.price;
+        
+        // If price is not set yet (during initial creation), allow any originalPrice
+        if (!price) return true;
+        
+        // Check if originalPrice >= price
+        return value >= price;
       },
       message: 'Original price must be greater than or equal to sale price'
     }
   },
-  images: [{
+  image: {
     type: String,
-    required: [true, 'At least one image is required'],
+    required: [true, 'Product image is required'],
     validate: {
-      validator: function(images: string[]) {
-        return images.length > 0 && images.length <= 10;
+      validator: function(img: string) {
+        if (!img || typeof img !== 'string') return false;
+        
+        const trimmedImg = img.trim();
+        if (trimmedImg.length === 0) return false;
+        
+        return (
+          trimmedImg.startsWith('data:image/') || 
+          trimmedImg.startsWith('http://') || 
+          trimmedImg.startsWith('https://') ||
+          trimmedImg.startsWith('/api/placeholder/') ||
+          trimmedImg.startsWith('/')
+        );
       },
-      message: 'Products must have 1-10 images'
+      message: 'Product must have a valid image URL (data URL, http, https, /api/placeholder/, or relative path)'
     }
-  }],
+  },
   category: {
     type: String,
     required: [true, 'Category is required'],
@@ -92,7 +119,7 @@ const ProductSchema = new Schema<IProduct>({
     default: 0,
     min: [0, 'Rating cannot be negative'],
     max: [5, 'Rating cannot exceed 5'],
-    set: (val: number) => Math.round(val * 10) / 10, // Round to 1 decimal
+    set: (val: number) => Math.round(val * 10) / 10,
   },
   reviews: {
     type: Number,
@@ -124,8 +151,90 @@ const ProductSchema = new Schema<IProduct>({
   }],
 }, {
   timestamps: true,
-  toJSON: { virtuals: true },
-  toObject: { virtuals: true },
+  toJSON: { 
+    virtuals: true,
+    transform: function(doc, ret) {
+      // Create a new object without __v
+      const { __v, ...result } = ret as any;
+      
+      // Access originalPrice properly
+      if (result.originalPrice !== undefined) {
+        // Convert to number if it's a string
+        if (typeof result.originalPrice === 'string') {
+          result.originalPrice = parseFloat(result.originalPrice);
+        }
+        // Ensure it's a number
+        result.originalPrice = Number(result.originalPrice);
+      }
+      
+      // Also parse price if needed
+      if (result.price !== undefined) {
+        if (typeof result.price === 'string') {
+          result.price = parseFloat(result.price);
+        }
+        result.price = Number(result.price);
+      }
+      
+      // Convert rating if needed
+      if (result.rating !== undefined && typeof result.rating === 'string') {
+        result.rating = parseFloat(result.rating);
+      }
+      
+      // Convert reviews if needed
+      if (result.reviews !== undefined && typeof result.reviews === 'string') {
+        result.reviews = parseInt(result.reviews, 10);
+      }
+      
+      // Convert stock if needed
+      if (result.stock !== undefined && typeof result.stock === 'string') {
+        result.stock = parseInt(result.stock, 10);
+      }
+      
+      return result;
+    }
+  },
+  toObject: { 
+    virtuals: true,
+    transform: function(doc, ret) {
+      // Create a new object without __v
+      const { __v, ...result } = ret as any;
+      
+      // Access originalPrice properly
+      if (result.originalPrice !== undefined) {
+        // Convert to number if it's a string
+        if (typeof result.originalPrice === 'string') {
+          result.originalPrice = parseFloat(result.originalPrice);
+        }
+        // Ensure it's a number
+        result.originalPrice = Number(result.originalPrice);
+      }
+      
+      // Also parse price if needed
+      if (result.price !== undefined) {
+        if (typeof result.price === 'string') {
+          result.price = parseFloat(result.price);
+        }
+        result.price = Number(result.price);
+      }
+      
+      // Convert rating if needed
+      if (result.rating !== undefined && typeof result.rating === 'string') {
+        result.rating = parseFloat(result.rating);
+      }
+      
+      // Convert reviews if needed
+      if (result.reviews !== undefined && typeof result.reviews === 'string') {
+        result.reviews = parseInt(result.reviews, 10);
+      }
+      
+      // Convert stock if needed
+      if (result.stock !== undefined && typeof result.stock === 'string') {
+        result.stock = parseInt(result.stock, 10);
+      }
+      
+      return result;
+    }
+  },
 });
 
 // Virtual for discount percentage
@@ -136,63 +245,79 @@ ProductSchema.virtual('discountPercentage').get(function(this: IProduct) {
   return 0;
 });
 
-// Compound indexes for common queries
-ProductSchema.index({ category: 1, isActive: 1, featured: 1 });
-ProductSchema.index({ price: 1, isActive: 1 });
-ProductSchema.index({ rating: -1, reviews: -1, isActive: 1 });
-ProductSchema.index({ createdAt: -1, isActive: 1 });
-
-// Text search index
-ProductSchema.index({ 
-  name: 'text', 
-  description: 'text', 
-  tags: 'text',
-  'designer.username': 'text' 
-});
-
 // Pre-save middleware for data normalization
 ProductSchema.pre('save', function(next) {
-  // Normalize tags: remove duplicates, trim, lowercase
-  if (this.tags) {
-    this.tags = [...new Set(this.tags.map(tag => tag.trim().toLowerCase()))];
+  // Type assertion to access document properties
+  const doc = this as any;
+  
+  // Normalize tags
+  if (doc.tags && Array.isArray(doc.tags)) {
+    doc.tags = [...new Set(doc.tags.map((tag: any) => {
+      if (tag && typeof tag === 'string') {
+        return tag.trim().toLowerCase();
+      }
+      return tag;
+    }).filter((tag: any) => tag && tag.length > 0))];
   }
   
-  // Ensure at least one image
-  if (this.images && this.images.length > 0) {
-    this.images = this.images.filter(img => img && img.trim().length > 0);
+  // Clean and validate image
+  if (doc.image && typeof doc.image === 'string') {
+    doc.image = doc.image.trim();
   }
   
-  // Round price to 2 decimal places
-  this.price = Math.round(this.price * 100) / 100;
-  if (this.originalPrice) {
-    this.originalPrice = Math.round(this.originalPrice * 100) / 100;
+  // Round prices to 2 decimal places
+  if (doc.price !== undefined) {
+    doc.price = Math.round(Number(doc.price) * 100) / 100;
+  }
+  
+  if (doc.originalPrice !== undefined) {
+    doc.originalPrice = Math.round(Number(doc.originalPrice) * 100) / 100;
+  }
+  
+  // Ensure originalPrice is undefined if not provided or 0
+  if (doc.originalPrice === 0 || doc.originalPrice === null) {
+    delete doc.originalPrice;
   }
   
   next();
 });
 
-// Static method for finding active products
+// Pre-validate middleware to handle empty originalPrice
+ProductSchema.pre('validate', function(next) {
+  const doc = this as any;
+  
+  // Convert empty string or 0 to undefined
+  if (doc.originalPrice === '' || doc.originalPrice === 0 || doc.originalPrice === null) {
+    delete doc.originalPrice;
+  }
+  
+  // Ensure price is a number
+  if (doc.price !== undefined && typeof doc.price === 'string') {
+    doc.price = parseFloat(doc.price);
+  }
+  
+  next();
+});
+
+// Static methods with proper typing
 ProductSchema.statics.findActive = function() {
   return this.find({ isActive: true });
 };
 
-// Static method for finding featured products
 ProductSchema.statics.findFeatured = function() {
   return this.find({ isActive: true, featured: true });
 };
 
-// Static method for finding products by category
 ProductSchema.statics.findByCategory = function(category: string) {
   return this.find({ isActive: true, category });
 };
 
-// Instance method for checking stock availability
-ProductSchema.methods.isInStock = function(quantity: number = 1) {
+// Instance methods
+ProductSchema.methods.isInStock = function(this: IProduct, quantity: number = 1) {
   return this.stock >= quantity;
 };
 
-// Instance method for updating stock
-ProductSchema.methods.updateStock = async function(quantity: number) {
+ProductSchema.methods.updateStock = async function(this: IProduct, quantity: number) {
   if (this.stock + quantity < 0) {
     throw new Error('Insufficient stock');
   }
@@ -200,4 +325,20 @@ ProductSchema.methods.updateStock = async function(quantity: number) {
   return this.save();
 };
 
-export default mongoose.models.Product || mongoose.model<IProduct>('Product', ProductSchema);
+// Indexes
+ProductSchema.index({ category: 1, isActive: 1, featured: 1 });
+ProductSchema.index({ price: 1, isActive: 1 });
+ProductSchema.index({ rating: -1, reviews: -1, isActive: 1 });
+ProductSchema.index({ createdAt: -1, isActive: 1 });
+ProductSchema.index({ 
+  name: 'text', 
+  description: 'text', 
+  tags: 'text',
+  'designer.username': 'text' 
+});
+
+// Type assertion for the model
+const ProductModel = (mongoose.models.Product as IProductModel) || 
+  mongoose.model<IProduct, IProductModel>('Product', ProductSchema);
+
+export default ProductModel;
