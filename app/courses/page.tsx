@@ -3,57 +3,45 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { useToast } from "@/components/ui/use-toast"
 import { 
   Star, 
   Play, 
-  BookOpen, 
   Search,
   Filter,
   Grid,
   List,
   Award,
-  Globe,
-  DownloadCloud,
-  CheckCircle,
+  Clock,
+  Users,
+  Heart,
   X,
   Loader2,
   Palette,
+  Target,
+  Medal,
+  TrendingUp,
+  Globe,
   Code,
   Camera,
-  TrendingUp,
   Zap,
-  Target,
   Rocket,
   CloudLightning,
-  Medal,
   Gauge,
-  ShieldCheck,
-  Clock4,
+  Sparkles,
+  Flame,
+  Crown,
+  CheckCircle,
   Brain,
-  AlertCircle,
-  Lock,
-  TrendingUp as TrendingIcon,
-  Calendar,
-  Clock,
-  BarChart,
-  Users,
-  Bookmark
+  ChevronRight
 } from 'lucide-react'
 import { PaymentModal } from '@/components/payment/PaymentModal'
 
-// Define interfaces
 interface S3Asset {
   key: string
   url: string
-  size: number
-  type: 'image' | 'video'
-  duration?: number
-  width?: number
-  height?: number
 }
 
 interface Course {
@@ -68,8 +56,6 @@ interface Course {
     lastName: string
     username: string
     avatar?: string
-    bio?: string
-    rating?: number
   }
   price: number
   isFree: boolean
@@ -77,59 +63,22 @@ interface Course {
   category: string
   tags: string[]
   thumbnail: S3Asset
-  previewVideo?: S3Asset
   totalStudents: number
   averageRating: number
   totalReviews: number
-  modules: Array<{
-    _id: string
-    title: string
-    description: string
-    order: number
-    chapters: Array<{  // Changed from lessons to chapters
-      _id: string
-      title: string
-      description: string
-      order: number
-      lessons: Array<{  // Lessons are now inside chapters
-        _id: string
-        title: string
-        description: string
-        duration: number
-        isPreview: boolean
-        order: number
-      }>
-    }>
-  }>
   totalDuration: number
   totalLessons: number
-  isPublished: boolean
   isFeatured: boolean
-  requirements: string[]
-  learningOutcomes: string[]
   createdAt: string
-  updatedAt: string
-  enrollmentCount?: number
-  completionRate?: number
-  aiFeatures?: {
-    hasAIAssistant: boolean
-    hasPersonalizedLearning: boolean
-    hasSmartRecommendations: boolean
-    hasProgressTracking: boolean
-    hasPersonalizedFeedback: boolean
-  }
 }
 
 interface UserProgress {
   _id: string
   courseId: string
-  userId: string
   enrolled: boolean
   progress: number
   completed: boolean
   currentLesson?: string
-  lastAccessed?: string
-  timeSpent?: number
   completedLessons: string[]
 }
 
@@ -138,7 +87,7 @@ interface FilterState {
   level: string[]
   price: 'all' | 'free' | 'paid'
   rating: number
-  sort: 'popular' | 'newest' | 'rating' | 'price-low' | 'price-high' | 'trending'
+  sort: 'popular' | 'newest' | 'rating' | 'price-low' | 'price-high'
 }
 
 export default function CoursesPage() {
@@ -147,7 +96,6 @@ export default function CoursesPage() {
   const [courses, setCourses] = useState<Course[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
@@ -156,13 +104,14 @@ export default function CoursesPage() {
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [enrollingCourse, setEnrollingCourse] = useState<Course | null>(null)
   const [favoriteCourses, setFavoriteCourses] = useState<Set<string>>(new Set())
+  const [hoveredCourse, setHoveredCourse] = useState<string | null>(null)
+  const [activeCategory, setActiveCategory] = useState<string>('all')
   
   const observerTarget = useRef<HTMLDivElement>(null)
   const filtersRef = useRef<HTMLDivElement>(null)
-  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
-  // Pagination
   const [pagination, setPagination] = useState({
     page: 1,
     limit: 12,
@@ -171,7 +120,6 @@ export default function CoursesPage() {
     hasMore: true
   })
 
-  // User progress state - with better initialization
   const [userProgress, setUserProgress] = useState<Record<string, UserProgress>>({})
   const [progressLoading, setProgressLoading] = useState<Set<string>>(new Set())
 
@@ -183,34 +131,44 @@ export default function CoursesPage() {
     sort: 'popular'
   })
 
-  // Helper function to get course URL
+  const categories = [
+    { id: 'all', name: 'All Courses', icon: Grid, color: 'from-gray-600 to-gray-800' },
+    { id: 'fashion-design', name: 'Design', icon: Palette, color: 'from-purple-600 to-pink-600' },
+    { id: 'pattern-making', name: 'Patterns', icon: Target, color: 'from-blue-600 to-cyan-600' },
+    { id: 'sewing', name: 'Sewing', icon: Medal, color: 'from-amber-600 to-orange-600' },
+    { id: 'textiles', name: 'Textiles', icon: Gauge, color: 'from-emerald-600 to-green-600' },
+    { id: 'business', name: 'Business', icon: TrendingUp, color: 'from-indigo-600 to-purple-600' },
+    { id: 'digital', name: 'Digital', icon: Code, color: 'from-cyan-600 to-blue-600' },
+    { id: '3d-design', name: '3D Design', icon: Camera, color: 'from-pink-600 to-rose-600' },
+  ]
+
+  const filterOptions = {
+    categories: [
+      { name: 'Fashion Design', icon: Palette, color: 'bg-gradient-to-r from-purple-600 to-pink-600' },
+      { name: 'Pattern Making', icon: Target, color: 'bg-gradient-to-r from-blue-600 to-cyan-600' },
+      { name: 'Sewing', icon: Medal, color: 'bg-gradient-to-r from-amber-600 to-orange-600' },
+      { name: 'Textiles', icon: Gauge, color: 'bg-gradient-to-r from-emerald-600 to-green-600' },
+      { name: 'Fashion Business', icon: TrendingUp, color: 'bg-gradient-to-r from-indigo-600 to-purple-600' },
+    ],
+    levels: [
+      { name: 'beginner', icon: Rocket, color: 'bg-gradient-to-r from-green-600 to-emerald-600' },
+      { name: 'intermediate', icon: Target, color: 'bg-gradient-to-r from-yellow-600 to-amber-600' },
+      { name: 'advanced', icon: CloudLightning, color: 'bg-gradient-to-r from-red-600 to-rose-600' }
+    ]
+  }
+
   const getCourseUrl = useCallback((course: Course): string => {
     if (course.slug && typeof course.slug === 'string' && course.slug.trim() !== '') {
       return `/courses/${course.slug}`
     }
-    console.warn('Invalid or missing slug for course:', course._id, 'Using ID instead')
     return `/courses/id/${course._id}`
   }, [])
 
-  // Helper function to safely navigate to course
   const navigateToCourse = useCallback((course: Course) => {
     const url = getCourseUrl(course)
     router.push(url)
   }, [getCourseUrl, router])
 
-  // Debug course data
-  useEffect(() => {
-    if (courses.length > 0) {
-      const invalidSlugs = courses.filter(c => 
-        !c.slug || typeof c.slug !== 'string' || c.slug.includes('object')
-      )
-      if (invalidSlugs.length > 0) {
-        console.warn('Courses with invalid slugs:', invalidSlugs.map(c => ({ id: c._id, slug: c.slug })))
-      }
-    }
-  }, [courses])
-
-  // Debounce search input
   useEffect(() => {
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current)
@@ -227,26 +185,6 @@ export default function CoursesPage() {
     }
   }, [searchQuery])
 
-  const filterOptions = {
-    categories: [
-      { name: 'Fashion Design', icon: Palette, color: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300' },
-      { name: 'Pattern Making', icon: Target, color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' },
-      { name: 'Sewing', icon: Medal, color: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' },
-      { name: 'Textiles', icon: Gauge, color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' },
-      { name: 'Fashion Business', icon: TrendingUp, color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300' },
-      { name: 'Sustainability', icon: Globe, color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300' },
-      { name: 'Digital Fashion', icon: Code, color: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-300' },
-      { name: '3D Design', icon: Camera, color: 'bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300' },
-      { name: 'Fashion Marketing', icon: Zap, color: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300' }
-    ],
-    levels: [
-      { name: 'beginner', icon: Rocket, color: 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-800' },
-      { name: 'intermediate', icon: Target, color: 'bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-800' },
-      { name: 'advanced', icon: CloudLightning, color: 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800' }
-    ]
-  }
-
-  // Close mobile filters when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (filtersRef.current && !filtersRef.current.contains(event.target as Node)) {
@@ -258,55 +196,51 @@ export default function CoursesPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Memoized filtered courses for better performance
   const filteredCourses = useMemo(() => {
     return courses.filter(course => {
-      // Search filter
       if (debouncedSearch) {
         const searchLower = debouncedSearch.toLowerCase()
         const matchesSearch = 
           course.title.toLowerCase().includes(searchLower) ||
           course.shortDescription.toLowerCase().includes(searchLower) ||
-          course.description.toLowerCase().includes(searchLower) ||
           course.instructor.firstName.toLowerCase().includes(searchLower) ||
-          course.instructor.lastName.toLowerCase().includes(searchLower) ||
-          course.tags.some(tag => tag.toLowerCase().includes(searchLower))
+          course.instructor.lastName.toLowerCase().includes(searchLower)
         
         if (!matchesSearch) return false
       }
 
-      // Category filter
+      if (activeCategory !== 'all') {
+        const category = categories.find(c => c.id === activeCategory)
+        if (category && course.category !== category.name) {
+          return false
+        }
+      }
+
       if (filters.category.length > 0 && !filters.category.includes(course.category)) {
         return false
       }
 
-      // Level filter
       if (filters.level.length > 0 && !filters.level.includes(course.level)) {
         return false
       }
 
-      // Price filter
       if (filters.price === 'free' && !course.isFree) return false
       if (filters.price === 'paid' && course.isFree) return false
 
-      // Rating filter
       if (filters.rating > 0 && course.averageRating < filters.rating) {
         return false
       }
 
       return true
     })
-  }, [courses, debouncedSearch, filters])
+  }, [courses, debouncedSearch, filters, activeCategory])
 
-  // Apply sorting to filtered courses
   const sortedCourses = useMemo(() => {
     const sorted = [...filteredCourses]
     
     switch (filters.sort) {
       case 'popular':
         return sorted.sort((a, b) => b.totalStudents - a.totalStudents)
-      case 'trending':
-        return sorted.sort((a, b) => (b.enrollmentCount || 0) - (a.enrollmentCount || 0))
       case 'newest':
         return sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       case 'rating':
@@ -320,17 +254,6 @@ export default function CoursesPage() {
     }
   }, [filteredCourses, filters.sort])
 
-  // Active filters count for badge
-  const activeFiltersCount = useMemo(() => {
-    return (
-      filters.category.length +
-      filters.level.length +
-      (filters.price !== 'all' ? 1 : 0) +
-      (filters.rating > 0 ? 1 : 0)
-    )
-  }, [filters])
-
-  // Fetch progress for a specific course
   const fetchCourseProgress = async (courseId: string) => {
     if (progressLoading.has(courseId)) return
     
@@ -351,38 +274,20 @@ export default function CoursesPage() {
           }
         }))
       } else if (response.status === 403 || response.status === 404) {
-        // User is not enrolled
         setUserProgress(prev => ({
           ...prev,
           [courseId]: {
             _id: `temp-${courseId}`,
             courseId,
-            userId: 'current-user',
             enrolled: false,
             progress: 0,
             completed: false,
-            completedLessons: [],
-            lastAccessed: new Date().toISOString(),
-            timeSpent: 0
+            completedLessons: []
           }
         }))
       }
     } catch (error) {
       console.error(`Error fetching progress for course ${courseId}:`, error)
-      setUserProgress(prev => ({
-        ...prev,
-        [courseId]: {
-          _id: `temp-${courseId}`,
-          courseId,
-          userId: 'current-user',
-          enrolled: false,
-          progress: 0,
-          completed: false,
-          completedLessons: [],
-          lastAccessed: new Date().toISOString(),
-          timeSpent: 0
-        }
-      }))
     } finally {
       setProgressLoading(prev => {
         const newSet = new Set(prev)
@@ -392,22 +297,11 @@ export default function CoursesPage() {
     }
   }
 
-  // Batch fetch progress for courses
-  const fetchAllCoursesProgress = async (courseIds: string[]) => {
-    // Use Promise.all for parallel fetching with limited concurrency
-    const batchSize = 5
-    for (let i = 0; i < courseIds.length; i += batchSize) {
-      const batch = courseIds.slice(i, i + batchSize)
-      await Promise.all(batch.map(courseId => fetchCourseProgress(courseId)))
-    }
-  }
-
-  // Enhanced enrollment function with proper payment handling
-  const enrollInCourse = async (course: Course) => {
+  const enrollInCourse = async (course: Course, e: React.MouseEvent) => {
+    e.stopPropagation()
     if (isEnrolling) return
     
     setIsEnrolling(course._id)
-    setError(null)
     
     try {
       const response = await fetch(`/api/courses/${course._id}/enroll`, {
@@ -420,19 +314,15 @@ export default function CoursesPage() {
 
       const result = await response.json()
 
-      // Handle payment required - this is NOT an error, it's a normal flow
       if (response.status === 402 && result.requiresPayment) {
-        // Show payment modal for paid courses
         setEnrollingCourse(course)
         setShowPaymentModal(true)
         setIsEnrolling(null)
-        return // Exit early - this is not an error
+        return
       }
 
-      // Handle other successful responses (200 status)
       if (response.ok) {
         if (result.enrolled) {
-          // Handle successful enrollment for free courses
           setCourses(prev => prev.map(c => 
             c._id === course._id 
               ? { 
@@ -447,18 +337,15 @@ export default function CoursesPage() {
             [course._id]: {
               _id: `temp-${course._id}`,
               courseId: course._id,
-              userId: 'current-user',
               enrolled: true,
               progress: 0,
               completed: false,
-              completedLessons: [],
-              lastAccessed: new Date().toISOString(),
-              timeSpent: 0
+              completedLessons: []
             }
           }))
           
           toast({
-            title: 'Successfully Enrolled!',
+            title: '🎉 Successfully Enrolled!',
             description: 'You can now start learning immediately',
           })
 
@@ -466,41 +353,22 @@ export default function CoursesPage() {
             navigateToCourse(course)
           }, 1500)
         } 
-        // Handle already enrolled case
         else if (result.alreadyEnrolled) {
           toast({
             title: 'Already Enrolled!',
             description: 'You are already enrolled in this course',
           })
-          
-          // Update UI to show enrolled status
-          setUserProgress(prev => ({
-            ...prev,
-            [course._id]: {
-              _id: `temp-${course._id}`,
-              courseId: course._id,
-              userId: 'current-user',
-              enrolled: true,
-              progress: result.progress?.progress || 0,
-              completed: result.progress?.completed || false,
-              completedLessons: result.progress?.completedLessons || [],
-              lastAccessed: new Date().toISOString(),
-              timeSpent: result.progress?.timeSpent || 0
-            }
-          }))
         }
         else {
           throw new Error('Unexpected response from server')
         }
       } else {
-        // Handle actual errors (not 402 payment required)
         throw new Error(result.error || `Failed to enroll (${response.status})`)
       }
 
     } catch (err: any) {
       console.error('Error enrolling:', err)
       
-      // Only show error toast for actual errors (not payment flow)
       if (err.message && !err.message.includes('402')) {
         if (err.message.includes('Unauthorized') || err.message.includes('401')) {
           toast({
@@ -508,15 +376,8 @@ export default function CoursesPage() {
             description: 'Please log in to enroll in courses',
             variant: 'destructive',
           })
-          // Redirect to login with return URL
           const currentUrl = encodeURIComponent(window.location.pathname + window.location.search)
           router.push(`/login?redirect=${currentUrl}`)
-        } else if (err.message.includes('not found')) {
-          toast({
-            title: 'Course Not Available',
-            description: 'This course is no longer available',
-            variant: 'destructive',
-          })
         } else {
           toast({
             title: 'Enrollment Failed',
@@ -530,20 +391,16 @@ export default function CoursesPage() {
     }
   }
 
-  // Handle payment success
   const handlePaymentSuccess = (courseId: string) => {
     setUserProgress(prev => ({
       ...prev,
       [courseId]: {
         _id: `temp-${courseId}`,
         courseId,
-        userId: 'current-user',
         enrolled: true,
         progress: 0,
         completed: false,
-        completedLessons: [],
-        lastAccessed: new Date().toISOString(),
-        timeSpent: 0
+        completedLessons: []
       }
     }))
     
@@ -556,7 +413,6 @@ export default function CoursesPage() {
       variant: 'default',
     })
 
-    // Find the course to redirect
     const enrolledCourse = courses.find(c => c._id === courseId)
     if (enrolledCourse) {
       setTimeout(() => {
@@ -565,33 +421,60 @@ export default function CoursesPage() {
     }
   }
 
-  // Check if user is enrolled in a course
   const isUserEnrolled = (courseId: string) => {
     return userProgress[courseId]?.enrolled === true
   }
 
-  // Enhanced enrollment button with better styling
-  const getEnrollmentButton = (course: Course) => {
+  const CourseCard = ({ course }: { course: Course }) => {
     const progress = userProgress[course._id]
     const isEnrolled = isUserEnrolled(course._id)
-    const isLoading = progressLoading.has(course._id) || isEnrolling === course._id
     const isFavorite = favoriteCourses.has(course._id)
     
-    if (isLoading) {
-      return (
-        <div className="flex items-center justify-center px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-800">
-          <Loader2 className="w-4 h-4 animate-spin text-gray-500" />
-        </div>
-      )
-    }
-
-    if (!isEnrolled) {
-      return (
-        <div className="flex gap-2">
-          <Button 
-            size="sm"
-            variant="ghost"
-            className="rounded-lg p-2 hover:bg-gray-100 dark:hover:bg-gray-800"
+    return (
+      <div 
+        className="group relative overflow-hidden rounded-3xl bg-white shadow-xl hover:shadow-2xl transition-all duration-500 cursor-pointer border border-white hover:border-red-100"
+        onMouseEnter={() => setHoveredCourse(course._id)}
+        onMouseLeave={() => setHoveredCourse(null)}
+        onClick={() => navigateToCourse(course)}
+      >
+        {/* Background Glow Effect */}
+        <div className="absolute inset-0 bg-gradient-to-br from-white via-red-50/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+        
+        {/* Course Thumbnail */}
+        <div className="relative h-64 overflow-hidden rounded-t-3xl">
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent z-10" />
+          <img
+            src={course.thumbnail?.url || '/api/placeholder/400/256'}
+            alt={course.title}
+            className="w-full h-full object-cover transform group-hover:scale-110 transition-transform duration-700"
+            loading="lazy"
+          />
+          
+          {/* Play Button */}
+          <div className="absolute inset-0 flex items-center justify-center z-20 opacity-0 group-hover:opacity-100 transition-all duration-500">
+            <div className="w-20 h-20 bg-gradient-to-r from-red-600 to-orange-500 rounded-full flex items-center justify-center shadow-2xl transform group-hover:scale-110 transition-transform duration-300">
+              <Play className="w-8 h-8 text-white ml-1" />
+            </div>
+          </div>
+          
+          {/* Badges */}
+          <div className="absolute top-4 left-4 z-30 space-y-2">
+            <div className={`px-4 py-2 rounded-full backdrop-blur-sm bg-white/90 text-sm font-semibold shadow-lg ${
+              course.level === 'beginner' ? 'text-green-700' :
+              course.level === 'intermediate' ? 'text-amber-700' : 'text-red-700'
+            }`}>
+              {course.level}
+            </div>
+            {course.isFeatured && (
+              <div className="px-4 py-2 rounded-full backdrop-blur-sm bg-gradient-to-r from-amber-500/90 to-orange-500/90 text-white text-sm font-semibold shadow-lg flex items-center gap-1">
+                <Flame className="w-4 h-4" />
+                Featured
+              </div>
+            )}
+          </div>
+          
+          {/* Favorite Button */}
+          <button
             onClick={(e) => {
               e.stopPropagation()
               setFavoriteCourses(prev => {
@@ -612,80 +495,212 @@ export default function CoursesPage() {
                 return newSet
               })
             }}
-            title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+            className="absolute top-4 right-4 z-30 p-3 backdrop-blur-sm bg-white/90 rounded-full hover:bg-white transition-all duration-300 shadow-lg"
           >
             {isFavorite ? (
-              <Bookmark className="w-4 h-4 fill-current text-yellow-500" />
+              <Heart className="w-5 h-5 fill-red-500 text-red-500" />
             ) : (
-              <Bookmark className="w-4 h-4" />
+              <Heart className="w-5 h-5 text-gray-600 group-hover:text-red-500 transition-colors" />
             )}
-          </Button>
-          <Button 
-            size="sm" 
-            className="flex-1 rounded-lg bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition-all shadow-sm hover:shadow"
-            onClick={(e) => {
-              e.stopPropagation()
-              enrollInCourse(course)
-            }}
-            disabled={isEnrolling === course._id}
-          >
-            {course.isFree ? 'Enroll Free' : `Enroll $${course.price}`}
-          </Button>
+          </button>
         </div>
-      )
-    }
-
-    if (progress?.completed) {
-      return (
-        <div className="flex items-center justify-center space-x-2 px-4 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 w-full">
-          <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
-          <span className="text-sm font-medium text-green-700 dark:text-green-300">Completed</span>
-        </div>
-      )
-    }
-
-    if (progress?.progress && progress.progress > 0) {
-      return (
-        <div className="w-full">
-          <div className="relative h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mb-2">
-            <div 
-              className="absolute h-full bg-black dark:bg-white rounded-full transition-all duration-500"
-              style={{ width: `${progress.progress * 100}%` }}
-            />
+        
+        {/* Course Content */}
+        <div className="p-6 relative z-20">
+          {/* Category and Price */}
+          <div className="flex items-center justify-between mb-4">
+            <div className="px-3 py-1.5 rounded-full bg-gradient-to-r from-gray-100 to-gray-50 text-sm font-medium text-gray-700">
+              {course.category}
+            </div>
+            <div className="flex items-center space-x-1">
+              {course.isFree ? (
+                <span className="text-2xl font-bold bg-gradient-to-r from-emerald-600 to-green-500 bg-clip-text text-transparent">FREE</span>
+              ) : (
+                <span className="text-2xl font-bold text-gray-900">${course.price}</span>
+              )}
+            </div>
           </div>
-          <Button 
-            size="sm" 
-            className="w-full rounded-lg bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition-all shadow-sm hover:shadow"
-            onClick={(e) => {
-              e.stopPropagation()
-              navigateToCourse(course)
-            }}
-          >
-            <Play className="w-4 h-4 mr-2" />
-            Continue ({Math.round(progress.progress * 100)}%)
-          </Button>
+          
+          {/* Title */}
+          <h3 className="text-xl font-bold mb-3 line-clamp-2 bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent group-hover:from-red-600 group-hover:to-orange-500 transition-all duration-300">
+            {course.title}
+          </h3>
+          
+          {/* Instructor */}
+          <div className="flex items-center space-x-3 mb-5">
+            <div className="w-10 h-10 rounded-full ring-2 ring-white ring-offset-2 bg-gradient-to-br from-red-100 to-pink-100 overflow-hidden">
+              <img
+                src={course.instructor.avatar || '/default-avatar.png'}
+                alt={course.instructor.username}
+                className="w-full h-full object-cover"
+              />
+            </div>
+            <span className="text-sm font-semibold text-gray-700">
+              {course.instructor.firstName} {course.instructor.lastName}
+            </span>
+          </div>
+          
+          {/* Stats */}
+          <div className="flex items-center justify-between text-sm text-gray-600 mb-6">
+            <div className="flex items-center space-x-1">
+              <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+              <span className="font-bold">{course.averageRating.toFixed(1)}</span>
+              <span className="text-gray-500">({course.totalReviews})</span>
+            </div>
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-1">
+                <Users className="w-4 h-4" />
+                <span>{course.totalStudents.toLocaleString()}</span>
+              </div>
+              <div className="flex items-center space-x-1">
+                <Clock className="w-4 h-4" />
+                <span>{Math.floor(course.totalDuration / 60)}h</span>
+              </div>
+            </div>
+          </div>
+          
+          {/* Enrollment Button */}
+          <div className="relative">
+            <div className="absolute inset-0 bg-gradient-to-r from-red-600 to-orange-500 rounded-2xl blur opacity-0 group-hover:opacity-30 transition-opacity duration-300" />
+            {progressLoading.has(course._id) || isEnrolling === course._id ? (
+              <Button className="w-full rounded-2xl bg-gray-100 text-gray-700 relative z-10 h-12" disabled>
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                Loading...
+              </Button>
+            ) : isEnrolled ? (
+              progress?.completed ? (
+                <Button className="w-full rounded-2xl bg-gradient-to-r from-emerald-600 to-green-500 text-white relative z-10 h-12">
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  Completed
+                </Button>
+              ) : (
+                <Button 
+                  className="w-full rounded-2xl bg-gradient-to-r from-red-600 to-orange-500 text-white relative z-10 h-12 hover:shadow-xl transition-all duration-300"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    navigateToCourse(course)
+                  }}
+                >
+                  <Play className="w-4 h-4 mr-2" />
+                  Continue ({Math.round((progress?.progress || 0) * 100)}%)
+                </Button>
+              )
+            ) : (
+              <Button 
+                className="w-full rounded-2xl bg-gradient-to-r from-red-600 to-orange-500 text-white relative z-10 h-12 hover:shadow-xl hover:scale-[1.02] transition-all duration-300"
+                onClick={(e) => enrollInCourse(course, e)}
+              >
+                <Sparkles className="w-4 h-4 mr-2" />
+                {course.isFree ? 'Enroll Free' : `Enroll Now`}
+              </Button>
+            )}
+          </div>
         </div>
-      )
-    }
-
-    return (
-      <Button 
-        size="sm" 
-        className="w-full rounded-lg bg-black hover:bg-gray-800 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition-all shadow-sm hover:shadow"
-        onClick={(e) => {
-          e.stopPropagation()
-          navigateToCourse(course)
-        }}
-      >
-        <Play className="w-4 h-4 mr-2" />
-        Start Learning
-      </Button>
+      </div>
     )
   }
 
-  // Fetch courses with abort controller and retry logic
+  const CourseSkeleton = () => (
+    <div className="overflow-hidden rounded-3xl bg-white shadow-lg border border-gray-200 animate-pulse">
+      <div className="h-64 bg-gradient-to-br from-gray-200 to-gray-300"></div>
+      <div className="p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="h-6 bg-gray-200 rounded-full w-24"></div>
+          <div className="h-8 bg-gray-200 rounded-full w-16"></div>
+        </div>
+        <div className="h-6 bg-gray-200 rounded mb-3 w-4/5"></div>
+        <div className="flex items-center space-x-3 mb-5">
+          <div className="w-10 h-10 bg-gray-200 rounded-full"></div>
+          <div className="h-4 bg-gray-200 rounded w-32"></div>
+        </div>
+        <div className="h-12 bg-gray-200 rounded-2xl"></div>
+      </div>
+    </div>
+  )
+
+  const FiltersSidebar = () => (
+    <div className="space-y-6">
+      {/* Sort Filter */}
+      <div className="bg-white/50 backdrop-blur-sm rounded-2xl border border-white/20 p-6">
+        <h3 className="font-bold mb-4 text-gray-900 flex items-center text-lg">
+          <Target className="w-5 h-5 mr-3 text-red-600" />
+          Sort by
+        </h3>
+        <select
+          value={filters.sort}
+          onChange={(e) => setFilters(prev => ({ ...prev, sort: e.target.value as any }))}
+          className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent"
+        >
+          <option value="popular">Most Popular</option>
+          <option value="newest">Newest First</option>
+          <option value="rating">Highest Rated</option>
+          <option value="price-low">Price: Low to High</option>
+          <option value="price-high">Price: High to Low</option>
+        </select>
+      </div>
+
+      {/* Price Filter */}
+      <div className="bg-white/50 backdrop-blur-sm rounded-2xl border border-white/20 p-6">
+        <h3 className="font-bold mb-4 text-gray-900 flex items-center text-lg">
+          <Crown className="w-5 h-5 mr-3 text-amber-600" />
+          Price
+        </h3>
+        <div className="space-y-3">
+          {[
+            { value: 'all', label: 'All Courses' },
+            { value: 'free', label: 'Free Only' },
+            { value: 'paid', label: 'Paid Only' }
+          ].map((price) => (
+            <label key={price.value} className="flex items-center space-x-3 cursor-pointer p-3 rounded-xl hover:bg-white/50 transition-colors">
+              <div className="relative">
+                <input
+                  type="radio"
+                  name="price"
+                  value={price.value}
+                  checked={filters.price === price.value}
+                  onChange={() => setFilters(prev => ({ ...prev, price: price.value as any }))}
+                  className="w-5 h-5 text-red-600 border-gray-300 focus:ring-red-500"
+                />
+              </div>
+              <span className="text-sm font-medium text-gray-700">{price.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Level Filter */}
+      <div className="bg-white/50 backdrop-blur-sm rounded-2xl border border-white/20 p-6">
+        <h3 className="font-bold mb-4 text-gray-900 flex items-center text-lg">
+          <Rocket className="w-5 h-5 mr-3 text-blue-600" />
+          Level
+        </h3>
+        <div className="space-y-3">
+          {filterOptions.levels.map((level) => (
+            <label key={level.name} className="flex items-center space-x-3 cursor-pointer p-3 rounded-xl hover:bg-white/50 transition-colors">
+              <input
+                type="checkbox"
+                checked={filters.level.includes(level.name)}
+                onChange={() => {
+                  setFilters(prev => ({
+                    ...prev,
+                    level: prev.level.includes(level.name)
+                      ? prev.level.filter(l => l !== level.name)
+                      : [...prev.level, level.name]
+                  }))
+                }}
+                className="w-5 h-5 text-red-600 border-gray-300 rounded focus:ring-red-500"
+              />
+              <span className={`px-4 py-2 rounded-xl text-sm font-medium text-white ${level.color}`}>
+                {level.name.charAt(0).toUpperCase() + level.name.slice(1)}
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+
   const fetchCourses = useCallback(async (page = 1, isLoadMore = false) => {
-    // Abort previous request if exists
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
     }
@@ -702,8 +717,6 @@ export default function CoursesPage() {
       setLoadingMore(true)
     }
     
-    setError(null)
-
     try {
       const params = new URLSearchParams({
         page: page.toString(),
@@ -711,7 +724,6 @@ export default function CoursesPage() {
         sort: filters.sort,
         price: filters.price,
         rating: filters.rating.toString(),
-        _t: Date.now().toString() // Cache busting
       })
 
       if (debouncedSearch) {
@@ -726,38 +738,20 @@ export default function CoursesPage() {
 
       const response = await fetch(`/api/courses?${params}`, {
         credentials: 'include',
-        headers: {
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache',
-          'Accept': 'application/json'
-        },
         signal: controller.signal
       })
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: Failed to fetch courses`)
+        throw new Error(`Failed to fetch courses`)
       }
 
       const data = await response.json()
-      console.log('API Response:', data) // Debug the response
       
-      // Handle different API response formats
-      let coursesData: Course[] = []
-      let paginationData = {
-        page: page,
-        total: 0,
-        totalPages: 1
-      }
-
-      // Helper function to normalize course data
       const normalizeCourse = (course: any): Course => {
-        // Ensure slug is a string and not an object
         let slug = course.slug
         if (slug && typeof slug === 'object') {
-          console.warn('Course slug is an object, converting to string:', course._id, slug)
           slug = String(slug)
         } else if (!slug || typeof slug !== 'string') {
-          console.warn('Course slug is invalid, using ID:', course._id, slug)
           slug = course._id
         }
         
@@ -765,6 +759,13 @@ export default function CoursesPage() {
           ...course,
           slug: slug
         }
+      }
+
+      let coursesData: Course[] = []
+      let paginationData = {
+        page: page,
+        total: 0,
+        totalPages: 1
       }
 
       if (Array.isArray(data)) {
@@ -780,9 +781,6 @@ export default function CoursesPage() {
       } else if (data.data && Array.isArray(data.data)) {
         coursesData = data.data.map(normalizeCourse)
         paginationData.total = data.data.length
-      } else if (data.items && Array.isArray(data.items)) {
-        coursesData = data.items.map(normalizeCourse)
-        paginationData.total = data.items.length
       }
 
       if (isLoadMore) {
@@ -803,27 +801,23 @@ export default function CoursesPage() {
         hasMore: paginationData.page < paginationData.totalPages
       })
 
-      // Fetch progress for all courses after loading
       if (coursesData.length > 0) {
-        fetchAllCoursesProgress(coursesData.map(c => c._id))
+        const batchSize = 5
+        for (let i = 0; i < coursesData.length; i += batchSize) {
+          const batch = coursesData.slice(i, i + batchSize).map(c => c._id)
+          await Promise.all(batch.map(courseId => fetchCourseProgress(courseId)))
+        }
       }
       
     } catch (err: any) {
-      if (err.name === 'AbortError') {
-        console.log('Request aborted')
-        return
-      }
+      if (err.name === 'AbortError') return
       
       console.error('Error fetching courses:', err)
-      setError(err.message || 'Failed to load courses')
-      
-      if (!isLoadMore) {
-        toast({
-          title: 'Error Loading Courses',
-          description: 'Please check your connection and try again',
-          variant: 'destructive',
-        })
-      }
+      toast({
+        title: 'Error Loading Courses',
+        description: 'Please check your connection and try again',
+        variant: 'destructive',
+      })
     } finally {
       setLoading(false)
       setLoadingMore(false)
@@ -831,7 +825,6 @@ export default function CoursesPage() {
     }
   }, [debouncedSearch, filters, pagination.limit, toast])
 
-  // Load more courses
   const loadMoreCourses = useCallback(async () => {
     if (!pagination.hasMore || loading || loadingMore) return
     
@@ -839,7 +832,6 @@ export default function CoursesPage() {
     await fetchCourses(nextPage, true)
   }, [pagination, loading, loadingMore, fetchCourses])
 
-  // Intersection Observer for infinite scroll
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
@@ -847,7 +839,7 @@ export default function CoursesPage() {
           loadMoreCourses()
         }
       },
-      { threshold: 0.3, rootMargin: '200px' }
+      { threshold: 0.1 }
     )
 
     const currentTarget = observerTarget.current
@@ -862,18 +854,14 @@ export default function CoursesPage() {
     }
   }, [pagination.hasMore, loading, loadingMore, loadMoreCourses])
 
-  // Initial load on mount
   useEffect(() => {
     fetchCourses(1, false)
   }, [])
 
-  // Fetch courses when search or sort filters change
   useEffect(() => {
-    // Reset to page 1 when search or sort changes
     fetchCourses(1, false)
   }, [debouncedSearch, filters.sort, filters.price, filters.rating])
 
-  // Category and level filters with debounce
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       fetchCourses(1, false)
@@ -882,288 +870,119 @@ export default function CoursesPage() {
     return () => clearTimeout(timeoutId)
   }, [filters.category, filters.level])
 
-  // Toggle filters
-  const toggleFilter = (type: keyof FilterState, value: string) => {
-    setFilters(prev => {
-      const currentArray = prev[type] as string[]
-      if (Array.isArray(currentArray)) {
-        return {
-          ...prev,
-          [type]: currentArray.includes(value)
-            ? currentArray.filter(item => item !== value)
-            : [...currentArray, value]
-        }
-      }
-      return prev
-    })
-  }
-
-  // Clear all filters
-  const clearFilters = () => {
-    setFilters({
-      category: [],
-      level: [],
-      price: 'all',
-      rating: 0,
-      sort: 'popular'
-    })
-    setSearchQuery('')
-  }
-
-  // Get level color
-  const getLevelColor = (level: string) => {
-    switch (level) {
-      case 'beginner':
-        return 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-800'
-      case 'intermediate':
-        return 'bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-800'
-      case 'advanced':
-        return 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800'
-      default:
-        return 'bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-800 dark:text-gray-300'
-    }
-  }
-
-  // Get category color
-  const getCategoryColor = (categoryName: string) => {
-    const category = filterOptions.categories.find(c => c.name === categoryName)
-    return category?.color || 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
-  }
-
-  // Course Skeleton
-  const CourseSkeleton = () => (
-    <Card className="rounded-xl overflow-hidden animate-pulse border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
-      <div className="h-44 bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-800 dark:to-gray-700"></div>
-      <CardHeader className="pb-4 px-5">
-        <div className="h-5 bg-gray-200 dark:bg-gray-800 rounded mb-3 w-4/5"></div>
-        <div className="h-4 bg-gray-200 dark:bg-gray-800 rounded w-3/4"></div>
-      </CardHeader>
-      <CardContent className="pb-5 px-5">
-        <div className="flex justify-between items-center">
-          <div className="h-6 bg-gray-200 dark:bg-gray-800 rounded w-20"></div>
-          <div className="h-9 bg-gray-200 dark:bg-gray-800 rounded-lg w-24"></div>
-        </div>
-      </CardContent>
-    </Card>
-  )
-
-  // Error Display
-  const ErrorDisplay = () => (
-    <div className="text-center py-12">
-      <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-100 dark:bg-red-900/20 mb-4">
-        <AlertCircle className="w-8 h-8 text-red-600 dark:text-red-400" />
-      </div>
-      <h3 className="text-xl font-semibold mb-2">Failed to Load Courses</h3>
-      <p className="text-gray-600 dark:text-gray-400 mb-6 max-w-md mx-auto">
-        {error || 'There was an error loading the courses. Please check your connection and try again.'}
-      </p>
-      <div className="flex justify-center gap-3">
-        <Button onClick={() => fetchCourses(1, false)} className="rounded-lg">
-          <Loader2 className="w-4 h-4 mr-2" />
-          Retry
-        </Button>
-        <Button 
-          onClick={clearFilters} 
-          variant="outline" 
-          className="rounded-lg"
-        >
-          Clear Filters
-        </Button>
-      </div>
-    </div>
-  )
-
-  // Filters Sidebar Component
-  const FiltersSidebar = () => (
-    <Card className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 lg:sticky lg:top-6">
-      <CardHeader className="pb-4">
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center text-lg">
-            <Filter className="w-5 h-5 mr-2 text-gray-600 dark:text-gray-400" />
-            Filters
-            {activeFiltersCount > 0 && (
-              <Badge className="ml-2 bg-black text-white dark:bg-white dark:text-black rounded-full px-2 py-0.5 text-xs">
-                {activeFiltersCount}
-              </Badge>
-            )}
-          </CardTitle>
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={clearFilters}
-            className="rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-sm"
-          >
-            Clear all
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        {/* Sort Filter */}
-        <div>
-          <h4 className="font-medium mb-3 text-sm text-gray-700 dark:text-gray-300">
-            Sort by
-          </h4>
-          <select
-            value={filters.sort}
-            onChange={(e) => setFilters(prev => ({ ...prev, sort: e.target.value as any }))}
-            className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm focus:ring-2 focus:ring-black dark:focus:ring-white focus:border-transparent"
-          >
-            <option value="popular">Most Popular</option>
-            <option value="trending">Trending</option>
-            <option value="newest">Newest</option>
-            <option value="rating">Highest Rated</option>
-            <option value="price-low">Price: Low to High</option>
-            <option value="price-high">Price: High to Low</option>
-          </select>
-        </div>
-
-        {/* Price Filter */}
-        <div>
-          <h4 className="font-medium mb-3 text-sm text-gray-700 dark:text-gray-300">
-            Price
-          </h4>
-          <div className="space-y-2">
-            {[
-              { value: 'all', label: 'All Courses' },
-              { value: 'free', label: 'Free Only' },
-              { value: 'paid', label: 'Paid Only' }
-            ].map((price) => (
-              <label key={price.value} className="flex items-center space-x-3 cursor-pointer group">
-                <input
-                  type="radio"
-                  name="price"
-                  value={price.value}
-                  checked={filters.price === price.value}
-                  onChange={() => setFilters(prev => ({ ...prev, price: price.value as any }))}
-                  className="w-4 h-4 text-black dark:text-white border-gray-300 dark:border-gray-600"
-                />
-                <span className="text-sm">{price.label}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        {/* Level Filter */}
-        <div>
-          <h4 className="font-medium mb-3 text-sm text-gray-700 dark:text-gray-300">
-            Level
-          </h4>
-          <div className="space-y-2">
-            {filterOptions.levels.map((level) => (
-              <label key={level.name} className="flex items-center space-x-3 cursor-pointer group">
-                <input
-                  type="checkbox"
-                  checked={filters.level.includes(level.name)}
-                  onChange={() => toggleFilter('level', level.name)}
-                  className="w-4 h-4 text-black dark:text-white rounded border-gray-300 dark:border-gray-600"
-                />
-                <span className={`px-3 py-1.5 rounded text-xs font-medium ${level.color} border`}>
-                  {level.name.charAt(0).toUpperCase() + level.name.slice(1)}
-                </span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        {/* Category Filter */}
-        <div>
-          <h4 className="font-medium mb-3 text-sm text-gray-700 dark:text-gray-300">
-            Category
-          </h4>
-          <div className="space-y-2">
-            {filterOptions.categories.map((category) => (
-              <label key={category.name} className="flex items-center space-x-3 cursor-pointer group">
-                <input
-                  type="checkbox"
-                  checked={filters.category.includes(category.name)}
-                  onChange={() => toggleFilter('category', category.name)}
-                  className="w-4 h-4 text-black dark:text-white rounded border-gray-300 dark:border-gray-600"
-                />
-                <span className={`px-3 py-1.5 rounded text-xs font-medium ${category.color} border`}>
-                  {category.name}
-                </span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        {/* Rating Filter */}
-        <div>
-          <h4 className="font-medium mb-3 text-sm text-gray-700 dark:text-gray-300">
-            Minimum Rating
-          </h4>
-          <div className="flex items-center space-x-2">
-            <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-            <select
-              value={filters.rating}
-              onChange={(e) => setFilters(prev => ({ ...prev, rating: Number(e.target.value) }))}
-              className="flex-1 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm focus:ring-2 focus:ring-black dark:focus:ring-white focus:border-transparent"
-            >
-              <option value="0">Any rating</option>
-              <option value="4">4+ stars</option>
-              <option value="4.5">4.5+ stars</option>
-            </select>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  )
-
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white dark:from-black dark:to-gray-900">
-      {/* Main Content */}
-      <div className="container mx-auto px-4 py-8">
-        {/* Header Section */}
-        <div className="mb-10">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-purple-100 to-pink-100 dark:from-purple-900/30 dark:to-pink-900/30 mb-4">
-              <Palette className="w-8 h-8 text-purple-600 dark:text-purple-400" />
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 via-white to-red-50/30">
+      {/* Hero Section */}
+      <div className="relative overflow-hidden bg-gradient-to-br from-white via-red-50/50 to-white">
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent animate-pulse"></div>
+        <div className="container mx-auto px-4 py-20">
+          <div className="text-center max-w-4xl mx-auto">
+            <div className="inline-flex items-center justify-center w-28 h-28 rounded-3xl bg-gradient-to-br from-red-500 to-orange-500 mb-8 shadow-2xl animate-float">
+              <Palette className="w-14 h-14 text-white" />
             </div>
-            <h1 className="text-3xl md:text-4xl font-bold mb-3 bg-gradient-to-r from-gray-900 to-gray-700 dark:from-white dark:to-gray-300 bg-clip-text text-transparent">
+            <h1 className="text-5xl md:text-7xl font-bold mb-8 bg-gradient-to-r from-gray-900 via-red-600 to-gray-900 bg-clip-text text-transparent">
               Master Fashion Design
             </h1>
-            <p className="text-gray-600 dark:text-gray-400 max-w-2xl mx-auto text-lg">
+            <p className="text-xl text-gray-600 mb-12 max-w-2xl mx-auto">
               Learn from industry experts with hands-on projects and personalized feedback
             </p>
-          </div>
-          
-          {/* Search Bar */}
-          <div className="max-w-2xl mx-auto">
-            <div className="relative">
-              <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <Input
-                type="text"
-                placeholder="Search for courses, topics, or instructors..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-12 pr-4 py-3 rounded-xl border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-base shadow-sm focus:shadow-md transition-shadow focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400"
-              />
-              {searchQuery && (
+            
+            {/* Search Bar */}
+            <div className="max-w-2xl mx-auto mb-16">
+              <div className="relative group">
+                <div className="absolute -inset-1 bg-gradient-to-r from-red-600 to-orange-500 rounded-3xl blur opacity-20 group-hover:opacity-30 transition duration-500"></div>
+                <div className="relative">
+                  <Search className="absolute left-6 top-1/2 transform -translate-y-1/2 text-gray-400 w-6 h-6" />
+                  <Input
+                    type="text"
+                    placeholder="Search for courses, topics, or instructors..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-16 pr-12 py-5 rounded-2xl border-2 border-white bg-white/80 backdrop-blur-sm text-lg shadow-2xl focus:border-red-300 focus:ring-2 focus:ring-red-200 transition-all"
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-6 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            {/* Quick Categories */}
+            <div className="flex flex-wrap justify-center gap-3 mb-8">
+              {categories.map((category) => (
                 <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  key={category.id}
+                  onClick={() => setActiveCategory(category.id)}
+                  className={`px-5 py-3 rounded-xl font-medium transition-all duration-300 flex items-center gap-2 backdrop-blur-sm ${
+                    activeCategory === category.id
+                      ? `bg-gradient-to-r ${category.color} text-white shadow-xl transform scale-105`
+                      : 'bg-white/80 text-gray-700 hover:bg-white shadow-lg hover:shadow-xl'
+                  }`}
                 >
-                  <X className="w-5 h-5" />
+                  <category.icon className="w-5 h-5" />
+                  {category.name}
                 </button>
-              )}
+              ))}
             </div>
           </div>
         </div>
+      </div>
 
+      {/* Main Content */}
+      <div className="container mx-auto px-4 py-8">
         <div className="flex flex-col lg:flex-row gap-8">
           {/* Filters Sidebar - Desktop */}
-          <div className="hidden lg:block lg:w-64 space-y-6">
-            <FiltersSidebar />
+          <div className="hidden lg:block lg:w-80 space-y-6">
+            <div className="sticky top-8 space-y-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-gray-900">Filters</h2>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => setFilters({
+                    category: [],
+                    level: [],
+                    price: 'all',
+                    rating: 0,
+                    sort: 'popular'
+                  })}
+                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                >
+                  Clear all
+                </Button>
+              </div>
+              <FiltersSidebar />
+            </div>
           </div>
 
           {/* Mobile Filters Overlay */}
           {mobileFiltersOpen && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 lg:hidden">
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 lg:hidden">
               <div 
                 ref={filtersRef}
-                className="absolute left-0 top-0 h-full w-80 max-w-[90vw] bg-white dark:bg-gray-900 shadow-xl overflow-y-auto"
+                className="absolute left-0 top-0 h-full w-80 max-w-[90vw] bg-white/95 backdrop-blur-sm shadow-2xl overflow-y-auto"
               >
-                <FiltersSidebar />
+                <div className="sticky top-0 bg-white/95 backdrop-blur-sm border-b border-gray-200 p-6">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-2xl font-bold text-gray-900">Filters</h2>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setMobileFiltersOpen(false)}
+                      className="p-2 hover:bg-gray-100 rounded-xl"
+                    >
+                      <X className="w-5 h-5 text-gray-700" />
+                    </Button>
+                  </div>
+                </div>
+                <div className="p-6">
+                  <FiltersSidebar />
+                </div>
               </div>
             </div>
           )}
@@ -1171,14 +990,13 @@ export default function CoursesPage() {
           {/* Courses Grid */}
           <div className="flex-1">
             {/* Controls */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-12">
               <div>
-                <h2 className="text-xl font-semibold mb-1">
-                  {debouncedSearch ? `Search results for "${debouncedSearch}"` : 'All Courses'}
+                <h2 className="text-3xl font-bold mb-2 bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent">
+                  {debouncedSearch ? `"${debouncedSearch}"` : 'All Courses'}
                 </h2>
-                <p className="text-gray-500 text-sm">
-                  {courses.length} of {pagination.total} courses
-                  {activeFiltersCount > 0 && ` • ${activeFiltersCount} filter${activeFiltersCount > 1 ? 's' : ''} active`}
+                <p className="text-gray-500 text-lg">
+                  {sortedCourses.length} courses available
                 </p>
               </div>
               
@@ -1186,211 +1004,93 @@ export default function CoursesPage() {
                 {/* Mobile Filters Button */}
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="lg"
                   onClick={() => setMobileFiltersOpen(true)}
-                  className="rounded-lg border-gray-300 dark:border-gray-700 lg:hidden"
+                  className="rounded-xl border-white/30 bg-white/50 backdrop-blur-sm lg:hidden hover:bg-white"
                 >
-                  <Filter className="w-4 h-4 mr-2" />
+                  <Filter className="w-5 h-5 mr-2" />
                   Filters
-                  {activeFiltersCount > 0 && (
-                    <span className="ml-2 bg-black text-white dark:bg-white dark:text-black rounded-full w-5 h-5 text-xs flex items-center justify-center">
-                      {activeFiltersCount}
-                    </span>
-                  )}
                 </Button>
 
                 {/* View Toggle */}
-                <div className="flex bg-gray-100 dark:bg-gray-900 rounded-lg p-1">
+                <div className="flex bg-white/50 backdrop-blur-sm rounded-xl p-1 border border-white/30">
                   <Button
                     variant={viewMode === 'grid' ? 'default' : 'ghost'}
                     size="sm"
                     onClick={() => setViewMode('grid')}
-                    className="rounded-md h-9 px-3"
+                    className="rounded-lg h-10 px-4"
                   >
-                    <Grid className="w-4 h-4" />
+                    <Grid className="w-5 h-5" />
                   </Button>
                   <Button
                     variant={viewMode === 'list' ? 'default' : 'ghost'}
                     size="sm"
                     onClick={() => setViewMode('list')}
-                    className="rounded-md h-9 px-3"
+                    className="rounded-lg h-10 px-4"
                   >
-                    <List className="w-4 h-4" />
+                    <List className="w-5 h-5" />
                   </Button>
                 </div>
               </div>
             </div>
 
             {/* Courses Grid */}
-            {error && !loading ? (
-              <ErrorDisplay />
-            ) : loading && courses.length === 0 ? (
-              <div className={`grid gap-6 ${
-                viewMode === 'grid' 
-                  ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' 
-                  : 'grid-cols-1'
-              }`}>
+            {loading && courses.length === 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
                 {Array.from({ length: 6 }).map((_, index) => (
                   <CourseSkeleton key={index} />
                 ))}
               </div>
             ) : sortedCourses.length === 0 ? (
-              <div className="text-center py-16">
-                <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-gray-100 dark:bg-gray-900 mb-6">
-                  <BookOpen className="w-10 h-10 text-gray-400" />
+              <div className="text-center py-20">
+                <div className="inline-flex items-center justify-center w-24 h-24 rounded-3xl bg-gradient-to-br from-red-50 to-pink-50 mb-8">
+                  <Search className="w-12 h-12 text-red-600" />
                 </div>
-                <h3 className="text-xl font-semibold mb-2">No courses found</h3>
-                <p className="text-gray-500 mb-6 max-w-sm mx-auto">
-                  Try adjusting your search or filters to find what you're looking for
+                <h3 className="text-2xl font-bold mb-4">No courses found</h3>
+                <p className="text-gray-500 mb-8 max-w-sm mx-auto">
+                  Try adjusting your search or filters
                 </p>
-                <div className="flex justify-center gap-3">
-                  <Button onClick={clearFilters} variant="outline" className="rounded-lg">
-                    Clear filters
-                  </Button>
-                  <Button onClick={() => setSearchQuery('')} variant="ghost" className="rounded-lg">
-                    Clear search
-                  </Button>
-                </div>
+                <Button 
+                  onClick={() => {
+                    setSearchQuery('')
+                    setFilters({
+                      category: [],
+                      level: [],
+                      price: 'all',
+                      rating: 0,
+                      sort: 'popular'
+                    })
+                  }}
+                  className="rounded-xl bg-gradient-to-r from-red-600 to-orange-500 text-white"
+                >
+                  Clear filters
+                </Button>
               </div>
             ) : (
               <>
-                <div className={`grid gap-6 ${
-                  viewMode === 'grid' 
-                    ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' 
-                    : 'grid-cols-1'
-                }`}>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
                   {sortedCourses.map((course) => (
-                    <Card 
-                      key={course._id} 
-                      className="group relative rounded-xl overflow-hidden hover:shadow-xl transition-all duration-300 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 cursor-pointer hover:border-gray-300 dark:hover:border-gray-700 hover:-translate-y-1"
-                      onClick={(e) => {
-                        // Don't navigate if clicking on a button or favorite icon
-                        const target = e.target as HTMLElement;
-                        const isButtonClick = target.closest('button');
-                        if (!isButtonClick) {
-                          navigateToCourse(course);
-                        }
-                      }}
-                    >
-                      {/* Course Thumbnail */}
-                      <div className="relative h-48 bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-800 dark:to-gray-700 overflow-hidden">
-                        <img
-                          src={course.thumbnail?.url || '/api/placeholder/400/250'}
-                          alt={course.title}
-                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                          loading="lazy"
-                          onError={(e) => {
-                            const target = e.target as HTMLImageElement
-                            target.src = '/api/placeholder/400/250'
-                          }}
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                        
-                        {/* Badges */}
-                        <div className="absolute top-3 left-3 flex flex-wrap gap-2">
-                          <Badge className={`rounded-lg ${getLevelColor(course.level)} border shadow-sm backdrop-blur-sm`}>
-                            {course.level}
-                          </Badge>
-                          <Badge className={`rounded-lg ${getCategoryColor(course.category)} border shadow-sm backdrop-blur-sm`}>
-                            {course.category}
-                          </Badge>
-                        </div>
-                        
-                        {/* Price Badge */}
-                        <div className="absolute top-3 right-3">
-                          {course.isFree ? (
-                            <Badge className="rounded-lg bg-gradient-to-r from-green-500 to-emerald-500 text-white border-0 shadow-lg backdrop-blur-sm">
-                              Free
-                            </Badge>
-                          ) : (
-                            <Badge className="rounded-lg bg-gradient-to-r from-purple-500 to-pink-500 text-white border-0 shadow-lg backdrop-blur-sm">
-                              ${course.price}
-                            </Badge>
-                          )}
-                        </div>
-                        
-                        {/* Featured Badge */}
-                        {course.isFeatured && (
-                          <div className="absolute bottom-3 left-3">
-                            <Badge className="rounded-lg bg-gradient-to-r from-yellow-500 to-amber-500 text-white border-0 shadow-lg backdrop-blur-sm">
-                              <TrendingIcon className="w-3 h-3 mr-1" />
-                              Featured
-                            </Badge>
-                          </div>
-                        )}
-                      </div>
-                      
-                      <CardHeader className="pb-4 px-5 pt-5">
-                        <CardTitle className="text-lg font-bold mb-2 line-clamp-2 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors">
-                          {course.title}
-                        </CardTitle>
-                        <CardDescription className="line-clamp-2 text-gray-600 dark:text-gray-400 text-sm">
-                          {course.shortDescription}
-                        </CardDescription>
-                      </CardHeader>
-                      
-                      <CardContent className="pb-5 px-5">
-                        {/* Instructor Info */}
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="flex items-center space-x-2">
-                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-200 to-pink-200 dark:from-purple-900 dark:to-pink-900 flex items-center justify-center overflow-hidden ring-2 ring-white dark:ring-gray-800">
-                              <img
-                                src={course.instructor.avatar || '/default-avatar.png'}
-                                alt={course.instructor.username}
-                                className="w-full h-full object-cover"
-                                onError={(e) => {
-                                  const target = e.target as HTMLImageElement
-                                  target.src = '/default-avatar.png'
-                                }}
-                              />
-                            </div>
-                            <span className="text-sm font-semibold">
-                              {course.instructor.firstName} {course.instructor.lastName.charAt(0)}.
-                            </span>
-                          </div>
-                          
-                          {/* Rating */}
-                          <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-800/50 px-2 py-1 rounded-lg">
-                            <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                            <span className="text-sm font-semibold">
-                              {course.averageRating > 0 ? course.averageRating.toFixed(1) : 'New'}
-                            </span>
-                          </div>
-                        </div>
-                        
-                        {/* Enrollment Button */}
-                        {getEnrollmentButton(course)}
-                      </CardContent>
-                    </Card>
+                    <CourseCard key={course._id} course={course} />
                   ))}
                 </div>
 
                 {/* Load More */}
-                {pagination.hasMore && !error && (
-                  <div ref={observerTarget} className="flex justify-center mt-12">
+                {pagination.hasMore && (
+                  <div ref={observerTarget} className="flex justify-center mt-20">
                     {loadingMore ? (
-                      <div className="flex items-center space-x-3 px-6 py-3 rounded-lg bg-gray-100 dark:bg-gray-900">
-                        <Loader2 className="w-5 h-5 animate-spin text-gray-500" />
-                        <span className="text-sm text-gray-500">Loading more courses...</span>
+                      <div className="flex items-center space-x-3 px-8 py-4 rounded-2xl bg-white/80 backdrop-blur-sm border border-white/30">
+                        <Loader2 className="w-6 h-6 animate-spin text-gray-500" />
+                        <span className="text-lg text-gray-500">Loading more...</span>
                       </div>
                     ) : (
                       <Button 
                         onClick={loadMoreCourses}
-                        variant="outline"
-                        className="rounded-lg border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900 px-8 py-3"
+                        className="rounded-2xl bg-gradient-to-r from-red-600 to-orange-500 text-white px-10 py-6 text-lg shadow-xl hover:shadow-2xl transition-all"
                       >
-                        <DownloadCloud className="w-5 h-5 mr-2" />
+                        <Sparkles className="w-6 h-6 mr-3" />
                         Load More Courses
                       </Button>
                     )}
-                  </div>
-                )}
-                
-                {!pagination.hasMore && courses.length > 0 && !error && (
-                  <div className="text-center mt-12 py-8 border-t border-gray-200 dark:border-gray-800">
-                    <p className="text-gray-500">
-                      You've reached the end • {pagination.total} courses
-                    </p>
                   </div>
                 )}
               </>
@@ -1411,6 +1111,16 @@ export default function CoursesPage() {
           onSuccess={handlePaymentSuccess}
         />
       )}
+
+      <style jsx global>{`
+        @keyframes float {
+          0%, 100% { transform: translateY(0px); }
+          50% { transform: translateY(-10px); }
+        }
+        .animate-float {
+          animation: float 3s ease-in-out infinite;
+        }
+      `}</style>
     </div>
   )
 }

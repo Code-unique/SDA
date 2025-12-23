@@ -3,18 +3,30 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@clerk/nextjs'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { 
-  Plus, 
-  Trash2, 
-  X, 
-  Save, 
+import { Progress } from '@/components/ui/progress'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs'
+import {
+  Plus,
+  Trash2,
+  X,
+  Save,
   BookOpen,
   Video,
   Image,
@@ -28,10 +40,41 @@ import {
   RefreshCw,
   HardDrive,
   Zap,
-  Shield
+  Shield,
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  DollarSign,
+  Settings,
+  Upload,
+  Tag,
+  Target,
+  Award,
+  Layers,
+  Clock,
+  Eye,
+  EyeOff,
+  ArrowLeft,
+  Calendar,
+  Users,
+  Globe,
+  Lock,
+  Sparkles,
+  Rocket,
+  Palette,
+  GraduationCap,
+  FileVideo,
+  Film,
+  Bookmark,
+  Star,
+  TrendingUp,
+  Feather,
+  Gem,
+  Crown
 } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
 
-// ==================== TYPES & INTERFACES ====================
+// ==================== TYPES ====================
 interface S3Asset {
   key: string
   url: string
@@ -41,6 +84,7 @@ interface S3Asset {
   width?: number
   height?: number
   uploadedAt?: string
+  fileName?: string
 }
 
 interface UploadProgress {
@@ -58,6 +102,8 @@ interface UploadProgress {
     size?: number
     uploadedBytes?: number
     startTime?: number
+    lastBytes?: number
+    lastTime?: number
   }
 }
 
@@ -111,7 +157,7 @@ interface Module {
   order: number
 }
 
-// ==================== OPTIMIZED HELPER FUNCTIONS ====================
+// ==================== HELPER FUNCTIONS ====================
 const formatFileSize = (bytes: number): string => {
   if (bytes >= 1024 * 1024 * 1024) {
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
@@ -316,7 +362,653 @@ const UploadStatusCard = memo(({ upload, onCancel, onRetry }: {
 })
 UploadStatusCard.displayName = 'UploadStatusCard'
 
-// ==================== OPTIMIZED FILE UPLOAD AREA ====================
+// ==================== ENHANCED UPLOAD HOOK ====================
+const useEnhancedS3Upload = () => {
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress>({})
+  const [multipartUploads, setMultipartUploads] = useState<Record<string, MultipartUploadState>>({})
+  const [activeUploads, setActiveUploads] = useState<Set<string>>(new Set())
+  const abortControllers = useRef<Map<string, AbortController>>(new Map())
+  const uploadedBytesByPart = useRef<Record<string, Record<number, number>>>({})
+  const lastProgressUpdate = useRef<Record<string, { time: number; progress: number }>>({})
+  const { getToken } = useAuth()
+
+  // Store apiCall in ref to avoid dependency issues
+  const apiCallRef = useRef<(endpoint: string, body: any, signal?: AbortSignal) => Promise<any>>(
+    async (endpoint: string, body: any, signal?: AbortSignal) => {
+      console.log(`📤 API Call to ${endpoint}:`, { 
+        ...body, 
+        fileSize: body.fileSize ? `${formatFileSize(body.fileSize)}` : 'N/A' 
+      })
+      
+      try {
+        const token = await getToken()
+        
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(body),
+          signal
+        })
+
+        console.log(`📥 API Response status: ${response.status} for ${endpoint}`)
+
+        if (response.status === 401) {
+          const currentPath = window.location.pathname + window.location.search
+          window.location.href = `/sign-in?redirect_url=${encodeURIComponent(currentPath)}`
+          throw new Error('Authentication required')
+        }
+
+        if (response.status === 403) {
+          throw new Error('Admin access required')
+        }
+
+        if (!response.ok) {
+          let errorData
+          try {
+            errorData = await response.json()
+          } catch {
+            errorData = { error: `HTTP ${response.status}: ${response.statusText}` }
+          }
+          
+          console.error(`❌ API Error for ${endpoint}:`, errorData)
+          
+          if (response.status === 429) {
+            throw new Error('Upload limit reached. Please try again in 15 minutes.')
+          } else if (response.status === 400) {
+            throw new Error(errorData.error || 'Invalid request')
+          } else if (response.status === 500) {
+            throw new Error(errorData.error || 'Server error. Please try again or contact support.')
+          }
+          
+          throw new Error(errorData.error || errorData.details || `Upload failed: ${response.status}`)
+        }
+
+        const data = await response.json()
+        
+        if (!data.success && !data.uploadId && !data.presignedUrl) {
+          throw new Error(data.error || 'Request failed')
+        }
+        
+        console.log(`✅ API Success for ${endpoint}:`, data)
+        return data
+
+      } catch (error) {
+        console.error(`❌ Network/API error for ${endpoint}:`, error)
+        
+        if (error instanceof TypeError && error.message === 'Failed to fetch') {
+          throw new Error('Network error. Please check your internet connection and try again.')
+        }
+        
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          throw new Error('Upload cancelled')
+        }
+        
+        throw error
+      }
+    }
+  )
+
+  // Memoize uploadFile with useCallback to prevent infinite re-renders
+  const uploadFile = useCallback(async (
+    file: File,
+    type: 'thumbnail' | 'previewVideo' | 'lessonVideo' | 'moduleThumbnail',
+    identifier: string,
+    moduleIndex?: number
+  ): Promise<S3Asset> => {
+    const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024
+    if (file.size > MAX_FILE_SIZE) {
+      throw new Error(`File too large. Maximum size: 10GB. Your file: ${formatFileSize(file.size)}`)
+    }
+
+    const abortController = new AbortController()
+    abortControllers.current.set(identifier, abortController)
+    
+    const shouldUseMultipart = file.size > 100 * 1024 * 1024
+    const OPTIMAL_PART_SIZE = 25 * 1024 * 1024
+    const PART_SIZE = shouldUseMultipart ? OPTIMAL_PART_SIZE : file.size
+    
+    // Get concurrency limit directly
+    const getConcurrencyLimit = (): number => {
+      if (typeof navigator !== 'undefined' && 'connection' in navigator) {
+        const conn = (navigator as any).connection;
+        if (conn) {
+          const downlink = conn.downlink;
+          if (downlink > 50) return 8;
+          if (downlink > 20) return 6;
+          if (downlink > 5) return 4;
+        }
+      }
+      return 3;
+    }
+    const CONCURRENCY_LIMIT = getConcurrencyLimit()
+
+    try {
+      setActiveUploads(prev => new Set([...prev, identifier]))
+      
+      setUploadProgress(prev => ({
+        ...prev,
+        [identifier]: {
+          progress: 0,
+          fileName: file.name,
+          type,
+          status: 'initiating',
+          isMultipart: shouldUseMultipart,
+          size: file.size,
+          uploadedBytes: 0,
+          startTime: Date.now()
+        }
+      }))
+
+      let uploadId: string
+      let fileKey: string
+      let fileUrl: string
+
+      if (shouldUseMultipart) {
+        const initData = await apiCallRef.current('/api/admin/upload/initiate', {
+          fileName: file.name,
+          fileType: file.type,
+          folder: `${type}s`
+        }, abortController.signal)
+        uploadId = initData.uploadId
+        fileKey = initData.fileKey
+        fileUrl = initData.fileUrl
+
+        if (!uploadId || !fileKey) {
+          throw new Error('Failed to initiate multipart upload')
+        }
+
+        setUploadProgress(prev => ({
+          ...prev,
+          [identifier]: {
+            ...prev[identifier]!,
+            progress: 5,
+            status: 'generating-urls'
+          }
+        }))
+
+        const totalParts = Math.ceil(file.size / PART_SIZE)
+        const parts = Array.from({ length: totalParts }, (_, i) => ({
+          partNumber: i + 1,
+          start: i * PART_SIZE,
+          end: Math.min((i + 1) * PART_SIZE, file.size),
+          presignedUrl: undefined as string | undefined,
+          etag: undefined as string | undefined,
+          status: 'pending' as const,
+          progress: 0
+        }))
+
+        setUploadProgress(prev => ({
+          ...prev,
+          [identifier]: {
+            ...prev[identifier]!,
+            progress: 10,
+            status: 'uploading',
+            parts: totalParts,
+            currentPart: 1
+          }
+        }))
+
+        setMultipartUploads(prev => ({
+          ...prev,
+          [identifier]: {
+            uploadId,
+            fileKey,
+            fileUrl,
+            parts,
+            isUploading: true,
+            totalProgress: 10,
+            startTime: Date.now(),
+            totalBytes: file.size,
+            uploadedBytes: 0
+          }
+        }))
+
+        const bulkUrlData = await apiCallRef.current('/api/admin/upload/parts', {
+          fileKey,
+          uploadId,
+          totalParts
+        }, abortController.signal)
+        const presignedUrls = bulkUrlData.presignedUrls
+        
+        if (!presignedUrls || presignedUrls.length !== totalParts) {
+          throw new Error(`Failed to generate presigned URLs. Expected ${totalParts}, got ${presignedUrls?.length || 0}`)
+        }
+        
+        const partsWithUrls = parts.map((part, index) => ({
+          ...part,
+          presignedUrl: presignedUrls[index]
+        })).filter(part => part.presignedUrl !== undefined) as Array<{
+          partNumber: number;
+          start: number;
+          end: number;
+          presignedUrl: string;
+          etag?: string;
+          status: 'pending' | 'uploading' | 'completed' | 'error';
+          progress?: number;
+        }>
+
+        if (partsWithUrls.length !== totalParts) {
+          throw new Error(`Failed to generate presigned URLs for all parts. Expected ${totalParts}, got ${partsWithUrls.length}`)
+        }
+
+        setUploadProgress(prev => ({
+          ...prev,
+          [identifier]: {
+            ...prev[identifier]!,
+            progress: 15
+          }
+        }))
+
+        const uploadedParts: Array<{ ETag: string; PartNumber: number }> = []
+        uploadedBytesByPart.current[identifier] = {}
+
+        for (let i = 0; i < partsWithUrls.length; i += CONCURRENCY_LIMIT) {
+          const batch = partsWithUrls.slice(i, i + CONCURRENCY_LIMIT)
+          
+          if (abortController.signal.aborted) {
+            throw new Error('Upload cancelled')
+          }
+
+          batch.forEach(part => {
+            setMultipartUploads(prev => ({
+              ...prev,
+              [identifier]: {
+                ...prev[identifier]!,
+                parts: prev[identifier]!.parts.map(p => 
+                  p.partNumber === part.partNumber 
+                    ? { ...p, status: 'uploading' }
+                    : p
+                )
+              }
+            }))
+          })
+
+          const batchPromises = batch.map(async (part) => {
+            try {
+              const partSize = part.end - part.start;
+              const blob = file.slice(part.start, part.end);
+              
+              const result = await new Promise<{ ETag: string; PartNumber: number }>((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                const startTime = Date.now();
+                
+                xhr.upload.addEventListener('progress', (event) => {
+                  if (event.lengthComputable) {
+                    if (!uploadedBytesByPart.current[identifier]) {
+                      uploadedBytesByPart.current[identifier] = {};
+                    }
+                    uploadedBytesByPart.current[identifier][part.partNumber] = event.loaded;
+                    
+                    const partBytes = uploadedBytesByPart.current[identifier];
+                    const totalUploadedBytes = Object.values(partBytes).reduce((sum, bytes) => sum + bytes, 0);
+                    
+                    const uploadProgressValue = 15 + (totalUploadedBytes / file.size) * 80;
+                    
+                    const elapsedSeconds = (Date.now() - startTime) / 1000;
+                    const uploadSpeed = totalUploadedBytes / elapsedSeconds;
+                    
+                    const remainingBytes = file.size - totalUploadedBytes;
+                    const timeRemaining = uploadSpeed > 0 ? remainingBytes / uploadSpeed : 0;
+                    
+                    // Throttle progress updates
+                    const now = Date.now();
+                    const lastUpdate = lastProgressUpdate.current[identifier];
+                    const newProgress = Math.min(Math.round(uploadProgressValue), 95);
+                    
+                    if (!lastUpdate || now - lastUpdate.time > 100 || Math.abs(newProgress - lastUpdate.progress) > 1) {
+                      lastProgressUpdate.current[identifier] = { time: now, progress: newProgress };
+                      
+                      setUploadProgress(prev => {
+                        const current = prev[identifier];
+                        if (!current) return prev;
+                        
+                        return {
+                          ...prev,
+                          [identifier]: {
+                            ...current,
+                            progress: newProgress,
+                            currentPart: part.partNumber,
+                            uploadSpeed,
+                            timeRemaining,
+                            uploadedBytes: totalUploadedBytes
+                          }
+                        };
+                      });
+                    }
+                  }
+                });
+                
+                xhr.addEventListener('load', () => {
+                  if (xhr.status === 200) {
+                    const etag = xhr.getResponseHeader('etag') || 
+                                 xhr.getResponseHeader('ETag')?.replace(/"/g, '');
+                    
+                    if (!etag) {
+                      reject(new Error(`No ETag received for part ${part.partNumber}`));
+                      return;
+                    }
+                    
+                    if (uploadedBytesByPart.current[identifier]) {
+                      uploadedBytesByPart.current[identifier][part.partNumber] = partSize;
+                    }
+                    
+                    resolve({ ETag: etag, PartNumber: part.partNumber });
+                  } else {
+                    reject(new Error(`Part upload failed: ${xhr.status}`));
+                  }
+                });
+                
+                xhr.addEventListener('error', () => reject(new Error('Network error during part upload')));
+                xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
+                
+                xhr.open('PUT', part.presignedUrl);
+                xhr.setRequestHeader('Content-Type', file.type);
+                xhr.send(blob);
+              });
+              
+              setMultipartUploads(prev => ({
+                ...prev,
+                [identifier]: {
+                  ...prev[identifier]!,
+                  parts: prev[identifier]!.parts.map(p => 
+                    p.partNumber === part.partNumber 
+                      ? { ...p, status: 'completed', etag: result.ETag, progress: 100 }
+                      : p
+                  )
+                }
+              }))
+
+              return result
+            } catch (error) {
+              setMultipartUploads(prev => ({
+                ...prev,
+                [identifier]: {
+                  ...prev[identifier]!,
+                  parts: prev[identifier]!.parts.map(p => 
+                    p.partNumber === part.partNumber 
+                      ? { ...p, status: 'error' }
+                      : p
+                  )
+                }
+              }))
+              throw error
+            }
+          })
+
+          const batchResults = await Promise.all(batchPromises)
+          uploadedParts.push(...batchResults)
+        }
+
+        uploadedParts.sort((a, b) => a.PartNumber - b.PartNumber)
+
+        setUploadProgress(prev => ({
+          ...prev,
+          [identifier]: {
+            ...prev[identifier]!,
+            progress: 98,
+            status: 'processing'
+          }
+        }))
+
+        try {
+          const completeData = await apiCallRef.current('/api/admin/upload/complete', {
+            fileKey,
+            uploadId,
+            parts: uploadedParts
+          }, abortController.signal)
+          fileUrl = completeData.fileUrl || fileUrl
+        } catch (error) {
+          console.error('❌ Error completing multipart upload:', error)
+          try {
+            await apiCallRef.current('/api/admin/upload/abort', {
+              fileKey,
+              uploadId
+            }, abortController.signal)
+          } catch (abortError) {
+            console.warn('Failed to abort upload:', abortError)
+          }
+          throw error
+        }
+
+      } else {
+        const initData = await apiCallRef.current('/api/admin/upload', {
+          fileName: file.name,
+          fileType: file.type,
+          fileSize: file.size,
+          folder: `${type}s`
+        }, abortController.signal)
+
+        fileKey = initData.fileKey
+        fileUrl = initData.fileUrl
+        const { presignedUrl } = initData
+
+        if (!presignedUrl) {
+          throw new Error('No presigned URL received from server')
+        }
+
+        setUploadProgress(prev => ({
+          ...prev,
+          [identifier]: {
+            ...prev[identifier]!,
+            progress: 30,
+            status: 'uploading'
+          }
+        }))
+
+        await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest()
+          const startTime = Date.now()
+          
+          xhr.upload.addEventListener('progress', (event) => {
+            if (event.lengthComputable) {
+              const progress = 30 + (event.loaded / event.total) * 65
+              const elapsedSeconds = (Date.now() - startTime) / 1000
+              const uploadSpeed = event.loaded / elapsedSeconds
+              
+              // Throttle progress updates
+              const now = Date.now();
+              const lastUpdate = lastProgressUpdate.current[identifier];
+              const newProgress = Math.round(progress);
+              
+              if (!lastUpdate || now - lastUpdate.time > 100 || Math.abs(newProgress - lastUpdate.progress) > 1) {
+                lastProgressUpdate.current[identifier] = { time: now, progress: newProgress };
+                
+                setUploadProgress(prev => {
+                  const current = prev[identifier];
+                  if (!current) return prev;
+                  
+                  return {
+                    ...prev,
+                    [identifier]: {
+                      ...current,
+                      progress: newProgress,
+                      uploadSpeed,
+                      timeRemaining: uploadSpeed > 0 
+                        ? (event.total - event.loaded) / uploadSpeed 
+                        : 0,
+                      uploadedBytes: event.loaded
+                    }
+                  };
+                });
+              }
+            }
+          })
+
+          xhr.addEventListener('load', () => {
+            if (xhr.status === 200) {
+              resolve()
+            } else {
+              reject(new Error(`Upload failed with status: ${xhr.status}`))
+            }
+          })
+
+          xhr.addEventListener('error', () => {
+            reject(new Error('Network error during upload'))
+          })
+
+          xhr.addEventListener('abort', () => {
+            reject(new Error('Upload cancelled'))
+          })
+
+          xhr.open('PUT', presignedUrl)
+          xhr.setRequestHeader('Content-Type', file.type)
+          xhr.send(file)
+        })
+      }
+
+      setUploadProgress(prev => ({
+        ...prev,
+        [identifier]: {
+          ...prev[identifier]!,
+          progress: 100,
+          status: 'completed'
+        }
+      }))
+
+      setTimeout(() => {
+        setUploadProgress(prev => {
+          const newProgress = { ...prev }
+          delete newProgress[identifier]
+          return newProgress
+        })
+        setMultipartUploads(prev => {
+          const newUploads = { ...prev }
+          delete newUploads[identifier]
+          return newUploads
+        })
+        setActiveUploads(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(identifier)
+          return newSet
+        })
+        delete uploadedBytesByPart.current[identifier]
+        delete lastProgressUpdate.current[identifier]
+        abortControllers.current.delete(identifier)
+      }, 3000)
+
+      return {
+        key: fileKey!,
+        url: fileUrl!,
+        size: file.size,
+        type: type === 'thumbnail' || type === 'moduleThumbnail' ? 'image' : 'video',
+        duration: type.includes('video') ? 0 : undefined,
+        uploadedAt: new Date().toISOString(),
+        fileName: file.name
+      }
+
+    } catch (error) {
+      console.error('❌ Upload error:', error)
+      
+      setUploadProgress(prev => ({
+        ...prev,
+        [identifier]: {
+          ...prev[identifier]!,
+          status: 'error',
+          error: error instanceof Error ? error.message : 'Upload failed'
+        }
+      }))
+
+      setActiveUploads(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(identifier)
+        return newSet
+      })
+      
+      abortControllers.current.delete(identifier)
+      delete uploadedBytesByPart.current[identifier]
+      delete lastProgressUpdate.current[identifier]
+      
+      throw error
+    }
+  }, []) // Empty dependency array - apiCallRef is a ref, other dependencies are refs
+
+  // Memoize cancelUpload with useCallback
+  const cancelUpload = useCallback(async (identifier: string) => {
+    const controller = abortControllers.current.get(identifier)
+    if (controller) {
+      controller.abort()
+    }
+
+    const upload = uploadProgress[identifier]
+    const multipartState = multipartUploads[identifier]
+    
+    if (upload?.isMultipart && multipartState?.uploadId && multipartState?.fileKey) {
+      try {
+        await apiCallRef.current('/api/admin/upload/abort', {
+          fileKey: multipartState.fileKey,
+          uploadId: multipartState.uploadId
+        })
+      } catch (error) {
+        console.warn('Failed to abort multipart upload on S3:', error)
+      }
+    }
+
+    setUploadProgress(prev => ({
+      ...prev,
+      [identifier]: {
+        ...prev[identifier]!,
+        status: 'cancelled',
+        progress: 0
+      }
+    }))
+
+    setActiveUploads(prev => {
+      const newSet = new Set(prev)
+      newSet.delete(identifier)
+      return newSet
+    })
+
+    setTimeout(() => {
+      setUploadProgress(prev => {
+        const newProgress = { ...prev }
+        delete newProgress[identifier]
+        return newProgress
+      })
+      setMultipartUploads(prev => {
+        const newUploads = { ...prev }
+        delete newUploads[identifier]
+        return newUploads
+      })
+      delete uploadedBytesByPart.current[identifier]
+      delete lastProgressUpdate.current[identifier]
+      abortControllers.current.delete(identifier)
+    }, 1000)
+  }, [uploadProgress, multipartUploads]) // Only depend on state values
+
+  // Memoize retryUpload with useCallback
+  const retryUpload = useCallback(async (
+    file: File,
+    type: 'thumbnail' | 'previewVideo' | 'lessonVideo' | 'moduleThumbnail',
+    identifier: string,
+    moduleIndex?: number
+  ) => {
+    setUploadProgress(prev => {
+      const newProgress = { ...prev }
+      delete newProgress[identifier]
+      return newProgress
+    })
+    
+    delete uploadedBytesByPart.current[identifier]
+    delete lastProgressUpdate.current[identifier]
+    
+    return uploadFile(file, type, identifier, moduleIndex)
+  }, [uploadFile])
+
+  // Return memoized object to prevent unnecessary re-renders
+  return useMemo(() => ({ 
+    uploadProgress, 
+    uploadFile, 
+    cancelUpload, 
+    retryUpload, 
+    multipartUploads,
+    activeUploads: Array.from(activeUploads)
+  }), [uploadProgress, uploadFile, cancelUpload, retryUpload, multipartUploads, activeUploads])
+}
+
+// ==================== FILE UPLOAD AREA ====================
 const FileUploadArea = memo(({
   type,
   label,
@@ -348,9 +1040,9 @@ const FileUploadArea = memo(({
   const [dragOver, setDragOver] = useState(false)
 
   const identifier = useMemo(() => 
-    type === 'lessonVideo' 
+    type === 'lessonVideo' && moduleIndex !== undefined && chapterIndex !== undefined && lessonIndex !== undefined
       ? `lesson-${moduleIndex}-${chapterIndex}-${lessonIndex}` 
-      : type === 'moduleThumbnail' 
+      : type === 'moduleThumbnail' && moduleIndex !== undefined
         ? `module-${moduleIndex}-thumbnail` 
         : type
   , [type, moduleIndex, chapterIndex, lessonIndex])
@@ -376,7 +1068,6 @@ const FileUploadArea = memo(({
     const syntheticEvent = {
       target: { files: dataTransfer.files }
     } as React.ChangeEvent<HTMLInputElement>
-    
     onFileChange(syntheticEvent)
   }, [onFileChange])
 
@@ -393,7 +1084,6 @@ const FileUploadArea = memo(({
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     setDragOver(false)
-    
     const file = e.dataTransfer.files[0]
     if (file && acceptedFiles.split(',').some(ext => file.type.includes(ext.replace('*', '')))) {
       handleFileSelect(file)
@@ -401,17 +1091,21 @@ const FileUploadArea = memo(({
   }, [acceptedFiles, handleFileSelect])
 
   return (
-    <div className="space-y-2 sm:space-y-4">
-      <div className="flex items-center gap-1.5 sm:gap-2">
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
         {isVideo ? (
-          <Video className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-600 flex-shrink-0" />
+          <div className="p-2 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 text-white">
+            <Film className="w-5 h-5" />
+          </div>
         ) : (
-          <Image className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-600 flex-shrink-0" />
+          <div className="p-2 rounded-lg bg-gradient-to-r from-purple-500 to-pink-500 text-white">
+            <Image className="w-5 h-5" />
+          </div>
         )}
-        <span className="text-xs sm:text-sm font-semibold truncate">{label}</span>
-        <span className="text-[10px] sm:text-xs font-normal text-slate-500 flex-shrink-0 whitespace-nowrap">
-          ({maxSize})
-        </span>
+        <div>
+          <span className="font-semibold text-slate-900 dark:text-white">{label}</span>
+          <span className="text-sm text-slate-500 dark:text-slate-400 ml-2">({maxSize})</span>
+        </div>
       </div>
       
       <input
@@ -424,78 +1118,96 @@ const FileUploadArea = memo(({
       />
       
       <div 
-        className={`border-2 border-dashed rounded-xl sm:rounded-2xl p-3 sm:p-4 text-center cursor-pointer transition-all duration-200 min-h-[110px] sm:min-h-[140px] flex items-center justify-center ${
+        className={`relative rounded-2xl p-6 text-center cursor-pointer transition-all duration-300 min-h-[180px] flex flex-col items-center justify-center border-2 ${
           dragOver 
-            ? 'border-rose-400 bg-rose-50 dark:border-rose-500 dark:bg-rose-900/20' 
+            ? 'border-emerald-400 bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20' 
             : isUploading
-              ? 'border-blue-300 bg-blue-50 dark:border-blue-700 dark:bg-blue-900/20 cursor-not-allowed' 
-              : 'border-slate-300 dark:border-slate-600 hover:border-rose-400 hover:bg-rose-50/50 dark:hover:border-rose-500'
+              ? 'border-blue-300 bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 cursor-not-allowed' 
+              : 'border-dashed border-slate-300 dark:border-slate-700 bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900/50 dark:to-slate-800/50 hover:border-emerald-400 hover:bg-gradient-to-br hover:from-emerald-50/50 hover:to-teal-50/50'
         }`}
         onClick={() => !isUploading && inputRef.current?.click()}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        {currentFile ? (
-          <div className="space-y-2 sm:space-y-3 w-full">
-            <div className="relative mx-auto w-20 h-20 sm:w-32 sm:h-32">
+        {currentFile && !isUploading ? (
+          <div className="space-y-4 w-full">
+            <div className="relative mx-auto w-40 h-40 rounded-xl overflow-hidden shadow-lg">
               {isVideo ? (
                 <>
-                  <div className="w-full h-full bg-gradient-to-br from-slate-800 to-slate-900 rounded-lg sm:rounded-xl flex items-center justify-center">
-                    <Play className="w-5 h-5 sm:w-8 sm:h-8 text-white" />
+                  <div className="absolute inset-0 bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
+                    <Play className="w-10 h-10 text-white" />
                   </div>
-                  <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[10px] sm:text-xs px-1 sm:px-2 py-0.5 rounded">
+                  <div className="absolute bottom-3 right-3 bg-gradient-to-r from-blue-600 to-cyan-600 text-white text-xs px-3 py-1.5 rounded-full shadow-lg">
                     Video
                   </div>
                 </>
               ) : (
-                <img
-                  src={currentFile.url}
-                  alt="Preview"
-                  className="w-full h-full object-cover rounded-lg sm:rounded-xl"
-                  loading="lazy"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = `data:image/svg+xml,${encodeURIComponent('<svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="200" height="200" fill="%23F3F4F6"/><text x="50%" y="50%" font-family="Arial" font-size="12" fill="%23999" text-anchor="middle" dy=".3em">Image Uploaded</text></svg>')}`
-                  }}
-                />
+                <>
+                  <img
+                    src={currentFile.url}
+                    alt="Preview"
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = `data:image/svg+xml,${encodeURIComponent('<svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="200" height="200" fill="%23F3F4F6"/><text x="50%" y="50%" font-family="Arial" font-size="12" fill="%23999" text-anchor="middle" dy=".3em">Image Uploaded</text></svg>')}`
+                    }}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
+                  <div className="absolute bottom-3 right-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white text-xs px-3 py-1.5 rounded-full shadow-lg">
+                    Image
+                  </div>
+                </>
               )}
             </div>
-            <div className="px-1">
-              <p className="text-xs sm:text-sm font-medium truncate px-2">
-                {currentFile.url.split('/').pop()?.substring(0, 20)}...
+            <div className="px-4">
+              <p className="font-medium text-slate-900 dark:text-white truncate">
+                {currentFile.fileName || currentFile.url.split('/').pop()?.substring(0, 25)}...
               </p>
-              <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5">
+              <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
                 {formatFileSize(currentFile.size)}
                 {currentFile.duration && ` • ${currentFile.duration}s`}
-              </p>
-              <p className="text-[10px] sm:text-xs text-slate-400 mt-0.5">
-                Click to change file
               </p>
             </div>
           </div>
         ) : (
-          <div className="space-y-2 sm:space-y-3 px-1">
-            <div className="p-2 sm:p-3 rounded-full bg-gradient-to-r from-rose-100 to-pink-100 dark:from-rose-900/30 dark:to-pink-900/30 w-10 h-10 sm:w-12 sm:h-12 mx-auto flex items-center justify-center">
-              {isVideo ? (
-                <Video className="w-4 h-4 sm:w-5 sm:h-5 text-rose-600 dark:text-rose-400" />
-              ) : (
-                <Image className="w-4 h-4 sm:w-5 sm:h-5 text-rose-600 dark:text-rose-400" />
-              )}
+          <div className="space-y-4 px-4">
+            <div className="relative mx-auto">
+              <div className={`p-4 rounded-2xl shadow-lg ${isUploading ? 'bg-gradient-to-r from-blue-500 to-cyan-500' : 'bg-gradient-to-r from-emerald-500 to-teal-500'}`}>
+                {isUploading ? (
+                  <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : isVideo ? (
+                  <Film className="w-8 h-8 text-white" />
+                ) : (
+                  <Image className="w-8 h-8 text-white" />
+                )}
+              </div>
             </div>
-            <div className="space-y-1">
-              <p className="font-semibold text-xs sm:text-sm">
-                {isUploading ? 'Uploading...' : `Upload ${isVideo ? 'Video' : 'Image'}`}
+            <div className="space-y-2">
+              <p className="font-semibold text-slate-900 dark:text-white">
+                {isUploading ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span>Uploading...</span>
+                    {upload?.progress && (
+                      <span className="text-sm font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
+                        {Math.round(upload.progress)}%
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  `Upload ${isVideo ? 'Video' : 'Image'}`
+                )}
               </p>
-              <p className="text-[10px] sm:text-xs text-slate-500">
-                {dragOver ? 'Drop file here' : 'Click to browse'}
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                {dragOver ? 'Drop file here' : 'Click to browse or drag & drop'}
               </p>
-              <p className="text-[10px] text-slate-400 mt-1 hidden sm:block">
-                {acceptedFiles.split(',').join(', ')}
+              <p className="text-xs text-slate-500 mt-2">
+                {isVideo ? 'MP4, WebM, MOV up to 10GB' : 'JPG, PNG, WebP up to 20MB'}
               </p>
               {isVideo && (
-                <div className="mt-1 inline-flex items-center gap-0.5 text-[10px] sm:text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full max-w-full">
-                  <Shield className="w-2.5 h-2.5 sm:w-3 sm:h-3 flex-shrink-0" />
-                  <span className="truncate">10GB supported</span>
+                <div className="mt-1 inline-flex items-center gap-0.5 text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-full max-w-full">
+                  <Shield className="w-3 h-3 flex-shrink-0" />
+                  <span className="truncate">10GB multipart upload supported</span>
                 </div>
               )}
             </div>
@@ -516,694 +1228,262 @@ const FileUploadArea = memo(({
 })
 FileUploadArea.displayName = 'FileUploadArea'
 
-// ==================== OPTIMIZED UPLOAD HOOK ====================
-const useEnhancedS3Upload = () => {
-  const [uploadProgress, setUploadProgress] = useState<UploadProgress>({})
-  const [multipartUploads, setMultipartUploads] = useState<Record<string, MultipartUploadState>>({})
-  const [activeUploads, setActiveUploads] = useState<Set<string>>(new Set())
-  const abortControllers = useRef<Map<string, AbortController>>(new Map())
-  const uploadedBytesByPart = useRef<Record<string, Record<number, number>>>({})
+// ==================== NEW COMPONENTS ====================
+const SectionHeader = memo(({ 
+  title, 
+  description, 
+  icon: Icon,
+  color = 'from-emerald-500 to-teal-500'
+}: { 
+  title: string
+  description: string
+  icon: React.ElementType
+  color?: string
+}) => (
+  <div className="flex items-center gap-4 mb-6">
+    <div className={`p-3 rounded-xl bg-gradient-to-r ${color} text-white shadow-lg`}>
+      <Icon className="w-6 h-6" />
+    </div>
+    <div>
+      <h2 className="text-xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">{title}</h2>
+      <p className="text-sm text-slate-600 dark:text-slate-400">{description}</p>
+    </div>
+  </div>
+))
+SectionHeader.displayName = 'SectionHeader'
 
-  // Helper to get optimal concurrency based on connection
-  const getConcurrencyLimit = useCallback((): number => {
-    if (typeof navigator !== 'undefined' && 'connection' in navigator) {
-      const conn = (navigator as any).connection;
-      if (conn) {
-        const downlink = conn.downlink; // in Mbps
-        if (downlink > 50) return 8;
-        if (downlink > 20) return 6;
-        if (downlink > 5) return 4;
-      }
-    }
-    return 3;
-  }, []);
+const FormCard = memo(({ 
+  children, 
+  className = '' 
+}: { 
+  children: React.ReactNode
+  className?: string
+}) => (
+  <Card className={`bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm border border-slate-200/50 dark:border-slate-700/50 shadow-xl rounded-2xl overflow-hidden ${className}`}>
+    {children}
+  </Card>
+))
+FormCard.displayName = 'FormCard'
 
-  // API Call Helper with enhanced error handling
-  const apiCall = useCallback(async (endpoint: string, body: any, signal?: AbortSignal) => {
-    console.log(`📤 API Call to ${endpoint}:`, { 
-      ...body, 
-      fileSize: body.fileSize ? `${formatFileSize(body.fileSize)}` : 'N/A' 
-    })
-    
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-        signal
-      })
+const FormGroup = memo(({ 
+  label, 
+  children,
+  required = false,
+  icon: Icon,
+  disabled = false
+}: { 
+  label: string
+  children: React.ReactNode
+  required?: boolean
+  icon?: React.ElementType
+  disabled?: boolean
+}) => (
+  <div className="space-y-3">
+    <label className={`font-semibold text-slate-900 dark:text-white flex items-center gap-2 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
+      {Icon && <Icon className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />}
+      {label}
+      {required && <span className="text-rose-500">*</span>}
+    </label>
+    <div className={disabled ? 'opacity-50 cursor-not-allowed' : ''}>
+      {children}
+    </div>
+  </div>
+))
+FormGroup.displayName = 'FormGroup'
 
-      console.log(`📥 API Response status: ${response.status} for ${endpoint}`)
+const UploadStatsPanel = memo(({ 
+  uploadStats,
+  activeUploads,
+  uploadProgress
+}: { 
+  uploadStats: { totalFiles: number, totalSize: number, completedFiles: number }
+  activeUploads: string[]
+  uploadProgress: UploadProgress
+}) => (
+  <FormCard>
+    <CardHeader>
+      <SectionHeader 
+        title="Upload Statistics" 
+        description="Current upload progress"
+        icon={CloudUpload}
+        color="from-blue-500 to-cyan-500"
+      />
+    </CardHeader>
+    <CardContent className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 p-2.5 rounded-lg">
+          <p className="text-[10px] sm:text-xs text-slate-600 dark:text-slate-400">Total Files</p>
+          <p className="text-lg sm:text-xl font-bold text-blue-600 dark:text-blue-400">
+            {uploadStats.totalFiles}
+          </p>
+        </div>
+        <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 p-2.5 rounded-lg">
+          <p className="text-[10px] sm:text-xs text-slate-600 dark:text-slate-400">Completed</p>
+          <p className="text-lg sm:text-xl font-bold text-green-600 dark:text-green-400">
+            {uploadStats.completedFiles}
+          </p>
+        </div>
+      </div>
+      <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 p-2.5 rounded-lg">
+        <p className="text-[10px] sm:text-xs text-slate-600 dark:text-slate-400">Total Size</p>
+        <p className="text-sm sm:text-base font-bold text-purple-600 dark:text-purple-400">
+          {formatFileSize(uploadStats.totalSize)}
+        </p>
+      </div>
+      {activeUploads.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+          <p className="text-xs sm:text-sm font-medium mb-1.5">Active Uploads</p>
+          <div className="space-y-1.5">
+            {activeUploads.map(identifier => {
+              const upload = uploadProgress[identifier]
+              return upload ? (
+                <div key={identifier} className="flex items-center justify-between text-xs">
+                  <span className="truncate max-w-[100px] sm:max-w-[120px]">{upload.fileName}</span>
+                  <span className="font-medium">{upload.progress}%</span>
+                </div>
+              ) : null
+            })}
+          </div>
+        </div>
+      )}
+    </CardContent>
+  </FormCard>
+))
+UploadStatsPanel.displayName = 'UploadStatsPanel'
 
-      if (response.status === 401) {
-        const failedRequest = { endpoint, body, timestamp: Date.now() }
-        localStorage.setItem('failed_upload_request', JSON.stringify(failedRequest))
-        
-        const currentPath = window.location.pathname + window.location.search
-        window.location.href = `/sign-in?redirect_url=${encodeURIComponent(currentPath)}`
-        
-        throw new Error('Authentication required. Redirecting to sign-in...')
-      }
+const StickyActions = memo(({ 
+  loading, 
+  activeUploads, 
+  networkStatus, 
+  hasThumbnail,
+  onSubmit,
+  canSubmit
+}: { 
+  loading: boolean
+  activeUploads: string[]
+  networkStatus: string
+  hasThumbnail: boolean
+  onSubmit: (e: React.MouseEvent<HTMLButtonElement>) => void
+  canSubmit: boolean
+}) => {
+  const handleSubmit = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    onSubmit(e)
+  }
 
-      if (response.status === 403) {
-        throw new Error('Admin access required. Please contact support if you believe this is an error.')
-      }
-
-      if (!response.ok) {
-        let errorData
-        try {
-          errorData = await response.json()
-        } catch {
-          errorData = { error: `HTTP ${response.status}: ${response.statusText}` }
-        }
-        
-        console.error(`❌ API Error for ${endpoint}:`, errorData)
-        
-        if (response.status === 429) {
-          throw new Error('Upload limit reached. Please try again in 15 minutes.')
-        } else if (response.status === 400) {
-          throw new Error(errorData.error || 'Invalid request. Please check your file and try again.')
-        } else if (response.status === 500) {
-          throw new Error('Server error. Please try again or contact support.')
-        }
-        
-        throw new Error(errorData.error || errorData.details || `Upload failed: ${response.status}`)
-      }
-
-      const data = await response.json()
-      
-      if (!data.success && !data.uploadId && !data.presignedUrl) {
-        throw new Error(data.error || 'Request failed')
-      }
-      
-      console.log(`✅ API Success for ${endpoint}:`, data)
-      return data
-
-    } catch (error) {
-      console.error(`❌ Network/API error for ${endpoint}:`, error)
-      
-      if (error instanceof TypeError && error.message === 'Failed to fetch') {
-        throw new Error('Network error. Please check your internet connection and try again.')
-      }
-      
-      if (error instanceof DOMException && error.name === 'AbortError') {
-        throw new Error('Upload cancelled')
-      }
-      
-      throw error
-    }
-  }, [])
-
-  // Update progress with smooth animation
-  const updateProgress = useCallback((identifier: string, updates: Partial<UploadProgress[string]>) => {
-    setUploadProgress(prev => {
-      const current = prev[identifier]
-      if (!current) return prev
-      
-      return {
-        ...prev,
-        [identifier]: {
-          ...current,
-          ...updates
-        }
-      }
-    })
-  }, [])
-
-  // Function to upload a single part with retry logic
-  const uploadPartWithRetry = useCallback(async (
-    part: { partNumber: number; start: number; end: number; presignedUrl?: string },
-    file: File,
-    identifier: string,
-    startTime: number,
-    abortController: AbortController,
-    maxRetries = 3
-  ): Promise<{ ETag: string; PartNumber: number }> => {
-    let lastError: Error | null = null;
-    const partSize = part.end - part.start;
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        if (abortController.signal.aborted) {
-          throw new Error('Upload cancelled');
-        }
-
-        if (!part.presignedUrl) {
-          throw new Error('No presigned URL available for part');
-        }
-
-        const blob = file.slice(part.start, part.end);
-        
-        // Upload using XMLHttpRequest for better progress tracking
-        return await new Promise<{ ETag: string; PartNumber: number }>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
+  return (
+    <div className="sticky bottom-0 left-0 right-0 bg-gradient-to-t from-white via-white/95 to-white/90 dark:from-slate-900 dark:via-slate-900/95 dark:to-slate-900/90 backdrop-blur-xl border-t border-slate-200/50 dark:border-slate-800/50 p-6 z-50">
+      <div className="max-w-7xl mx-auto">
+        <div className="flex flex-col sm:flex-row gap-4">
+          <Button 
+            type="button"
+            onClick={handleSubmit}
+            className="flex-1 h-14 text-base font-bold shadow-2xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-700 hover:to-teal-600 text-white rounded-2xl transform hover:scale-[1.02] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed" 
+            disabled={loading || !canSubmit || !hasThumbnail || networkStatus === 'offline'}
+          >
+            {loading ? (
+              <>
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-3" />
+                Creating Course...
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-5 h-5 mr-2" />
+                Create & Publish Course
+              </>
+            )}
+          </Button>
           
-          xhr.upload.addEventListener('progress', (event) => {
-            if (event.lengthComputable) {
-              // Track bytes for this specific part
-              if (!uploadedBytesByPart.current[identifier]) {
-                uploadedBytesByPart.current[identifier] = {};
-              }
-              uploadedBytesByPart.current[identifier][part.partNumber] = event.loaded;
-              
-              // Calculate total uploaded bytes across all parts
-              const partBytes = uploadedBytesByPart.current[identifier];
-              const totalUploadedBytes = Object.values(partBytes).reduce((sum, bytes) => sum + bytes, 0);
-              
-              // Calculate progress (15-95% range for upload phase)
-              const uploadProgress = 15 + (totalUploadedBytes / file.size) * 80;
-              
-              // Calculate speed
-              const elapsedSeconds = (Date.now() - startTime) / 1000;
-              const uploadSpeed = totalUploadedBytes / elapsedSeconds;
-              
-              // Calculate remaining time
-              const remainingBytes = file.size - totalUploadedBytes;
-              const timeRemaining = uploadSpeed > 0 ? remainingBytes / uploadSpeed : 0;
-              
-              updateProgress(identifier, {
-                progress: Math.min(Math.round(uploadProgress), 95),
-                currentPart: part.partNumber,
-                uploadSpeed,
-                timeRemaining,
-                uploadedBytes: totalUploadedBytes
-              });
-            }
-          });
-          
-          xhr.addEventListener('load', () => {
-            if (xhr.status === 200) {
-              // Extract ETag safely
-              const etag = xhr.getResponseHeader('etag') || 
-                           xhr.getResponseHeader('ETag')?.replace(/"/g, '');
-              
-              if (!etag) {
-                reject(new Error(`No ETag received for part ${part.partNumber}`));
-                return;
-              }
-              
-              // Mark this part as fully uploaded
-              if (uploadedBytesByPart.current[identifier]) {
-                uploadedBytesByPart.current[identifier][part.partNumber] = partSize;
-              }
-              
-              resolve({ ETag: etag, PartNumber: part.partNumber });
-            } else {
-              reject(new Error(`Part upload failed: ${xhr.status}`));
-            }
-          });
-          
-          xhr.addEventListener('error', () => reject(new Error('Network error during part upload')));
-          xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
-          
-          if (!part.presignedUrl) {
-  console.error('Missing presigned URL for part:', part);
-  reject(new Error(`Missing presigned URL for part ${part.partNumber}`));
-  return;
-}
-xhr.open('PUT', part.presignedUrl);
-          xhr.setRequestHeader('Content-Type', file.type);
-          xhr.send(blob);
-        });
-
-      } catch (error) {
-        lastError = error as Error;
-        console.warn(`Attempt ${attempt} failed for part ${part.partNumber}:`, error);
-
-        if (attempt < maxRetries) {
-          const delay = 1000 * Math.pow(2, attempt - 1);
-          console.log(`Retrying part ${part.partNumber} in ${delay}ms...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
-      }
-    }
-
-    throw lastError || new Error(`Failed to upload part ${part.partNumber} after ${maxRetries} attempts`);
-  }, [updateProgress]);
-
-  // Main Upload Function with 10GB Support
-  const uploadFile = useCallback(async (
-    file: File,
-    type: 'thumbnail' | 'previewVideo' | 'lessonVideo' | 'moduleThumbnail',
-    identifier: string,
-    moduleIndex?: number
-  ): Promise<S3Asset> => {
-    // Set maximum file size to 10 GB
-    const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024 // 10 GB
-    if (file.size > MAX_FILE_SIZE) {
-      throw new Error(`File too large. Maximum size: 10GB. Your file: ${formatFileSize(file.size)}`)
-    }
-
-    // Create abort controller for this upload
-    const abortController = new AbortController()
-    abortControllers.current.set(identifier, abortController)
-    
-    // Determine if we should use multipart upload (for files > 100MB)
-    const shouldUseMultipart = file.size > 100 * 1024 * 1024 // 100MB threshold
-    const OPTIMAL_PART_SIZE = 25 * 1024 * 1024 // 25MB parts for multipart
-    const PART_SIZE = shouldUseMultipart ? OPTIMAL_PART_SIZE : file.size
-    const CONCURRENCY_LIMIT = getConcurrencyLimit()
-
-    try {
-      // Add to active uploads
-      setActiveUploads(prev => new Set([...prev, identifier]))
-      
-      // Initialize upload progress
-      setUploadProgress(prev => ({
-        ...prev,
-        [identifier]: {
-          progress: 0,
-          fileName: file.name,
-          type,
-          status: 'initiating',
-          isMultipart: shouldUseMultipart,
-          size: file.size,
-          uploadedBytes: 0,
-          startTime: Date.now()
-        }
-      }))
-
-      let uploadId: string
-      let fileKey: string
-      let fileUrl: string
-
-      if (shouldUseMultipart) {
-        // ========== MULTIPART UPLOAD (for files > 100MB) ==========
-        console.log(`🚀 Starting multipart upload for ${file.name} (${formatFileSize(file.size)})`)
-
-        // Step 1: Initiate multipart upload
-        const initData = await apiCall('/api/admin/upload/initiate', {
-          fileName: file.name,
-          fileType: file.type,
-          folder: `${type}s`
-        }, abortController.signal)
-        uploadId = initData.uploadId
-        fileKey = initData.fileKey
-        fileUrl = initData.fileUrl
-
-        if (!uploadId || !fileKey) {
-          throw new Error('Failed to initiate multipart upload: Missing uploadId or fileKey')
-        }
-
-        console.log(`✅ Multipart upload initiated:`, { uploadId, fileKey })
-
-        updateProgress(identifier, {
-          progress: 5,
-          status: 'generating-urls'
-        })
-
-        // Step 2: Calculate parts
-        const totalParts = Math.ceil(file.size / PART_SIZE)
-        const parts = Array.from({ length: totalParts }, (_, i) => ({
-          partNumber: i + 1,
-          start: i * PART_SIZE,
-          end: Math.min((i + 1) * PART_SIZE, file.size),
-          presignedUrl: undefined as string | undefined,
-          etag: undefined as string | undefined,
-          status: 'pending' as const,
-          progress: 0
-        }))
-
-        console.log(`📊 Total parts to upload: ${totalParts}`)
-
-        updateProgress(identifier, {
-          progress: 10,
-          status: 'uploading',
-          parts: totalParts,
-          currentPart: 1
-        })
-
-        // Store multipart state
-        setMultipartUploads(prev => ({
-          ...prev,
-          [identifier]: {
-            uploadId,
-            fileKey,
-            fileUrl,
-            parts,
-            isUploading: true,
-            totalProgress: 10,
-            startTime: Date.now(),
-            totalBytes: file.size,
-            uploadedBytes: 0
-          }
-        }))
-
-        // Step 3: Generate ALL presigned URLs at once
-        console.log(`🔗 Generating presigned URLs for ${totalParts} parts...`)
+          <Button 
+            type="button" 
+            variant="outline" 
+            className="h-14 rounded-2xl border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800"
+            onClick={() => window.history.back()}
+            disabled={loading}
+          >
+            <ArrowLeft className="w-5 h-5 mr-2" />
+            Cancel
+          </Button>
+        </div>
         
-        const bulkUrlData = await apiCall('/api/admin/upload/parts', {
-          fileKey,
-          uploadId,
-          totalParts
-        }, abortController.signal)
-        const presignedUrls = bulkUrlData.presignedUrls
-        
-        if (!presignedUrls || presignedUrls.length !== totalParts) {
-          throw new Error(`Failed to generate presigned URLs. Expected ${totalParts}, got ${presignedUrls?.length || 0}`)
-        }
-        
-        const partsWithUrls = parts.map((part, index) => ({
-          ...part,
-          presignedUrl: presignedUrls[index]
-        }))
-
-        console.log(`✅ All presigned URLs generated successfully`)
-
-        updateProgress(identifier, {
-          progress: 15
-        })
-
-        // Step 4: Upload parts in batches with progress tracking
-        const uploadedParts: Array<{ ETag: string; PartNumber: number }> = []
-        
-        // Initialize progress tracking for this upload
-        uploadedBytesByPart.current[identifier] = {}
-
-        // Upload parts in batches
-        for (let i = 0; i < partsWithUrls.length; i += CONCURRENCY_LIMIT) {
-          const batch = partsWithUrls.slice(i, i + CONCURRENCY_LIMIT)
+        <AnimatePresence>
+          {activeUploads.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              className="text-center text-sm bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent font-medium mt-3 flex items-center justify-center gap-2"
+            >
+              <CloudUpload className="w-4 h-4" />
+              {activeUploads.length} upload{activeUploads.length > 1 ? 's' : ''} in progress • Please wait...
+            </motion.div>
+          )}
           
-          // Check if upload was cancelled
-          if (abortController.signal.aborted) {
-            throw new Error('Upload cancelled')
-          }
+          {networkStatus === 'offline' && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-center text-sm bg-gradient-to-r from-rose-600 to-red-500 bg-clip-text text-transparent font-medium mt-3 flex items-center justify-center"
+            >
+              <WifiOff className="w-4 h-4 mr-2" />
+              You are offline. Connect to internet to continue.
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  )
+})
+StickyActions.displayName = 'StickyActions'
 
-          console.log(`📤 Uploading batch ${Math.floor(i/CONCURRENCY_LIMIT) + 1} of ${Math.ceil(partsWithUrls.length/CONCURRENCY_LIMIT)}`)
+const LoadingSkeleton = memo(() => (
+  <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white dark:from-slate-900 dark:to-slate-950 flex items-center justify-center">
+    <div className="text-center space-y-6">
+      <div className="relative">
+        <div className="w-16 h-16 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+        <div className="absolute inset-0 bg-gradient-to-r from-emerald-500 to-teal-500 blur-2xl opacity-20"></div>
+      </div>
+      <div>
+        <p className="text-lg font-bold bg-gradient-to-r from-emerald-600 to-teal-500 bg-clip-text text-transparent">Loading Course Creator</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Preparing your workspace...</p>
+      </div>
+    </div>
+  </div>
+))
+LoadingSkeleton.displayName = 'LoadingSkeleton'
 
-          // Update batch parts to uploading status
-          batch.forEach(part => {
-            setMultipartUploads(prev => ({
-              ...prev,
-              [identifier]: {
-                ...prev[identifier]!,
-                parts: prev[identifier]!.parts.map(p => 
-                  p.partNumber === part.partNumber 
-                    ? { ...p, status: 'uploading' }
-                    : p
-                )
-              }
-            }))
-          })
+const AccessDenied = memo(({ onBack }: { onBack: () => void }) => (
+  <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white dark:from-slate-900 dark:to-slate-950 flex items-center justify-center">
+    <div className="text-center max-w-md px-6">
+      <div className="p-4 rounded-2xl bg-gradient-to-r from-rose-100 to-pink-100 dark:from-rose-900/30 dark:to-pink-900/30 w-20 h-20 mx-auto mb-6 flex items-center justify-center">
+        <Lock className="w-10 h-10 text-rose-600 dark:text-rose-400" />
+      </div>
+      <h2 className="text-2xl font-bold bg-gradient-to-r from-rose-600 to-pink-600 bg-clip-text text-transparent mb-3">Access Denied</h2>
+      <p className="text-slate-600 dark:text-slate-400 mb-8">
+        Admin privileges are required to access this page.
+      </p>
+      <Button 
+        onClick={onBack} 
+        className="w-full h-12 text-base font-semibold rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-700 hover:to-teal-600 text-white"
+      >
+        Return to Home
+      </Button>
+    </div>
+  </div>
+))
+AccessDenied.displayName = 'AccessDenied'
 
-          // Upload batch in parallel
-          const batchPromises = batch.map(async (part) => {
-            try {
-              // Upload part with retry logic
-              const result = await uploadPartWithRetry(part, file, identifier, Date.now(), abortController)
-              
-              // Update part status to completed
-              setMultipartUploads(prev => ({
-                ...prev,
-                [identifier]: {
-                  ...prev[identifier]!,
-                  parts: prev[identifier]!.parts.map(p => 
-                    p.partNumber === part.partNumber 
-                      ? { ...p, status: 'completed', etag: result.ETag, progress: 100 }
-                      : p
-                  )
-                }
-              }))
-
-              return result
-            } catch (error) {
-              // Update part status to error
-              setMultipartUploads(prev => ({
-                ...prev,
-                [identifier]: {
-                  ...prev[identifier]!,
-                  parts: prev[identifier]!.parts.map(p => 
-                    p.partNumber === part.partNumber 
-                      ? { ...p, status: 'error' }
-                      : p
-                  )
-                }
-              }))
-              throw error
-            }
-          })
-
-          // Wait for batch to complete
-          const batchResults = await Promise.all(batchPromises)
-          uploadedParts.push(...batchResults)
-          
-          console.log(`✅ Batch ${Math.floor(i/CONCURRENCY_LIMIT) + 1} completed: ${batchResults.length} parts uploaded`)
-        }
-
-        // Sort parts by part number for completion
-        uploadedParts.sort((a, b) => a.PartNumber - b.PartNumber)
-
-        // Step 5: Complete multipart upload
-        console.log(`✅ All parts uploaded. Completing multipart upload...`)
-        
-        updateProgress(identifier, {
-          progress: 98,
-          status: 'processing'
-        })
-
-        try {
-          const completeData = await apiCall('/api/admin/upload/complete', {
-            fileKey,
-            uploadId,
-            parts: uploadedParts
-          }, abortController.signal)
-          fileUrl = completeData.fileUrl || fileUrl
-          console.log(`🎉 Multipart upload completed successfully! File URL: ${fileUrl}`)
-        } catch (error) {
-          console.error('❌ Error completing multipart upload:', error)
-          // Try to abort the upload if completion fails
-          try {
-            await apiCall('/api/admin/upload/abort', {
-              fileKey,
-              uploadId
-            }, abortController.signal)
-          } catch (abortError) {
-            console.warn('Failed to abort upload:', abortError)
-          }
-          throw error
-        }
-
-      } else {
-        // ========== SINGLE PART UPLOAD (for small files) ==========
-        console.log(`📤 Starting single-part upload for ${file.name} (${formatFileSize(file.size)})`)
-
-        const initData = await apiCall('/api/admin/upload', {
-          fileName: file.name,
-          fileType: file.type,
-          fileSize: file.size,
-          folder: `${type}s`
-        }, abortController.signal)
-
-        fileKey = initData.fileKey
-        fileUrl = initData.fileUrl
-        const { presignedUrl } = initData
-
-        if (!presignedUrl) {
-          throw new Error('No presigned URL received from server')
-        }
-
-        // Upload the file using XMLHttpRequest for progress tracking
-        updateProgress(identifier, {
-          progress: 30,
-          status: 'uploading'
-        })
-
-        await new Promise<void>((resolve, reject) => {
-          const xhr = new XMLHttpRequest()
-          const startTime = Date.now()
-          
-          xhr.upload.addEventListener('progress', (event) => {
-            if (event.lengthComputable) {
-              const progress = 30 + (event.loaded / event.total) * 65 // 30-95% range
-              const elapsedSeconds = (Date.now() - startTime) / 1000
-              const uploadSpeed = event.loaded / elapsedSeconds
-              
-              updateProgress(identifier, {
-                progress: Math.round(progress),
-                uploadSpeed,
-                timeRemaining: uploadSpeed > 0 
-                  ? (event.total - event.loaded) / uploadSpeed 
-                  : 0,
-                uploadedBytes: event.loaded
-              })
-            }
-          })
-
-          xhr.addEventListener('load', () => {
-            if (xhr.status === 200) {
-              resolve()
-            } else {
-              reject(new Error(`Upload failed with status: ${xhr.status}`))
-            }
-          })
-
-          xhr.addEventListener('error', () => {
-            reject(new Error('Network error during upload'))
-          })
-
-          xhr.addEventListener('abort', () => {
-            reject(new Error('Upload cancelled'))
-          })
-
-          xhr.open('PUT', presignedUrl)
-          xhr.setRequestHeader('Content-Type', file.type)
-          xhr.send(file)
-        })
-      }
-
-      // Final success update
-      updateProgress(identifier, {
-        progress: 100,
-        status: 'completed'
-      })
-
-      // Clear progress after success
-      setTimeout(() => {
-        setUploadProgress(prev => {
-          const newProgress = { ...prev }
-          delete newProgress[identifier]
-          return newProgress
-        })
-        setMultipartUploads(prev => {
-          const newUploads = { ...prev }
-          delete newUploads[identifier]
-          return newUploads
-        })
-        setActiveUploads(prev => {
-          const newSet = new Set(prev)
-          newSet.delete(identifier)
-          return newSet
-        })
-        delete uploadedBytesByPart.current[identifier]
-        abortControllers.current.delete(identifier)
-      }, 3000)
-
-      return {
-        key: fileKey!,
-        url: fileUrl!,
-        size: file.size,
-        type: type === 'thumbnail' || type === 'moduleThumbnail' ? 'image' : 'video',
-        duration: type.includes('video') ? 0 : undefined,
-        uploadedAt: new Date().toISOString()
-      }
-
-    } catch (error) {
-      console.error('❌ Upload error:', error)
-      
-      // Update error state
-      updateProgress(identifier, {
-        status: 'error',
-        error: error instanceof Error ? error.message : 'Upload failed'
-      })
-
-      // Remove from active uploads
-      setActiveUploads(prev => {
-        const newSet = new Set(prev)
-        newSet.delete(identifier)
-        return newSet
-      })
-      
-      // Clean up abort controller
-      abortControllers.current.delete(identifier)
-      delete uploadedBytesByPart.current[identifier]
-      
-      throw error
-    }
-  }, [apiCall, updateProgress, uploadPartWithRetry, getConcurrencyLimit])
-
-  const cancelUpload = useCallback(async (identifier: string) => {
-    // Abort the upload
-    const controller = abortControllers.current.get(identifier)
-    if (controller) {
-      controller.abort()
-    }
-
-    // If it's a multipart upload, abort on S3 too
-    const upload = uploadProgress[identifier]
-    const multipartState = multipartUploads[identifier]
-    
-    if (upload?.isMultipart && multipartState?.uploadId && multipartState?.fileKey) {
-      try {
-        await apiCall('/api/admin/upload/abort', {
-          fileKey: multipartState.fileKey,
-          uploadId: multipartState.uploadId
-        })
-        console.log(`✅ Multipart upload ${identifier} aborted on S3`)
-      } catch (error) {
-        console.warn('Failed to abort multipart upload on S3:', error)
-      }
-    }
-
-    // Update progress to cancelled
-    updateProgress(identifier, {
-      status: 'cancelled',
-      progress: 0
-    })
-
-    // Remove from active uploads
-    setActiveUploads(prev => {
-      const newSet = new Set(prev)
-      newSet.delete(identifier)
-      return newSet
-    })
-
-    // Clean up after delay
-    setTimeout(() => {
-      setUploadProgress(prev => {
-        const newProgress = { ...prev }
-        delete newProgress[identifier]
-        return newProgress
-      })
-      setMultipartUploads(prev => {
-        const newUploads = { ...prev }
-        delete newUploads[identifier]
-        return newUploads
-      })
-      delete uploadedBytesByPart.current[identifier]
-      abortControllers.current.delete(identifier)
-    }, 1000)
-  }, [apiCall, multipartUploads, uploadProgress, updateProgress])
-
-  const retryUpload = useCallback(async (
-    file: File,
-    type: 'thumbnail' | 'previewVideo' | 'lessonVideo' | 'moduleThumbnail',
-    identifier: string,
-    moduleIndex?: number
-  ) => {
-    // Clear previous error state
-    setUploadProgress(prev => {
-      const newProgress = { ...prev }
-      delete newProgress[identifier]
-      return newProgress
-    })
-    
-    // Clean up any existing tracking
-    delete uploadedBytesByPart.current[identifier]
-    
-    // Retry the upload
-    return uploadFile(file, type, identifier, moduleIndex)
-  }, [uploadFile])
-
-  return useMemo(() => ({ 
-    uploadProgress, 
-    uploadFile, 
-    cancelUpload, 
-    retryUpload, 
-    multipartUploads,
-    activeUploads: Array.from(activeUploads)
-  }), [uploadProgress, uploadFile, cancelUpload, retryUpload, multipartUploads, activeUploads])
-}
-
-// ==================== MAIN CREATE COURSE PAGE ====================
+// ==================== MAIN PAGE ====================
 export default function CreateCoursePage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [isClient, setIsClient] = useState(false)
   const [userRole, setUserRole] = useState<string | null>(null)
   const [checkingAuth, setCheckingAuth] = useState(true)
-  const [networkStatus, setNetworkStatus] = useState<'online' | 'offline'>(typeof window !== 'undefined' ? (navigator.onLine ? 'online' : 'offline') : 'online')
+  const [networkStatus, setNetworkStatus] = useState<'online' | 'offline'>(
+    typeof window !== 'undefined' ? (navigator.onLine ? 'online' : 'offline') : 'online'
+  )
   const [uploadStats, setUploadStats] = useState({
     totalFiles: 0,
     totalSize: 0,
@@ -1246,19 +1526,10 @@ export default function CreateCoursePage() {
   // Effect hooks
   useEffect(() => {
     setIsClient(true)
-    
-    const handleOnline = () => {
-      setNetworkStatus('online')
-      console.log('🌐 Network: Online')
-    }
-    const handleOffline = () => {
-      setNetworkStatus('offline')
-      console.log('🌐 Network: Offline')
-    }
-    
+    const handleOnline = () => setNetworkStatus('online')
+    const handleOffline = () => setNetworkStatus('offline')
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
-    
     return () => {
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
@@ -1271,11 +1542,9 @@ export default function CreateCoursePage() {
         try {
           setCheckingAuth(true)
           const response = await fetch('/api/users/me')
-          
           if (response.ok) {
             const data = await response.json()
             const userData = data.user || data
-            
             if (userData.role === 'admin') {
               setUserRole('admin')
             } else {
@@ -1283,7 +1552,6 @@ export default function CreateCoursePage() {
               router.push('/')
             }
           } else {
-            console.error('Failed to fetch user role:', response.status)
             setUserRole(null)
           }
         } catch (error) {
@@ -1298,7 +1566,6 @@ export default function CreateCoursePage() {
         setCheckingAuth(false)
       }
     }
-
     checkUserRole()
   }, [isLoaded, isSignedIn, isClient, userId, router])
 
@@ -1359,7 +1626,10 @@ export default function CreateCoursePage() {
       try {
         const result = await enhancedUploadFile(file, 'moduleThumbnail', `module-${moduleIndex}-thumbnail`, moduleIndex)
         const updatedModules = [...formData.modules]
-        updatedModules[moduleIndex].thumbnailUrl = result.url
+        updatedModules[moduleIndex] = {
+          ...updatedModules[moduleIndex],
+          thumbnailUrl: result.url
+        }
         setFormData(prev => ({ ...prev, modules: updatedModules }))
       } catch (error) {
         console.error('Error uploading module thumbnail:', error)
@@ -1379,7 +1649,20 @@ export default function CreateCoursePage() {
       try {
         const result = await enhancedUploadFile(file, 'lessonVideo', identifier, moduleIndex)
         const updatedModules = [...formData.modules]
-        updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].video = result
+        updatedModules[moduleIndex] = {
+          ...updatedModules[moduleIndex],
+          chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) => 
+            chapIdx === chapterIndex ? {
+              ...chapter,
+              lessons: chapter.lessons.map((lesson, lesIdx) => 
+                lesIdx === lessonIndex ? {
+                  ...lesson,
+                  video: result
+                } : lesson
+              )
+            } : chapter
+          )
+        }
         setFormData(prev => ({ ...prev, modules: updatedModules }))
       } catch (error) {
         console.error('Error uploading lesson video:', error)
@@ -1391,7 +1674,6 @@ export default function CreateCoursePage() {
     const upload = uploadProgress[identifier]
     if (!upload) return
 
-    // Create file input for user to select the file again
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = upload.type.includes('video') 
@@ -1403,38 +1685,54 @@ export default function CreateCoursePage() {
       if (!file) return
 
       try {
-        // Determine the type and module info from identifier
         let moduleIndex: number | undefined
-        let chapterIndex: number | undefined
-        let lessonIndex: number | undefined
-        
         if (identifier.startsWith('lesson-')) {
           const parts = identifier.split('-')
           moduleIndex = parseInt(parts[1])
-          chapterIndex = parseInt(parts[2])
-          lessonIndex = parseInt(parts[3])
+        } else if (identifier.startsWith('module-')) {
+          const parts = identifier.split('-')
+          moduleIndex = parseInt(parts[1])
         }
         
         const type = upload.type as 'thumbnail' | 'previewVideo' | 'lessonVideo' | 'moduleThumbnail'
-        
-        // Retry the upload
         const result = await enhancedUploadFile(file, type, identifier, moduleIndex)
         
-        // Update the form data with the new upload result
         if (type === 'thumbnail') {
           setFormData(prev => ({ ...prev, thumbnail: result }))
         } else if (type === 'previewVideo') {
           setFormData(prev => ({ ...prev, previewVideo: result }))
         } else if (type === 'moduleThumbnail' && moduleIndex !== undefined) {
           const updatedModules = [...formData.modules]
-          updatedModules[moduleIndex].thumbnailUrl = result.url
+          updatedModules[moduleIndex] = {
+            ...updatedModules[moduleIndex],
+            thumbnailUrl: result.url
+          }
           setFormData(prev => ({ ...prev, modules: updatedModules }))
-        } else if (type === 'lessonVideo' && moduleIndex !== undefined && chapterIndex !== undefined && lessonIndex !== undefined) {
+        } else if (type === 'lessonVideo' && identifier.startsWith('lesson-')) {
+          const parts = identifier.split('-')
+          const modIdx = parseInt(parts[1])
+          const chapIdx = parseInt(parts[2])
+          const lesIdx = parseInt(parts[3])
+          
           const updatedModules = [...formData.modules]
-          updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].video = result
-          setFormData(prev => ({ ...prev, modules: updatedModules }))
+          if (updatedModules[modIdx]?.chapters[chapIdx]?.lessons[lesIdx]) {
+            updatedModules[modIdx] = {
+              ...updatedModules[modIdx],
+              chapters: updatedModules[modIdx].chapters.map((chapter, cIdx) => 
+                cIdx === chapIdx ? {
+                  ...chapter,
+                  lessons: chapter.lessons.map((lesson, lIdx) => 
+                    lIdx === lesIdx ? {
+                      ...lesson,
+                      video: result
+                    } : lesson
+                  )
+                } : chapter
+              )
+            }
+            setFormData(prev => ({ ...prev, modules: updatedModules }))
+          }
         }
-        
       } catch (error) {
         console.error('Retry failed:', error)
       }
@@ -1520,85 +1818,136 @@ export default function CreateCoursePage() {
   // Chapter management
   const addChapter = useCallback((moduleIndex: number) => {
     const updatedModules = [...formData.modules]
-    updatedModules[moduleIndex].chapters.push({
-      title: '',
-      description: '',
-      order: updatedModules[moduleIndex].chapters.length,
-      lessons: []
-    })
+    updatedModules[moduleIndex] = {
+      ...updatedModules[moduleIndex],
+      chapters: [
+        ...updatedModules[moduleIndex].chapters,
+        {
+          title: '',
+          description: '',
+          order: updatedModules[moduleIndex].chapters.length,
+          lessons: []
+        }
+      ]
+    }
     setFormData(prev => ({ ...prev, modules: updatedModules }))
   }, [formData.modules])
 
   const removeChapter = useCallback((moduleIndex: number, chapterIndex: number) => {
     const updatedModules = [...formData.modules]
-    updatedModules[moduleIndex].chapters = updatedModules[moduleIndex].chapters.filter(
-      (_, index) => index !== chapterIndex
-    )
+    updatedModules[moduleIndex] = {
+      ...updatedModules[moduleIndex],
+      chapters: updatedModules[moduleIndex].chapters.filter(
+        (_, index) => index !== chapterIndex
+      )
+    }
     setFormData(prev => ({ ...prev, modules: updatedModules }))
   }, [formData.modules])
 
   // Lesson management
   const addLesson = useCallback((moduleIndex: number, chapterIndex: number) => {
     const updatedModules = [...formData.modules]
-    updatedModules[moduleIndex].chapters[chapterIndex].lessons.push({
-      title: '',
-      description: '',
-      content: '',
-      duration: 0,
-      isPreview: false,
-      resources: [],
-      order: updatedModules[moduleIndex].chapters[chapterIndex].lessons.length
-    })
+    updatedModules[moduleIndex] = {
+      ...updatedModules[moduleIndex],
+      chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) =>
+        chapIdx === chapterIndex ? {
+          ...chapter,
+          lessons: [
+            ...chapter.lessons,
+            {
+              title: '',
+              description: '',
+              content: '',
+              duration: 0,
+              isPreview: false,
+              resources: [],
+              order: chapter.lessons.length
+            }
+          ]
+        } : chapter
+      )
+    }
     setFormData(prev => ({ ...prev, modules: updatedModules }))
   }, [formData.modules])
 
   const removeLesson = useCallback((moduleIndex: number, chapterIndex: number, lessonIndex: number) => {
     const updatedModules = [...formData.modules]
-    updatedModules[moduleIndex].chapters[chapterIndex].lessons = 
-      updatedModules[moduleIndex].chapters[chapterIndex].lessons.filter(
-        (_, index) => index !== lessonIndex
+    updatedModules[moduleIndex] = {
+      ...updatedModules[moduleIndex],
+      chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) =>
+        chapIdx === chapterIndex ? {
+          ...chapter,
+          lessons: chapter.lessons.filter(
+            (_, index) => index !== lessonIndex
+          )
+        } : chapter
       )
+    }
     setFormData(prev => ({ ...prev, modules: updatedModules }))
   }, [formData.modules])
 
   const addResource = useCallback((moduleIndex: number, chapterIndex: number, lessonIndex: number) => {
     const updatedModules = [...formData.modules]
-    updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].resources.push({
-      title: '',
-      url: '',
-      type: 'pdf'
-    })
+    updatedModules[moduleIndex] = {
+      ...updatedModules[moduleIndex],
+      chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) =>
+        chapIdx === chapterIndex ? {
+          ...chapter,
+          lessons: chapter.lessons.map((lesson, lesIdx) =>
+            lesIdx === lessonIndex ? {
+              ...lesson,
+              resources: [...lesson.resources, {
+                title: '',
+                url: '',
+                type: 'pdf'
+              }]
+            } : lesson
+          )
+        } : chapter
+      )
+    }
     setFormData(prev => ({ ...prev, modules: updatedModules }))
   }, [formData.modules])
 
   const removeResource = useCallback((moduleIndex: number, chapterIndex: number, lessonIndex: number, resourceIndex: number) => {
     const updatedModules = [...formData.modules]
-    updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].resources = 
-      updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].resources.filter(
-        (_, index) => index !== resourceIndex
+    updatedModules[moduleIndex] = {
+      ...updatedModules[moduleIndex],
+      chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) =>
+        chapIdx === chapterIndex ? {
+          ...chapter,
+          lessons: chapter.lessons.map((lesson, lesIdx) =>
+            lesIdx === lessonIndex ? {
+              ...lesson,
+              resources: lesson.resources.filter((_, index) => index !== resourceIndex)
+            } : lesson
+          )
+        } : chapter
       )
+    }
     setFormData(prev => ({ ...prev, modules: updatedModules }))
   }, [formData.modules])
 
   // Form submission
-  const handleSubmit = useCallback(async (e: React.FormEvent) => {
+  const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault()
+    e.stopPropagation()
     
-    // Check for active uploads
-    const hasActiveUploads = activeUploads.length > 0
+    // Check if there are any uploads in progress
+    const uploadingFiles = Object.values(uploadProgress).filter(
+      u => u.status === 'initiating' || u.status === 'generating-urls' || u.status === 'uploading' || u.status === 'processing'
+    )
     
-    if (hasActiveUploads) {
+    if (uploadingFiles.length > 0) {
       alert('Please wait for all uploads to complete before submitting')
       return
     }
 
-    // Check network status
     if (networkStatus === 'offline') {
       alert('You are offline. Please check your internet connection and try again.')
       return
     }
 
-    // Validate required fields
     if (!formData.thumbnail) {
       alert('Please upload a course thumbnail')
       return
@@ -1614,7 +1963,6 @@ export default function CreateCoursePage() {
       return
     }
 
-    // Validate all lessons have videos
     const missingVideos = formData.modules.some(module => 
       module.chapters.some(chapter => 
         chapter.lessons.some(lesson => !lesson.video)
@@ -1687,975 +2035,1784 @@ export default function CreateCoursePage() {
     } finally {
       setLoading(false)
     }
-  }, [activeUploads, networkStatus, formData, router])
+  }, [uploadProgress, networkStatus, formData, router])
+
+  // Check if user can submit (no uploads in progress)
+  const canSubmit = useMemo(() => {
+    const uploadingFiles = Object.values(uploadProgress).filter(
+      u => u.status === 'initiating' || 
+           u.status === 'generating-urls' || 
+           u.status === 'uploading' || 
+           u.status === 'processing'
+    )
+    return uploadingFiles.length === 0
+  }, [uploadProgress])
 
   // Show loading state
   if (!isLoaded || !isClient || checkingAuth) {
-    return (
-      <div className="p-4 sm:p-6 max-w-7xl mx-auto flex items-center justify-center min-h-screen">
-        <div className="text-center space-y-3 sm:space-y-4">
-          <div className="w-10 h-10 sm:w-12 sm:h-12 border-3 border-rose-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-          <div>
-            <p className="text-sm sm:text-base font-medium text-slate-700 dark:text-slate-300">Loading Course Creator</p>
-            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">Preparing your workspace...</p>
-          </div>
-        </div>
-      </div>
-    )
+    return <LoadingSkeleton />
   }
 
-  // Check authentication
   if (!isSignedIn) {
     return null
   }
 
   if (userRole !== 'admin') {
-    return (
-      <div className="p-4 sm:p-6 max-w-7xl mx-auto flex items-center justify-center min-h-screen">
-        <div className="text-center max-w-xs sm:max-w-md px-4">
-          <AlertCircle className="w-10 h-10 sm:w-12 sm:h-12 text-red-500 mx-auto mb-3 sm:mb-4" />
-          <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 mb-1.5 sm:mb-2">Access Denied</h2>
-          <p className="text-sm text-slate-600 dark:text-slate-400 mb-4 sm:mb-6">
-            Admin privileges are required to access this page.
-          </p>
-          <div className="space-y-2 sm:space-y-3">
-            <Button onClick={() => router.push('/')} className="w-full rounded-xl sm:rounded-2xl text-sm sm:text-base">
-              Return to Home
-            </Button>
-          </div>
-        </div>
-      </div>
-    )
+    return <AccessDenied onBack={() => router.push('/')} />
   }
 
   return (
-    <div className="p-3 sm:p-4 md:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
-        <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-serif font-bold bg-gradient-to-r from-rose-600 to-pink-600 bg-clip-text text-transparent leading-tight">
-            Create New Course
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-0.5 sm:mt-1 truncate">
-            Design and publish a comprehensive fashion course with 10GB video support
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-1.5 sm:gap-2">
-          {networkStatus === 'offline' && (
-            <div className="inline-flex items-center text-amber-600 dark:text-amber-400 text-xs bg-amber-50 dark:bg-amber-900/20 px-2 sm:px-3 py-1 rounded-full">
-              <WifiOff className="w-3 h-3 mr-1 flex-shrink-0" />
-              Offline
-            </div>
-          )}
-          {activeUploads.length > 0 && (
-            <div className="inline-flex items-center text-blue-600 dark:text-blue-400 text-xs bg-blue-50 dark:bg-blue-900/20 px-2 sm:px-3 py-1 rounded-full">
-              <CloudUpload className="w-3 h-3 mr-1 animate-pulse flex-shrink-0" />
-              {activeUploads.length} Active
-            </div>
-          )}
-          <Button 
-            variant="outline" 
-            className="rounded-xl sm:rounded-2xl text-xs sm:text-sm px-3 sm:px-4"
-            onClick={() => router.push('/admin/courses')}
-            disabled={activeUploads.length > 0}
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 dark:from-slate-900 dark:via-slate-950 dark:to-emerald-900/10 pb-32">
+      <div className="p-4 sm:p-6 max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <Button
+            type="button"
+            variant="ghost"
             size="sm"
+            onClick={() => router.push('/admin/courses')}
+            className="mb-4 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"
           >
-            Cancel
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Courses
           </Button>
-        </div>
-      </div>
-
-      {/* Upload Status Banner */}
-      {activeUploads.length > 0 && (
-        <div className="space-y-2 sm:space-y-3">
-          <Alert className="rounded-xl sm:rounded-2xl border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 p-3 sm:p-4">
-            <div className="flex gap-2 sm:gap-3">
-              <CloudUpload className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 flex-shrink-0 mt-0.5" />
-              <div className="min-w-0">
-                <AlertTitle className="text-sm sm:text-base font-semibold text-blue-800 dark:text-blue-300 mb-0.5">
-                  Uploading {activeUploads.length} file{activeUploads.length > 1 ? 's' : ''}
-                </AlertTitle>
-                <AlertDescription className="text-xs sm:text-sm text-blue-700 dark:text-blue-400">
-                  Files are uploading to AWS S3. Do not close this page.
-                </AlertDescription>
-              </div>
-            </div>
-          </Alert>
           
-          {/* Show optimization tips for large files */}
-          {Object.values(uploadProgress).some(upload => 
-            upload.status === 'uploading' && 
-            (upload.type === 'previewVideo' || upload.type === 'lessonVideo')
-          ) && (
-            <UploadOptimizationTips 
-              fileSize={uploadStats.totalSize}
-              uploadStatus="Active"
-            />
-          )}
+          <div className="space-y-3">
+            <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-emerald-600 via-teal-500 to-cyan-600 bg-clip-text text-transparent">
+              Create New Course
+            </h1>
+            <p className="text-slate-600 dark:text-slate-400">
+              Design and publish a comprehensive fashion course with 10GB video support
+            </p>
+          </div>
         </div>
-      )}
 
-      <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6 md:space-y-8">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 sm:gap-6 md:gap-8">
-          {/* Main Form Content - 3 columns */}
-          <div className="lg:col-span-3 space-y-4 sm:space-y-6 md:space-y-8">
-            {/* Basic Information */}
-            <Card className="rounded-xl sm:rounded-2xl border-slate-200 dark:border-slate-700">
-              <CardHeader className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 rounded-t-xl sm:rounded-t-2xl p-3 sm:p-6">
-                <CardTitle className="flex items-center text-base sm:text-lg md:text-xl">
-                  <BookOpen className="w-4 h-4 sm:w-5 sm:h-5 mr-1.5 sm:mr-2 text-rose-600 flex-shrink-0" />
-                  <span className="truncate">Course Information</span>
-                </CardTitle>
-                <CardDescription className="text-xs sm:text-sm">
-                  Basic details about your course
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="pt-3 sm:pt-4 space-y-3 sm:space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-                  <div className="space-y-2 sm:space-y-3">
-                    <div>
-                      <label className="text-xs sm:text-sm font-medium mb-1 block">Course Title *</label>
+        {/* Upload Status Banner */}
+        <AnimatePresence>
+          {activeUploads.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="mb-8 space-y-4"
+            >
+              <Alert className="border-blue-200 bg-gradient-to-r from-blue-50/80 to-cyan-50/80 dark:from-blue-900/30 dark:to-cyan-900/30 backdrop-blur-sm">
+                <div className="flex gap-3">
+                  <div className="p-2 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 text-white">
+                    <CloudUpload className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <AlertTitle className="text-base font-bold text-blue-800 dark:text-blue-300">
+                      Uploading {activeUploads.length} file{activeUploads.length > 1 ? 's' : ''}
+                    </AlertTitle>
+                    <AlertDescription className="text-sm text-blue-700 dark:text-blue-400">
+                      Files are uploading to AWS S3. You can continue filling out the form while uploads are in progress.
+                    </AlertDescription>
+                  </div>
+                </div>
+              </Alert>
+              
+              {/* Show optimization tips for large files */}
+              {Object.values(uploadProgress).some(upload => 
+                upload.status === 'uploading' && 
+                (upload.type === 'previewVideo' || upload.type === 'lessonVideo')
+              ) && (
+                <UploadOptimizationTips 
+                  fileSize={uploadStats.totalSize}
+                  uploadStatus="Active"
+                />
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <form onSubmit={handleSubmit} className="space-y-8">
+          {/* Tabs for Mobile Navigation */}
+          <div className="block sm:hidden">
+            <Tabs defaultValue="basic" className="w-full">
+              <TabsList className="grid w-full grid-cols-3 bg-gradient-to-r from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 p-1 rounded-2xl">
+                <TabsTrigger value="basic" className="rounded-xl data-[state=active]:bg-white data-[state=active]:shadow-lg">
+                  <BookOpen className="w-4 h-4 mr-2" />
+                  Basic
+                </TabsTrigger>
+                <TabsTrigger value="content" className="rounded-xl data-[state=active]:bg-white data-[state=active]:shadow-lg">
+                  <Layers className="w-4 h-4 mr-2" />
+                  Content
+                </TabsTrigger>
+                <TabsTrigger value="settings" className="rounded-xl data-[state=active]:bg-white data-[state=active]:shadow-lg">
+                  <Settings className="w-4 h-4 mr-2" />
+                  Settings
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="basic" className="space-y-6 mt-4">
+                {/* Basic Information Card */}
+                <FormCard>
+                  <CardHeader>
+                    <SectionHeader 
+                      title="Course Information" 
+                      description="Basic details about your course"
+                      icon={BookOpen}
+                    />
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    <FormGroup label="Course Title" required icon={Feather}>
                       <Input
-                        placeholder="e.g., Advanced Fashion Design"
+                        placeholder="e.g., Advanced Fashion Design Masterclass"
                         value={formData.title}
                         onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-                        className="rounded-xl sm:rounded-2xl text-sm sm:text-base"
+                        className="h-12 rounded-xl border-slate-300 dark:border-slate-700 text-base"
                         required
                       />
-                    </div>
-                    
-                    <div>
-                      <label className="text-xs sm:text-sm font-medium mb-1 block">Short Description *</label>
+                    </FormGroup>
+
+                    <FormGroup label="Short Description" required icon={FileText}>
                       <Textarea
                         placeholder="Brief overview of the course"
                         value={formData.shortDescription}
                         onChange={(e) => setFormData(prev => ({ ...prev, shortDescription: e.target.value }))}
-                        className="rounded-xl sm:rounded-2xl min-h-[60px] sm:min-h-[80px] text-sm sm:text-base"
+                        className="min-h-[100px] rounded-xl border-slate-300 dark:border-slate-700 text-base"
                         required
                       />
+                    </FormGroup>
+
+                    <FormGroup label="Full Description" required icon={BookOpen}>
+                      <Textarea
+                        placeholder="Detailed description of what students will learn..."
+                        value={formData.description}
+                        onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                        className="min-h-[120px] rounded-xl border-slate-300 dark:border-slate-700 text-base"
+                        required
+                      />
+                    </FormGroup>
+
+                    <div className="grid grid-cols-1 gap-6">
+                      <FormGroup label="Level" required icon={TrendingUp}>
+                        <select
+                          value={formData.level}
+                          onChange={(e) => setFormData(prev => ({ 
+                            ...prev, 
+                            level: e.target.value as 'beginner' | 'intermediate' | 'advanced' 
+                          }))}
+                          className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          required
+                        >
+                          <option value="beginner">Beginner</option>
+                          <option value="intermediate">Intermediate</option>
+                          <option value="advanced">Advanced</option>
+                        </select>
+                      </FormGroup>
+
+                      <FormGroup label="Category" required icon={Tag}>
+                        <Input
+                          placeholder="e.g., Fashion Design, Pattern Making"
+                          value={formData.category}
+                          onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
+                          className="h-12 rounded-xl border-slate-300 dark:border-slate-700 text-base"
+                          required
+                        />
+                      </FormGroup>
                     </div>
-                  </div>
-                  
-                  <div className="space-y-2 sm:space-y-3">
-                    <div>
-                      <label className="text-xs sm:text-sm font-medium mb-1 block">Level *</label>
+
+                    {/* Tags */}
+                    <FormGroup label="Tags" icon={Tag}>
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {formData.tags.map((tag, index) => (
+                          <Badge key={index} variant="secondary" className="rounded-full px-4 py-1.5 bg-gradient-to-r from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900">
+                            <span className="truncate">{tag}</span>
+                            <button
+                              type="button"
+                              onClick={() => removeTag(tag)}
+                              className="ml-2 hover:text-rose-500"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </Badge>
+                        ))}
+                      </div>
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="Add a tag and press Enter"
+                          value={newTag}
+                          onChange={(e) => setNewTag(e.target.value)}
+                          className="h-12 rounded-xl border-slate-300 dark:border-slate-700 text-base"
+                          onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())}
+                        />
+                        <Button type="button" onClick={addTag} variant="outline" className="h-12 px-4 rounded-xl">
+                          <Plus className="w-5 h-5" />
+                        </Button>
+                      </div>
+                    </FormGroup>
+                  </CardContent>
+                </FormCard>
+
+                {/* Course Media Card */}
+                <FormCard>
+                  <CardHeader>
+                    <SectionHeader 
+                      title="Course Media" 
+                      description="Upload thumbnail and preview video"
+                      icon={Film}
+                      color="from-blue-500 to-cyan-500"
+                    />
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    <FileUploadArea
+                      type="thumbnail"
+                      label="Course Thumbnail *"
+                      acceptedFiles="image/jpeg,image/jpg,image/png,image/webp"
+                      maxSize="20MB"
+                      currentFile={formData.thumbnail}
+                      onFileChange={handleThumbnailChange}
+                      uploadProgress={uploadProgress}
+                      onCancelUpload={cancelUpload}
+                      onRetryUpload={handleRetryUpload}
+                    />
+
+                    <FileUploadArea
+                      type="previewVideo"
+                      label="Preview Video (Optional)"
+                      acceptedFiles="video/mp4,video/webm,video/ogg,video/quicktime,video/mov"
+                      maxSize="10GB"
+                      currentFile={formData.previewVideo}
+                      onFileChange={handlePreviewVideoChange}
+                      uploadProgress={uploadProgress}
+                      onCancelUpload={cancelUpload}
+                      onRetryUpload={handleRetryUpload}
+                    />
+                  </CardContent>
+                </FormCard>
+              </TabsContent>
+
+              <TabsContent value="content" className="space-y-6 mt-4">
+                {/* Requirements & Outcomes */}
+                <div className="space-y-6">
+                  <FormCard>
+                    <CardHeader>
+                      <SectionHeader 
+                        title="Requirements" 
+                        description="What students should know before taking this course"
+                        icon={Target}
+                        color="from-rose-500 to-pink-500"
+                      />
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {formData.requirements.map((requirement, index) => (
+                        <div key={index} className="flex items-center gap-3 p-3 bg-gradient-to-r from-rose-50 to-pink-50 dark:from-rose-900/20 dark:to-pink-900/20 rounded-xl">
+                          <div className="w-2 h-2 bg-gradient-to-r from-rose-500 to-pink-500 rounded-full flex-shrink-0"></div>
+                          <span className="flex-1 text-sm">{requirement}</span>
+                          <button
+                            type="button"
+                            onClick={() => removeRequirement(index)}
+                            className="text-rose-500 hover:text-rose-600 flex-shrink-0"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="Add a requirement"
+                          value={newRequirement}
+                          onChange={(e) => setNewRequirement(e.target.value)}
+                          className="h-12 rounded-xl"
+                          onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addRequirement())}
+                        />
+                        <Button type="button" onClick={addRequirement} variant="outline" className="h-12 px-4 rounded-xl">
+                          <Plus className="w-5 h-5" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </FormCard>
+
+                  <FormCard>
+                    <CardHeader>
+                      <SectionHeader 
+                        title="Learning Outcomes" 
+                        description="What students will learn from this course"
+                        icon={Award}
+                        color="from-emerald-500 to-green-500"
+                      />
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {formData.learningOutcomes.map((outcome, index) => (
+                        <div key={index} className="flex items-center gap-3 p-3 bg-gradient-to-r from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/20 rounded-xl">
+                          <div className="w-2 h-2 bg-gradient-to-r from-emerald-500 to-green-500 rounded-full flex-shrink-0"></div>
+                          <span className="flex-1 text-sm">{outcome}</span>
+                          <button
+                            type="button"
+                            onClick={() => removeOutcome(index)}
+                            className="text-emerald-500 hover:text-emerald-600 flex-shrink-0"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="Add a learning outcome"
+                          value={newOutcome}
+                          onChange={(e) => setNewOutcome(e.target.value)}
+                          className="h-12 rounded-xl"
+                          onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addOutcome())}
+                        />
+                        <Button type="button" onClick={addOutcome} variant="outline" className="h-12 px-4 rounded-xl">
+                          <Plus className="w-5 h-5" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </FormCard>
+                </div>
+
+                {/* Course Content */}
+                <FormCard>
+                  <CardHeader>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <SectionHeader 
+                        title="Course Content" 
+                        description="Add modules, chapters and lessons to your course"
+                        icon={Layers}
+                        color="from-purple-500 to-indigo-500"
+                      />
+                      <Button type="button" onClick={addModule} className="h-11 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white">
+                        <Plus className="w-4 h-4 mr-1.5" />
+                        Add Module
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    {formData.modules.map((module, moduleIndex) => (
+                      <Accordion key={moduleIndex} type="single" collapsible className="border border-slate-200/50 dark:border-slate-700/50 rounded-2xl overflow-hidden">
+                        <AccordionItem value={`module-${moduleIndex}`} className="border-b-0">
+                          <AccordionTrigger className="px-6 hover:no-underline">
+                            <div className="flex items-center gap-4 flex-1 text-left">
+                              <div className="w-12 h-12 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-lg">
+                                {moduleIndex + 1}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-bold text-slate-900 dark:text-white truncate">{module.title || `Module ${moduleIndex + 1}`}</p>
+                                <p className="text-sm text-slate-500 truncate">
+                                  {module.chapters.length} chapters • {module.chapters.reduce((sum, ch) => sum + ch.lessons.length, 0)} lessons
+                                </p>
+                              </div>
+                            </div>
+                          </AccordionTrigger>
+                          <AccordionContent className="px-6 pb-6">
+                            <div className="space-y-6">
+                              <FormGroup label="Module Title" required icon={Bookmark}>
+                                <Input
+                                  placeholder="Module Title *"
+                                  value={module.title}
+                                  onChange={(e) => {
+                                    const updatedModules = [...formData.modules]
+                                    updatedModules[moduleIndex] = {
+                                      ...updatedModules[moduleIndex],
+                                      title: e.target.value
+                                    }
+                                    setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                  }}
+                                  className="h-12 rounded-xl"
+                                  required
+                                />
+                              </FormGroup>
+
+                              <FormGroup label="Module Description" required icon={FileText}>
+                                <Textarea
+                                  placeholder="Module Description *"
+                                  value={module.description}
+                                  onChange={(e) => {
+                                    const updatedModules = [...formData.modules]
+                                    updatedModules[moduleIndex] = {
+                                      ...updatedModules[moduleIndex],
+                                      description: e.target.value
+                                    }
+                                    setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                  }}
+                                  className="min-h-[100px] rounded-xl"
+                                  required
+                                />
+                              </FormGroup>
+
+                              {/* Module thumbnail upload */}
+                              <FileUploadArea
+                                type="moduleThumbnail"
+                                label="Module Thumbnail (Optional)"
+                                acceptedFiles="image/jpeg,image/jpg,image/png,image/webp"
+                                maxSize="20MB"
+                                currentFile={module.thumbnailUrl ? {
+                                  key: `module-${moduleIndex}-thumbnail`,
+                                  url: module.thumbnailUrl,
+                                  size: 0,
+                                  type: 'image',
+                                  fileName: 'module-thumbnail.jpg'
+                                } : null}
+                                onFileChange={(e) => handleModuleThumbnailChange(e, moduleIndex)}
+                                moduleIndex={moduleIndex}
+                                uploadProgress={uploadProgress}
+                                onCancelUpload={cancelUpload}
+                                onRetryUpload={handleRetryUpload}
+                              />
+
+                              {/* Chapters */}
+                              <div className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                  <h4 className="font-bold text-slate-900 dark:text-white">Chapters</h4>
+                                  <Button 
+                                    type="button" 
+                                    onClick={() => addChapter(moduleIndex)} 
+                                    variant="outline"
+                                    className="h-10 rounded-xl"
+                                  >
+                                    <Plus className="w-4 h-4 mr-1" />
+                                    Add Chapter
+                                  </Button>
+                                </div>
+                                
+                                {module.chapters.map((chapter, chapterIndex) => (
+                                  <Accordion key={chapterIndex} type="single" collapsible className="border border-slate-200/50 dark:border-slate-700/50 rounded-xl">
+                                    <AccordionItem value={`chapter-${moduleIndex}-${chapterIndex}`} className="border-b-0">
+                                      <AccordionTrigger className="px-4 hover:no-underline">
+                                        <div className="flex items-center gap-3 flex-1 text-left">
+                                          <div className="w-10 h-10 bg-gradient-to-r from-blue-600 to-cyan-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-md">
+                                            {chapterIndex + 1}
+                                          </div>
+                                          <div className="flex-1 min-w-0">
+                                            <p className="font-semibold text-slate-900 dark:text-white truncate">{chapter.title || `Chapter ${chapterIndex + 1}`}</p>
+                                            <p className="text-sm text-slate-500 truncate">
+                                              {chapter.lessons.length} lessons
+                                            </p>
+                                          </div>
+                                        </div>
+                                      </AccordionTrigger>
+                                      <AccordionContent className="px-4 pb-4">
+                                        <div className="space-y-4">
+                                          <FormGroup label="Chapter Title" required icon={Bookmark}>
+                                            <Input
+                                              placeholder="Chapter Title *"
+                                              value={chapter.title}
+                                              onChange={(e) => {
+                                                const updatedModules = [...formData.modules]
+                                                updatedModules[moduleIndex] = {
+                                                  ...updatedModules[moduleIndex],
+                                                  chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                    chapIdx === chapterIndex ? {
+                                                      ...chap,
+                                                      title: e.target.value
+                                                    } : chap
+                                                  )
+                                                }
+                                                setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                              }}
+                                              className="h-11 rounded-lg"
+                                              required
+                                            />
+                                          </FormGroup>
+
+                                          <FormGroup label="Chapter Description" required icon={FileText}>
+                                            <Textarea
+                                              placeholder="Chapter Description *"
+                                              value={chapter.description}
+                                              onChange={(e) => {
+                                                const updatedModules = [...formData.modules]
+                                                updatedModules[moduleIndex] = {
+                                                  ...updatedModules[moduleIndex],
+                                                  chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                    chapIdx === chapterIndex ? {
+                                                      ...chap,
+                                                      description: e.target.value
+                                                    } : chap
+                                                  )
+                                                }
+                                                setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                              }}
+                                              className="min-h-[80px] rounded-lg"
+                                              required
+                                            />
+                                          </FormGroup>
+
+                                          {/* Lessons */}
+                                          <div className="space-y-4">
+                                            <div className="flex items-center justify-between">
+                                              <h5 className="font-semibold text-slate-900 dark:text-white">Lessons</h5>
+                                              <Button 
+                                                type="button" 
+                                                onClick={() => addLesson(moduleIndex, chapterIndex)} 
+                                                variant="outline"
+                                                className="h-9 rounded-lg"
+                                              >
+                                                <Plus className="w-3.5 h-3.5 mr-1" />
+                                                Add Lesson
+                                              </Button>
+                                            </div>
+                                            
+                                            {chapter.lessons.map((lesson, lessonIndex) => (
+                                              <div key={lessonIndex} className="border border-slate-200/50 dark:border-slate-700/50 rounded-xl p-4 space-y-4">
+                                                <div className="flex items-center gap-3">
+                                                  <div className="w-8 h-8 bg-gradient-to-r from-slate-600 to-slate-700 rounded-lg flex items-center justify-center text-white font-bold text-xs shadow-md">
+                                                    {lessonIndex + 1}
+                                                  </div>
+                                                  <div className="flex-1 min-w-0">
+                                                    <p className="font-semibold text-slate-900 dark:text-white truncate">{lesson.title || `Lesson ${lessonIndex + 1}`}</p>
+                                                  </div>
+                                                  <Button 
+                                                    type="button" 
+                                                    variant="ghost" 
+                                                    size="icon"
+                                                    onClick={() => removeLesson(moduleIndex, chapterIndex, lessonIndex)}
+                                                    className="h-8 w-8 rounded-lg text-rose-500 hover:text-rose-600 hover:bg-rose-50"
+                                                  >
+                                                    <X className="w-4 h-4" />
+                                                  </Button>
+                                                </div>
+
+                                                <FormGroup label="Lesson Title" required icon={Feather}>
+                                                  <Input
+                                                    placeholder="Lesson Title *"
+                                                    value={lesson.title}
+                                                    onChange={(e) => {
+                                                      const updatedModules = [...formData.modules]
+                                                      updatedModules[moduleIndex] = {
+                                                        ...updatedModules[moduleIndex],
+                                                        chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                          chapIdx === chapterIndex ? {
+                                                            ...chap,
+                                                            lessons: chap.lessons.map((les, lesIdx) =>
+                                                              lesIdx === lessonIndex ? {
+                                                                ...les,
+                                                                title: e.target.value
+                                                              } : les
+                                                            )
+                                                          } : chap
+                                                        )
+                                                      }
+                                                      setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                    }}
+                                                    className="h-11 rounded-lg"
+                                                    required
+                                                  />
+                                                </FormGroup>
+
+                                                <FormGroup label="Lesson Description" required icon={FileText}>
+                                                  <Textarea
+                                                    placeholder="Lesson Description *"
+                                                    value={lesson.description}
+                                                    onChange={(e) => {
+                                                      const updatedModules = [...formData.modules]
+                                                      updatedModules[moduleIndex] = {
+                                                        ...updatedModules[moduleIndex],
+                                                        chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                          chapIdx === chapterIndex ? {
+                                                            ...chap,
+                                                            lessons: chap.lessons.map((les, lesIdx) =>
+                                                              lesIdx === lessonIndex ? {
+                                                                ...les,
+                                                                description: e.target.value
+                                                              } : les
+                                                            )
+                                                          } : chap
+                                                        )
+                                                      }
+                                                      setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                    }}
+                                                    className="min-h-[80px] rounded-lg"
+                                                    required
+                                                  />
+                                                </FormGroup>
+
+                                                {/* Video Upload */}
+                                                <FileUploadArea
+                                                  type="lessonVideo"
+                                                  label="Lesson Video * (10GB supported)"
+                                                  acceptedFiles="video/mp4,video/webm,video/ogg,video/quicktime,video/mov"
+                                                  maxSize="10GB"
+                                                  currentFile={lesson.video || null}
+                                                  onFileChange={(e) => handleLessonVideoChange(e, moduleIndex, chapterIndex, lessonIndex)}
+                                                  moduleIndex={moduleIndex}
+                                                  chapterIndex={chapterIndex}
+                                                  lessonIndex={lessonIndex}
+                                                  uploadProgress={uploadProgress}
+                                                  onCancelUpload={cancelUpload}
+                                                  onRetryUpload={handleRetryUpload}
+                                                />
+
+                                                <FormGroup label="Duration (minutes)" icon={Clock}>
+                                                  <Input
+                                                    type="number"
+                                                    placeholder="e.g., 45"
+                                                    value={lesson.duration}
+                                                    onChange={(e) => {
+                                                      const updatedModules = [...formData.modules]
+                                                      updatedModules[moduleIndex] = {
+                                                        ...updatedModules[moduleIndex],
+                                                        chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                          chapIdx === chapterIndex ? {
+                                                            ...chap,
+                                                            lessons: chap.lessons.map((les, lesIdx) =>
+                                                              lesIdx === lessonIndex ? {
+                                                                ...les,
+                                                                duration: parseInt(e.target.value) || 0
+                                                              } : les
+                                                            )
+                                                          } : chap
+                                                        )
+                                                      }
+                                                      setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                    }}
+                                                    className="h-11 rounded-lg"
+                                                    min="0"
+                                                  />
+                                                </FormGroup>
+
+                                                <FormGroup label="Lesson Content" required icon={BookOpen}>
+                                                  <Textarea
+                                                    placeholder="Detailed content for this lesson..."
+                                                    value={lesson.content}
+                                                    onChange={(e) => {
+                                                      const updatedModules = [...formData.modules]
+                                                      updatedModules[moduleIndex] = {
+                                                        ...updatedModules[moduleIndex],
+                                                        chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                          chapIdx === chapterIndex ? {
+                                                            ...chap,
+                                                            lessons: chap.lessons.map((les, lesIdx) =>
+                                                              lesIdx === lessonIndex ? {
+                                                                ...les,
+                                                                content: e.target.value
+                                                              } : les
+                                                            )
+                                                          } : chap
+                                                        )
+                                                      }
+                                                      setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                    }}
+                                                    className="min-h-[100px] rounded-lg"
+                                                    required
+                                                  />
+                                                </FormGroup>
+
+                                                <div className="flex items-center gap-3 p-3 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-lg">
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={lesson.isPreview}
+                                                    onChange={(e) => {
+                                                      const updatedModules = [...formData.modules]
+                                                      updatedModules[moduleIndex] = {
+                                                        ...updatedModules[moduleIndex],
+                                                        chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                          chapIdx === chapterIndex ? {
+                                                            ...chap,
+                                                            lessons: chap.lessons.map((les, lesIdx) =>
+                                                              lesIdx === lessonIndex ? {
+                                                                ...les,
+                                                                isPreview: e.target.checked
+                                                              } : les
+                                                            )
+                                                          } : chap
+                                                        )
+                                                      }
+                                                      setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                    }}
+                                                    className="w-5 h-5 rounded border-slate-300 dark:border-slate-600 text-emerald-600 focus:ring-emerald-500"
+                                                  />
+                                                  <label className="text-sm font-semibold text-slate-900 dark:text-white">Preview Lesson</label>
+                                                  <span className="text-xs text-slate-500">(Free for all students)</span>
+                                                </div>
+
+                                                {/* Resources */}
+                                                <div className="space-y-3">
+                                                  <div className="flex items-center justify-between">
+                                                    <h6 className="font-medium text-slate-900 dark:text-white">Resources</h6>
+                                                    <Button 
+                                                      type="button" 
+                                                      onClick={() => addResource(moduleIndex, chapterIndex, lessonIndex)} 
+                                                      variant="outline"
+                                                      size="sm"
+                                                      className="h-8 rounded-lg"
+                                                    >
+                                                      <Plus className="w-3.5 h-3.5 mr-1" />
+                                                      Add Resource
+                                                    </Button>
+                                                  </div>
+                                                  
+                                                  {lesson.resources.map((resource, resourceIndex) => (
+                                                    <div key={resourceIndex} className="grid grid-cols-12 gap-2 p-2 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800/50 dark:to-slate-900/50 rounded-lg">
+                                                      <Input
+                                                        placeholder="Title"
+                                                        value={resource.title}
+                                                        onChange={(e) => {
+                                                          const updatedModules = [...formData.modules]
+                                                          updatedModules[moduleIndex] = {
+                                                            ...updatedModules[moduleIndex],
+                                                            chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                              chapIdx === chapterIndex ? {
+                                                                ...chap,
+                                                                lessons: chap.lessons.map((les, lesIdx) =>
+                                                                  lesIdx === lessonIndex ? {
+                                                                    ...les,
+                                                                    resources: les.resources.map((res, resIdx) =>
+                                                                      resIdx === resourceIndex ? {
+                                                                        ...res,
+                                                                        title: e.target.value
+                                                                      } : res
+                                                                    )
+                                                                  } : les
+                                                                )
+                                                              } : chap
+                                                            )
+                                                          }
+                                                          setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                        }}
+                                                        className="col-span-5 rounded-md h-9 text-sm"
+                                                      />
+                                                      <Input
+                                                        placeholder="URL"
+                                                        value={resource.url}
+                                                        onChange={(e) => {
+                                                          const updatedModules = [...formData.modules]
+                                                          updatedModules[moduleIndex] = {
+                                                            ...updatedModules[moduleIndex],
+                                                            chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                              chapIdx === chapterIndex ? {
+                                                                ...chap,
+                                                                lessons: chap.lessons.map((les, lesIdx) =>
+                                                                  lesIdx === lessonIndex ? {
+                                                                    ...les,
+                                                                    resources: les.resources.map((res, resIdx) =>
+                                                                      resIdx === resourceIndex ? {
+                                                                        ...res,
+                                                                        url: e.target.value
+                                                                      } : res
+                                                                    )
+                                                                  } : les
+                                                                )
+                                                              } : chap
+                                                            )
+                                                          }
+                                                          setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                        }}
+                                                        className="col-span-5 rounded-md h-9 text-sm"
+                                                      />
+                                                      <select
+                                                        value={resource.type}
+                                                        onChange={(e) => {
+                                                          const updatedModules = [...formData.modules]
+                                                          updatedModules[moduleIndex] = {
+                                                            ...updatedModules[moduleIndex],
+                                                            chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                              chapIdx === chapterIndex ? {
+                                                                ...chap,
+                                                                lessons: chap.lessons.map((les, lesIdx) =>
+                                                                  lesIdx === lessonIndex ? {
+                                                                    ...les,
+                                                                    resources: les.resources.map((res, resIdx) =>
+                                                                      resIdx === resourceIndex ? {
+                                                                        ...res,
+                                                                        type: e.target.value as any
+                                                                      } : res
+                                                                    )
+                                                                  } : les
+                                                                )
+                                                              } : chap
+                                                            )
+                                                          }
+                                                          setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                        }}
+                                                        className="col-span-1 rounded-md h-9 text-sm border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+                                                      >
+                                                        <option value="pdf">PDF</option>
+                                                        <option value="document">Document</option>
+                                                        <option value="link">Link</option>
+                                                        <option value="video">Video</option>
+                                                      </select>
+                                                      <Button 
+                                                        type="button" 
+                                                        variant="ghost" 
+                                                        size="icon"
+                                                        onClick={() => removeResource(moduleIndex, chapterIndex, lessonIndex, resourceIndex)}
+                                                        className="col-span-1 h-9 w-9 rounded-md text-rose-500 hover:text-rose-600"
+                                                      >
+                                                        <X className="w-4 h-4" />
+                                                      </Button>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      </AccordionContent>
+                                    </AccordionItem>
+                                  </Accordion>
+                                ))}
+                              </div>
+                            </div>
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
+                    ))}
+
+                    {formData.modules.length === 0 && (
+                      <div className="text-center py-12 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl">
+                        <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-100 to-indigo-100 dark:from-purple-900/30 dark:to-indigo-900/30 w-16 h-16 mx-auto mb-4 flex items-center justify-center">
+                          <Layers className="w-8 h-8 text-purple-600 dark:text-purple-400" />
+                        </div>
+                        <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">
+                          No modules yet
+                        </h3>
+                        <p className="text-sm text-slate-500 mb-6">
+                          Start building your course by adding the first module
+                        </p>
+                        <Button type="button" onClick={addModule} className="h-11 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white">
+                          <Plus className="w-4 h-4 mr-1.5" />
+                          Add Your First Module
+                        </Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </FormCard>
+              </TabsContent>
+
+              <TabsContent value="settings" className="space-y-6 mt-4">
+                {/* Pricing */}
+                <FormCard>
+                  <CardHeader>
+                    <SectionHeader 
+                      title="Pricing" 
+                      description="Set your course pricing"
+                      icon={DollarSign}
+                      color="from-amber-500 to-orange-500"
+                    />
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between p-4 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-xl">
+                      <label className="flex items-center gap-4 cursor-pointer">
+                        <div className="relative">
+                          <input
+                            type="checkbox"
+                            checked={formData.isFree}
+                            onChange={(e) => setFormData(prev => ({ ...prev, isFree: e.target.checked }))}
+                            className="sr-only"
+                          />
+                          <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center ${formData.isFree ? 'bg-gradient-to-r from-emerald-500 to-green-500 border-transparent' : 'border-amber-300 dark:border-amber-700'} cursor-pointer`}>
+                            {formData.isFree && <CheckCircle className="w-4 h-4 text-white" />}
+                          </div>
+                        </div>
+                        <div>
+                          <span className="font-semibold text-slate-900 dark:text-white">Free Course</span>
+                          <p className="text-sm text-slate-600 dark:text-slate-400">Available to all students</p>
+                        </div>
+                      </label>
+                    </div>
+                    
+                    {!formData.isFree && (
+                      <FormGroup label="Price ($)" icon={DollarSign}>
+                        <div className="relative">
+                          <span className="absolute left-4 top-1/2 transform -translate-y-1/2 text-amber-600 dark:text-amber-400">$</span>
+                          <Input
+                            type="number"
+                            placeholder="0.00"
+                            value={formData.price}
+                            onChange={(e) => setFormData(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
+                            className="pl-10 h-12 rounded-xl"
+                            min="0"
+                            step="0.01"
+                          />
+                        </div>
+                      </FormGroup>
+                    )}
+                  </CardContent>
+                </FormCard>
+
+                {/* Course Settings */}
+                <FormCard>
+                  <CardHeader>
+                    <SectionHeader 
+                      title="Settings" 
+                      description="Course visibility and features"
+                      icon={Settings}
+                      color="from-slate-600 to-slate-700"
+                    />
+                  </CardHeader>
+                  <CardContent>
+                    <label className="flex items-center gap-4 cursor-pointer p-4 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800/50 dark:to-slate-900/50 rounded-xl">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          checked={formData.isFeatured}
+                          onChange={(e) => setFormData(prev => ({ ...prev, isFeatured: e.target.checked }))}
+                          className="sr-only"
+                        />
+                        <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center ${formData.isFeatured ? 'bg-gradient-to-r from-emerald-500 to-teal-500 border-transparent' : 'border-slate-300 dark:border-slate-700'} cursor-pointer`}>
+                          {formData.isFeatured && <CheckCircle className="w-4 h-4 text-white" />}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="font-semibold text-slate-900 dark:text-white">Feature this course</span>
+                        <p className="text-sm text-slate-600 dark:text-slate-400">Show on homepage</p>
+                      </div>
+                    </label>
+                  </CardContent>
+                </FormCard>
+
+                {/* Upload Stats Panel */}
+                <UploadStatsPanel 
+                  uploadStats={uploadStats}
+                  activeUploads={activeUploads}
+                  uploadProgress={uploadProgress}
+                />
+
+                {/* Course Summary */}
+                <FormCard>
+                  <CardHeader>
+                    <SectionHeader 
+                      title="Course Summary" 
+                      description="Overview of your course"
+                      icon={Layers}
+                      color="from-cyan-500 to-blue-500"
+                    />
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-gradient-to-br from-cyan-50 to-blue-50 dark:from-cyan-900/20 dark:to-blue-900/20 p-3 rounded-xl">
+                        <p className="text-xs text-slate-600 dark:text-slate-400">Modules</p>
+                        <p className="text-xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 bg-clip-text text-transparent">
+                          {formData.modules.length}
+                        </p>
+                      </div>
+                      <div className="bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 p-3 rounded-xl">
+                        <p className="text-xs text-slate-600 dark:text-slate-400">Chapters</p>
+                        <p className="text-xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
+                          {totalChapters}
+                        </p>
+                      </div>
+                      <div className="bg-gradient-to-br from-rose-50 to-red-50 dark:from-rose-900/20 dark:to-red-900/20 p-3 rounded-xl">
+                        <p className="text-xs text-slate-600 dark:text-slate-400">Lessons</p>
+                        <p className="text-xl font-bold bg-gradient-to-r from-rose-600 to-red-600 bg-clip-text text-transparent">
+                          {totalLessons}
+                        </p>
+                      </div>
+                      <div className="bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/20 p-3 rounded-xl">
+                        <p className="text-xs text-slate-600 dark:text-slate-400">Duration</p>
+                        <p className="text-base font-bold bg-gradient-to-r from-emerald-600 to-green-600 bg-clip-text text-transparent">
+                          {formatDuration(totalDuration)}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-3 pt-4 border-t border-slate-200 dark:border-slate-700">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-slate-600 dark:text-slate-400">Price</span>
+                        <span className="font-semibold">
+                          {formData.isFree ? (
+                            <Badge className="bg-gradient-to-r from-emerald-500 to-green-500 text-white">Free</Badge>
+                          ) : (
+                            <span className="bg-gradient-to-r from-amber-600 to-orange-500 bg-clip-text text-transparent font-bold">
+                              ${formData.price.toFixed(2)}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-slate-600 dark:text-slate-400">Level</span>
+                        <Badge variant="outline" className="rounded-full capitalize bg-gradient-to-r from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900">
+                          {formData.level}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-slate-600 dark:text-slate-400">Featured</span>
+                        <Badge variant={formData.isFeatured ? "default" : "outline"} className={formData.isFeatured ? "bg-gradient-to-r from-emerald-500 to-teal-500" : ""}>
+                          {formData.isFeatured ? 'Yes' : 'No'}
+                        </Badge>
+                      </div>
+                    </div>
+                  </CardContent>
+                </FormCard>
+              </TabsContent>
+            </Tabs>
+          </div>
+
+          {/* Desktop Layout - 3 columns */}
+          <div className="hidden sm:grid grid-cols-1 lg:grid-cols-4 gap-8">
+            {/* Main Content - 3 columns */}
+            <div className="lg:col-span-3 space-y-8">
+              {/* Basic Information */}
+              <FormCard>
+                <CardHeader>
+                  <SectionHeader 
+                    title="Course Information" 
+                    description="Basic details about your course"
+                    icon={BookOpen}
+                  />
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <FormGroup label="Course Title" required icon={Feather}>
+                      <Input
+                        placeholder="e.g., Advanced Fashion Design Masterclass"
+                        value={formData.title}
+                        onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+                        className="h-12 rounded-xl border-slate-300 dark:border-slate-700 text-base"
+                        required
+                      />
+                    </FormGroup>
+
+                    <FormGroup label="Level" required icon={TrendingUp}>
                       <select
                         value={formData.level}
                         onChange={(e) => setFormData(prev => ({ 
                           ...prev, 
                           level: e.target.value as 'beginner' | 'intermediate' | 'advanced' 
                         }))}
-                        className="w-full rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 sm:px-4 sm:py-3 text-sm sm:text-base focus:outline-none focus:ring-2 focus:ring-rose-500"
+                        className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-emerald-500"
                         required
                       >
                         <option value="beginner">Beginner</option>
                         <option value="intermediate">Intermediate</option>
                         <option value="advanced">Advanced</option>
                       </select>
-                    </div>
-                    
-                    <div>
-                      <label className="text-xs sm:text-sm font-medium mb-1 block">Category *</label>
+                    </FormGroup>
+                  </div>
+
+                  <FormGroup label="Short Description" required icon={FileText}>
+                    <Textarea
+                      placeholder="Brief overview of the course"
+                      value={formData.shortDescription}
+                      onChange={(e) => setFormData(prev => ({ ...prev, shortDescription: e.target.value }))}
+                      className="min-h-[100px] rounded-xl border-slate-300 dark:border-slate-700 text-base"
+                      required
+                    />
+                  </FormGroup>
+
+                  <FormGroup label="Full Description" required icon={BookOpen}>
+                    <Textarea
+                      placeholder="Detailed description of what students will learn..."
+                      value={formData.description}
+                      onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                      className="min-h-[120px] rounded-xl border-slate-300 dark:border-slate-700 text-base"
+                      required
+                    />
+                  </FormGroup>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <FormGroup label="Category" required icon={Tag}>
                       <Input
                         placeholder="e.g., Fashion Design, Pattern Making"
                         value={formData.category}
                         onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
-                        className="rounded-xl sm:rounded-2xl text-sm sm:text-base"
+                        className="h-12 rounded-xl border-slate-300 dark:border-slate-700 text-base"
                         required
                       />
-                    </div>
+                    </FormGroup>
+
+                    <FormGroup label="Tags" icon={Tag}>
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {formData.tags.map((tag, index) => (
+                          <Badge key={index} variant="secondary" className="rounded-full px-4 py-1.5 bg-gradient-to-r from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900">
+                            <span className="truncate">{tag}</span>
+                            <button
+                              type="button"
+                              onClick={() => removeTag(tag)}
+                              className="ml-2 hover:text-rose-500"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </Badge>
+                        ))}
+                      </div>
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="Add a tag and press Enter"
+                          value={newTag}
+                          onChange={(e) => setNewTag(e.target.value)}
+                          className="h-12 rounded-xl border-slate-300 dark:border-slate-700 text-base"
+                          onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())}
+                        />
+                        <Button type="button" onClick={addTag} variant="outline" className="h-12 px-4 rounded-xl">
+                          <Plus className="w-5 h-5" />
+                        </Button>
+                      </div>
+                    </FormGroup>
                   </div>
-                </div>
+                </CardContent>
+              </FormCard>
 
-                <div>
-                  <label className="text-xs sm:text-sm font-medium mb-1 block">Full Description *</label>
-                  <Textarea
-                    placeholder="Detailed description of what students will learn..."
-                    value={formData.description}
-                    onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                    className="rounded-xl sm:rounded-2xl min-h-[80px] sm:min-h-[100px] text-sm sm:text-base"
-                    required
+              {/* Course Media */}
+              <FormCard>
+                <CardHeader>
+                  <SectionHeader 
+                    title="Course Media" 
+                    description="Upload thumbnail and preview video (10GB multipart upload supported)"
+                    icon={Film}
+                    color="from-blue-500 to-cyan-500"
                   />
-                </div>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <FileUploadArea
+                      type="thumbnail"
+                      label="Course Thumbnail *"
+                      acceptedFiles="image/jpeg,image/jpg,image/png,image/webp"
+                      maxSize="20MB"
+                      currentFile={formData.thumbnail}
+                      onFileChange={handleThumbnailChange}
+                      uploadProgress={uploadProgress}
+                      onCancelUpload={cancelUpload}
+                      onRetryUpload={handleRetryUpload}
+                    />
 
-                {/* Tags */}
-                <div className="space-y-2">
-                  <label className="text-xs sm:text-sm font-medium">Tags</label>
-                  <div className="flex flex-wrap gap-1.5 mb-2">
-                    {formData.tags.map((tag, index) => (
-                      <Badge key={index} variant="secondary" className="rounded-full px-2 py-0.5 text-xs">
-                        <span className="truncate max-w-[80px]">{tag}</span>
+                    <FileUploadArea
+                      type="previewVideo"
+                      label="Preview Video (Optional)"
+                      acceptedFiles="video/mp4,video/webm,video/ogg,video/quicktime,video/mov"
+                      maxSize="10GB"
+                      currentFile={formData.previewVideo}
+                      onFileChange={handlePreviewVideoChange}
+                      uploadProgress={uploadProgress}
+                      onCancelUpload={cancelUpload}
+                      onRetryUpload={handleRetryUpload}
+                    />
+                  </div>
+                </CardContent>
+              </FormCard>
+
+              {/* Requirements & Outcomes */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <FormCard>
+                  <CardHeader>
+                    <SectionHeader 
+                      title="Requirements" 
+                      description="What students should know before taking this course"
+                      icon={Target}
+                      color="from-rose-500 to-pink-500"
+                    />
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {formData.requirements.map((requirement, index) => (
+                      <div key={index} className="flex items-center gap-3 p-3 bg-gradient-to-r from-rose-50 to-pink-50 dark:from-rose-900/20 dark:to-pink-900/20 rounded-xl">
+                        <div className="w-2 h-2 bg-gradient-to-r from-rose-500 to-pink-500 rounded-full flex-shrink-0"></div>
+                        <span className="flex-1 text-sm">{requirement}</span>
                         <button
                           type="button"
-                          onClick={() => removeTag(tag)}
-                          className="ml-1 hover:text-red-500"
+                          onClick={() => removeRequirement(index)}
+                          className="text-rose-500 hover:text-rose-600 flex-shrink-0"
                         >
-                          <X className="w-2.5 h-2.5" />
+                          <X className="w-4 h-4" />
                         </button>
-                      </Badge>
-                    ))}
-                  </div>
-                  <div className="flex gap-1.5">
-                    <Input
-                      placeholder="Add a tag and press Enter"
-                      value={newTag}
-                      onChange={(e) => setNewTag(e.target.value)}
-                      className="rounded-xl flex-1 text-xs sm:text-sm"
-                      onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())}
-                    />
-                    <Button type="button" onClick={addTag} variant="outline" className="rounded-xl px-2.5" size="sm">
-                      <Plus className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Course Media */}
-            <Card className="rounded-xl sm:rounded-2xl border-slate-200 dark:border-slate-700">
-              <CardHeader className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 rounded-t-xl sm:rounded-t-2xl p-3 sm:p-6">
-                <CardTitle className="flex items-center text-base sm:text-lg md:text-xl">
-                  <Video className="w-4 h-4 sm:w-5 sm:h-5 mr-1.5 sm:mr-2 text-rose-600 flex-shrink-0" />
-                  <span className="truncate">Course Media</span>
-                </CardTitle>
-                <CardDescription className="text-xs sm:text-sm">
-                  Upload thumbnail and preview video (10GB multipart upload supported)
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="pt-3 sm:pt-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
-                  {/* Thumbnail Upload */}
-                  <FileUploadArea
-                    type="thumbnail"
-                    label="Course Thumbnail *"
-                    acceptedFiles="image/jpeg,image/jpg,image/png,image/webp"
-                    maxSize="5MB"
-                    currentFile={formData.thumbnail}
-                    onFileChange={handleThumbnailChange}
-                    uploadProgress={uploadProgress}
-                    onCancelUpload={cancelUpload}
-                    onRetryUpload={handleRetryUpload}
-                  />
-
-                  {/* Preview Video Upload */}
-                  <FileUploadArea
-                    type="previewVideo"
-                    label="Preview Video (Optional)"
-                    acceptedFiles="video/mp4,video/webm,video/ogg,video/quicktime,video/mov"
-                    maxSize="10GB"
-                    currentFile={formData.previewVideo}
-                    onFileChange={handlePreviewVideoChange}
-                    uploadProgress={uploadProgress}
-                    onCancelUpload={cancelUpload}
-                    onRetryUpload={handleRetryUpload}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Requirements & Outcomes */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-              {/* Requirements */}
-              <Card className="rounded-xl sm:rounded-2xl border-slate-200 dark:border-slate-700">
-                <CardHeader className="p-3 sm:p-4">
-                  <CardTitle className="text-sm sm:text-base">Requirements</CardTitle>
-                  <CardDescription className="text-xs sm:text-sm">
-                    What students should know before taking this course
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="pt-0 space-y-2">
-                  {formData.requirements.map((requirement, index) => (
-                    <div key={index} className="flex items-center gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                      <div className="w-1.5 h-1.5 bg-rose-500 rounded-full flex-shrink-0"></div>
-                      <span className="flex-1 text-xs sm:text-sm truncate">{requirement}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeRequirement(index)}
-                        className="text-red-500 hover:text-red-600 flex-shrink-0"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
-                  <div className="flex gap-1.5">
-                    <Input
-                      placeholder="Add a requirement"
-                      value={newRequirement}
-                      onChange={(e) => setNewRequirement(e.target.value)}
-                      className="rounded-lg text-xs sm:text-sm"
-                      onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addRequirement())}
-                    />
-                    <Button type="button" onClick={addRequirement} variant="outline" size="sm" className="rounded-lg px-2.5">
-                      <Plus className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Learning Outcomes */}
-              <Card className="rounded-xl sm:rounded-2xl border-slate-200 dark:border-slate-700">
-                <CardHeader className="p-3 sm:p-4">
-                  <CardTitle className="text-sm sm:text-base">Learning Outcomes</CardTitle>
-                  <CardDescription className="text-xs sm:text-sm">
-                    What students will learn from this course
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="pt-0 space-y-2">
-                  {formData.learningOutcomes.map((outcome, index) => (
-                    <div key={index} className="flex items-center gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                      <div className="w-1.5 h-1.5 bg-green-500 rounded-full flex-shrink-0"></div>
-                      <span className="flex-1 text-xs sm:text-sm truncate">{outcome}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeOutcome(index)}
-                        className="text-red-500 hover:text-red-600 flex-shrink-0"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
-                  <div className="flex gap-1.5">
-                    <Input
-                      placeholder="Add a learning outcome"
-                      value={newOutcome}
-                      onChange={(e) => setNewOutcome(e.target.value)}
-                      className="rounded-lg text-xs sm:text-sm"
-                      onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addOutcome())}
-                    />
-                    <Button type="button" onClick={addOutcome} variant="outline" size="sm" className="rounded-lg px-2.5">
-                      <Plus className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Course Content */}
-            <Card className="rounded-xl sm:rounded-2xl border-slate-200 dark:border-slate-700">
-              <CardHeader className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 rounded-t-xl sm:rounded-t-2xl p-3 sm:p-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <CardTitle className="flex items-center text-base sm:text-lg md:text-xl">
-                      <BookOpen className="w-4 h-4 sm:w-5 sm:h-5 mr-1.5 sm:mr-2 text-rose-600 flex-shrink-0" />
-                      <span className="truncate">Course Content</span>
-                    </CardTitle>
-                    <CardDescription className="text-xs sm:text-sm">
-                      Add modules, chapters and lessons to your course
-                    </CardDescription>
-                  </div>
-                  <Button type="button" onClick={addModule} variant="outline" className="rounded-xl sm:rounded-2xl text-xs sm:text-sm px-3" disabled={activeUploads.length > 0} size="sm">
-                    <Plus className="w-3.5 h-3.5 mr-1.5" />
-                    Add Module
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-3 sm:pt-4 space-y-4 sm:space-y-6">
-                {formData.modules.map((module, moduleIndex) => (
-                  <div key={moduleIndex} className="border border-slate-200 dark:border-slate-700 rounded-xl sm:rounded-2xl p-3 sm:p-4 md:p-6 bg-gradient-to-br from-slate-50/50 to-white dark:from-slate-800/50 dark:to-slate-900/50">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-                      <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                        <div className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 bg-gradient-to-r from-rose-500 to-pink-500 rounded-lg sm:rounded-xl flex items-center justify-center text-white font-bold text-sm sm:text-base md:text-lg flex-shrink-0">
-                          {moduleIndex + 1}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <Input
-                            placeholder="Module Title *"
-                            value={module.title}
-                            onChange={(e) => {
-                              const updatedModules = [...formData.modules]
-                              updatedModules[moduleIndex].title = e.target.value
-                              setFormData(prev => ({ ...prev, modules: updatedModules }))
-                            }}
-                            className="rounded-xl sm:rounded-2xl text-sm sm:text-base md:text-lg font-semibold"
-                            required
-                            disabled={activeUploads.length > 0}
-                          />
-                        </div>
                       </div>
-                      <Button 
-                        type="button" 
-                        variant="ghost" 
-                        size="icon" 
-                        onClick={() => removeModule(moduleIndex)}
-                        className="text-red-500 hover:text-red-600 hover:bg-red-50 rounded-xl self-start sm:self-center"
-                        disabled={activeUploads.length > 0}
-                      >
-                        <Trash2 className="w-4 h-4 sm:w-4 sm:h-4" />
+                    ))}
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Add a requirement"
+                        value={newRequirement}
+                        onChange={(e) => setNewRequirement(e.target.value)}
+                        className="h-12 rounded-xl"
+                        onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addRequirement())}
+                      />
+                      <Button type="button" onClick={addRequirement} variant="outline" className="h-12 px-4 rounded-xl">
+                        <Plus className="w-5 h-5" />
                       </Button>
                     </div>
-                    
-                    {/* Module thumbnail upload */}
-                    <div className="mb-4">
-                      <FileUploadArea
-                        type="moduleThumbnail"
-                        label="Module Thumbnail (Optional)"
-                        acceptedFiles="image/jpeg,image/jpg,image/png,image/webp"
-                        maxSize="5MB"
-                        currentFile={module.thumbnailUrl ? {
-                          key: `module-${moduleIndex}-thumbnail`,
-                          url: module.thumbnailUrl,
-                          size: 0,
-                          type: 'image'
-                        } : null}
-                        onFileChange={(e) => handleModuleThumbnailChange(e, moduleIndex)}
-                        moduleIndex={moduleIndex}
-                        uploadProgress={uploadProgress}
-                        onCancelUpload={cancelUpload}
-                        onRetryUpload={handleRetryUpload}
-                      />
-                    </div>
-                    
-                    <Textarea
-                      placeholder="Module Description *"
-                      value={module.description}
-                      onChange={(e) => {
-                        const updatedModules = [...formData.modules]
-                        updatedModules[moduleIndex].description = e.target.value
-                        setFormData(prev => ({ ...prev, modules: updatedModules }))
-                      }}
-                      className="rounded-xl sm:rounded-2xl mb-4 min-h-[60px] sm:min-h-[80px] text-sm sm:text-base"
-                      required
-                      disabled={activeUploads.length > 0}
+                  </CardContent>
+                </FormCard>
+
+                <FormCard>
+                  <CardHeader>
+                    <SectionHeader 
+                      title="Learning Outcomes" 
+                      description="What students will learn from this course"
+                      icon={Award}
+                      color="from-emerald-500 to-green-500"
                     />
-                    
-                    {/* Chapters */}
-                    <div className="space-y-3 sm:space-y-4">
-                      {module.chapters.map((chapter, chapterIndex) => (
-                        <div key={chapterIndex} className="border border-slate-200 dark:border-slate-600 rounded-xl sm:rounded-2xl p-3 sm:p-4 bg-white/50 dark:bg-slate-800/30">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
-                            <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                              <div className="w-5 h-5 sm:w-6 sm:h-6 md:w-8 md:h-8 bg-gradient-to-r from-blue-500 to-cyan-500 rounded sm:rounded-lg flex items-center justify-center text-white font-bold text-xs sm:text-sm flex-shrink-0">
-                                {chapterIndex + 1}
-                              </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {formData.learningOutcomes.map((outcome, index) => (
+                      <div key={index} className="flex items-center gap-3 p-3 bg-gradient-to-r from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/20 rounded-xl">
+                        <div className="w-2 h-2 bg-gradient-to-r from-emerald-500 to-green-500 rounded-full flex-shrink-0"></div>
+                        <span className="flex-1 text-sm">{outcome}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeOutcome(index)}
+                          className="text-emerald-500 hover:text-emerald-600 flex-shrink-0"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Add a learning outcome"
+                        value={newOutcome}
+                        onChange={(e) => setNewOutcome(e.target.value)}
+                        className="h-12 rounded-xl"
+                        onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addOutcome())}
+                      />
+                      <Button type="button" onClick={addOutcome} variant="outline" className="h-12 px-4 rounded-xl">
+                        <Plus className="w-5 h-5" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </FormCard>
+              </div>
+
+              {/* Course Content */}
+              <FormCard>
+                <CardHeader>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <SectionHeader 
+                      title="Course Content" 
+                      description="Add modules, chapters and lessons to your course"
+                      icon={Layers}
+                      color="from-purple-500 to-indigo-500"
+                    />
+                    <Button type="button" onClick={addModule} className="h-11 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white">
+                      <Plus className="w-4 h-4 mr-1.5" />
+                      Add Module
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {formData.modules.map((module, moduleIndex) => (
+                    <Accordion key={moduleIndex} type="single" collapsible className="border border-slate-200/50 dark:border-slate-700/50 rounded-2xl overflow-hidden">
+                      <AccordionItem value={`module-${moduleIndex}`} className="border-b-0">
+                        <AccordionTrigger className="px-6 hover:no-underline">
+                          <div className="flex items-center gap-4 flex-1 text-left">
+                            <div className="w-12 h-12 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-lg">
+                              {moduleIndex + 1}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-bold text-slate-900 dark:text-white truncate">{module.title || `Module ${moduleIndex + 1}`}</p>
+                              <p className="text-sm text-slate-500 truncate">
+                                {module.chapters.length} chapters • {module.chapters.reduce((sum, ch) => sum + ch.lessons.length, 0)} lessons
+                              </p>
+                            </div>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="px-6 pb-6">
+                          <div className="space-y-6">
+                            <FormGroup label="Module Title" required icon={Bookmark}>
                               <Input
-                                placeholder="Chapter Title *"
-                                value={chapter.title}
+                                placeholder="Module Title *"
+                                value={module.title}
                                 onChange={(e) => {
                                   const updatedModules = [...formData.modules]
-                                  updatedModules[moduleIndex].chapters[chapterIndex].title = e.target.value
+                                  updatedModules[moduleIndex] = {
+                                    ...updatedModules[moduleIndex],
+                                    title: e.target.value
+                                  }
                                   setFormData(prev => ({ ...prev, modules: updatedModules }))
                                 }}
-                                className="rounded-xl sm:rounded-2xl flex-1 text-sm sm:text-base min-w-0"
+                                className="h-12 rounded-xl"
                                 required
-                                disabled={activeUploads.length > 0}
                               />
-                            </div>
-                            <Button 
-                              type="button" 
-                              variant="ghost" 
-                              size="icon"
-                              onClick={() => removeChapter(moduleIndex, chapterIndex)}
-                              className="text-red-500 hover:text-red-600 hover:bg-red-50 rounded-xl self-start sm:self-center"
-                              disabled={activeUploads.length > 0}
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </Button>
-                          </div>
+                            </FormGroup>
 
-                          <Textarea
-                            placeholder="Chapter Description *"
-                            value={chapter.description}
-                            onChange={(e) => {
-                              const updatedModules = [...formData.modules]
-                              updatedModules[moduleIndex].chapters[chapterIndex].description = e.target.value
-                              setFormData(prev => ({ ...prev, modules: updatedModules }))
-                            }}
-                            className="rounded-xl sm:rounded-2xl mb-3 min-h-[50px] sm:min-h-[60px] text-sm sm:text-base"
-                            required
-                            disabled={activeUploads.length > 0}
-                          />
-                          
-                          {/* Lessons inside chapter */}
-                          <div className="space-y-2 sm:space-y-3">
-                            {chapter.lessons.map((lesson, lessonIndex) => (
-                              <div key={lessonIndex} className="border border-slate-200 dark:border-slate-600 rounded-xl sm:rounded-2xl p-2.5 sm:p-3 md:p-4 bg-slate-50/50 dark:bg-slate-800/20">
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2.5 sm:mb-3">
-                                  <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                                    <div className="w-4 h-4 sm:w-5 sm:h-5 md:w-7 md:h-7 bg-gradient-to-r from-slate-500 to-slate-600 rounded sm:rounded-md flex items-center justify-center text-white font-bold text-[10px] sm:text-xs flex-shrink-0">
-                                      {lessonIndex + 1}
-                                    </div>
-                                    <Input
-                                      placeholder="Lesson Title *"
-                                      value={lesson.title}
-                                      onChange={(e) => {
-                                        const updatedModules = [...formData.modules]
-                                        updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].title = e.target.value
-                                        setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                      }}
-                                      className="rounded-xl sm:rounded-2xl flex-1 text-sm sm:text-base min-w-0"
-                                      required
-                                      disabled={activeUploads.length > 0}
-                                    />
-                                  </div>
-                                  <Button 
-                                    type="button" 
-                                    variant="ghost" 
-                                    size="icon"
-                                    onClick={() => removeLesson(moduleIndex, chapterIndex, lessonIndex)}
-                                    className="text-red-500 hover:text-red-600 hover:bg-red-50 rounded-xl self-start sm:self-center"
-                                    disabled={activeUploads.length > 0}
-                                  >
-                                    <X className="w-3.5 h-3.5" />
-                                  </Button>
-                                </div>
+                            <FormGroup label="Module Description" required icon={FileText}>
+                              <Textarea
+                                placeholder="Module Description *"
+                                value={module.description}
+                                onChange={(e) => {
+                                  const updatedModules = [...formData.modules]
+                                  updatedModules[moduleIndex] = {
+                                    ...updatedModules[moduleIndex],
+                                    description: e.target.value
+                                  }
+                                  setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                }}
+                                className="min-h-[100px] rounded-xl"
+                                required
+                              />
+                            </FormGroup>
 
-                                <Textarea
-                                  placeholder="Lesson Description *"
-                                  value={lesson.description}
-                                  onChange={(e) => {
-                                    const updatedModules = [...formData.modules]
-                                    updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].description = e.target.value
-                                    setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                  }}
-                                  className="rounded-xl sm:rounded-2xl mb-2.5 sm:mb-3 min-h-[50px] sm:min-h-[60px] text-sm sm:text-base"
-                                  required
-                                  disabled={activeUploads.length > 0}
-                                />
+                            {/* Module thumbnail upload */}
+                            <FileUploadArea
+                              type="moduleThumbnail"
+                              label="Module Thumbnail (Optional)"
+                              acceptedFiles="image/jpeg,image/jpg,image/png,image/webp"
+                              maxSize="20MB"
+                              currentFile={module.thumbnailUrl ? {
+                                key: `module-${moduleIndex}-thumbnail`,
+                                url: module.thumbnailUrl,
+                                size: 0,
+                                type: 'image',
+                                fileName: 'module-thumbnail.jpg'
+                              } : null}
+                              onFileChange={(e) => handleModuleThumbnailChange(e, moduleIndex)}
+                              moduleIndex={moduleIndex}
+                              uploadProgress={uploadProgress}
+                              onCancelUpload={cancelUpload}
+                              onRetryUpload={handleRetryUpload}
+                            />
 
-                                {/* Video Upload - 10GB SUPPORT */}
-                                <div className="mb-2.5 sm:mb-3">
-                                  <FileUploadArea
-                                    type="lessonVideo"
-                                    label="Lesson Video * (10GB supported)"
-                                    acceptedFiles="video/mp4,video/webm,video/ogg,video/quicktime,video/mov"
-                                    maxSize="10GB"
-                                    currentFile={lesson.video || null}
-                                    onFileChange={(e) => handleLessonVideoChange(e, moduleIndex, chapterIndex, lessonIndex)}
-                                    moduleIndex={moduleIndex}
-                                    chapterIndex={chapterIndex}
-                                    lessonIndex={lessonIndex}
-                                    uploadProgress={uploadProgress}
-                                    onCancelUpload={cancelUpload}
-                                    onRetryUpload={handleRetryUpload}
-                                  />
-                                </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 sm:gap-3 mb-2.5 sm:mb-3">
-                                  <div>
-                                    <label className="text-xs sm:text-sm font-medium mb-1 block">Duration (minutes)</label>
-                                    <Input
-                                      type="number"
-                                      placeholder="e.g., 45"
-                                      value={lesson.duration}
-                                      onChange={(e) => {
-                                        const updatedModules = [...formData.modules]
-                                        updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].duration = parseInt(e.target.value) || 0
-                                        setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                      }}
-                                      className="rounded-xl sm:rounded-2xl text-sm sm:text-base"
-                                      min="0"
-                                      disabled={activeUploads.length > 0}
-                                    />
-                                  </div>
-                                </div>
-
-                                <div>
-                                  <label className="text-xs sm:text-sm font-medium mb-1 block">Lesson Content *</label>
-                                  <Textarea
-                                    placeholder="Detailed content for this lesson..."
-                                    value={lesson.content}
-                                    onChange={(e) => {
-                                      const updatedModules = [...formData.modules]
-                                      updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].content = e.target.value
-                                      setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                    }}
-                                    className="rounded-xl sm:rounded-2xl min-h-[60px] sm:min-h-[80px] text-sm sm:text-base"
-                                    required
-                                    disabled={activeUploads.length > 0}
-                                  />
-                                </div>
-
-                                <div className="flex items-center gap-2.5 sm:gap-3 mt-2.5 sm:mt-3 p-2 sm:p-3 bg-slate-100 dark:bg-slate-800 rounded-lg sm:rounded-xl">
-                                  <label className="flex items-center gap-1.5 sm:gap-2 cursor-pointer">
-                                    <div className="relative">
-                                      <input
-                                        type="checkbox"
-                                        checked={lesson.isPreview}
-                                        onChange={(e) => {
-                                          const updatedModules = [...formData.modules]
-                                          updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].isPreview = e.target.checked
-                                          setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                        }}
-                                        className="sr-only"
-                                        disabled={activeUploads.length > 0}
-                                      />
-                                      <div className={`w-4 h-4 sm:w-5 sm:h-5 rounded border flex items-center justify-center ${lesson.isPreview ? 'bg-rose-500 border-rose-500' : 'border-slate-300 dark:border-slate-600'} ${activeUploads.length > 0 ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
-                                        {lesson.isPreview && <CheckCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white" />}
-                                      </div>
-                                    </div>
-                                    <div className="min-w-0">
-                                      <span className="text-xs sm:text-sm font-medium">Preview Lesson</span>
-                                      <p className="text-[10px] sm:text-xs text-slate-500">Free for all students</p>
-                                    </div>
-                                  </label>
-                                </div>
-
-                                {/* Resources */}
-                                <div className="space-y-2 sm:space-y-3 mt-2.5 sm:mt-3">
-                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
-                                    <h4 className="text-xs sm:text-sm font-medium">Resources</h4>
-                                    <Button 
-                                      type="button" 
-                                      onClick={() => addResource(moduleIndex, chapterIndex, lessonIndex)} 
-                                      variant="outline" 
-                                      size="sm" 
-                                      className="rounded-xl text-xs px-2 py-1 h-auto"
-                                      disabled={activeUploads.length > 0}
-                                    >
-                                      <Plus className="w-3 h-3 mr-1" />
-                                      Add Resource
-                                    </Button>
-                                  </div>
-                                  
-                                  {lesson.resources.map((resource, resourceIndex) => (
-                                    <div key={resourceIndex} className="grid grid-cols-1 md:grid-cols-12 gap-1.5 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                                      <Input
-                                        placeholder="Title"
-                                        value={resource.title}
-                                        onChange={(e) => {
-                                          const updatedModules = [...formData.modules]
-                                          updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].resources[resourceIndex].title = e.target.value
-                                          setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                        }}
-                                        className="rounded-lg md:col-span-4 text-xs sm:text-sm"
-                                        disabled={activeUploads.length > 0}
-                                      />
-                                      <Input
-                                        placeholder="URL"
-                                        value={resource.url}
-                                        onChange={(e) => {
-                                          const updatedModules = [...formData.modules]
-                                          updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].resources[resourceIndex].url = e.target.value
-                                          setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                        }}
-                                        className="rounded-lg md:col-span-5 text-xs sm:text-sm"
-                                        disabled={activeUploads.length > 0}
-                                      />
-                                      <select
-                                        value={resource.type}
-                                        onChange={(e) => {
-                                          const updatedModules = [...formData.modules]
-                                          updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].resources[resourceIndex].type = e.target.value as any
-                                          setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                        }}
-                                        className="rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs md:col-span-2"
-                                        disabled={activeUploads.length > 0}
-                                      >
-                                        <option value="pdf">PDF</option>
-                                        <option value="document">Document</option>
-                                        <option value="link">Link</option>
-                                        <option value="video">Video</option>
-                                      </select>
-                                      <Button 
-                                        type="button" 
-                                        variant="ghost" 
-                                        size="icon"
-                                        onClick={() => removeResource(moduleIndex, chapterIndex, lessonIndex, resourceIndex)}
-                                        className="text-red-500 rounded-lg hover:text-red-600 md:col-span-1 h-8 w-8"
-                                        disabled={activeUploads.length > 0}
-                                      >
-                                        <X className="w-3.5 h-3.5" />
-                                      </Button>
-                                    </div>
-                                  ))}
-                                </div>
+                            {/* Chapters */}
+                            <div className="space-y-4">
+                              <div className="flex items-center justify-between">
+                                <h4 className="font-bold text-slate-900 dark:text-white">Chapters</h4>
+                                <Button 
+                                  type="button" 
+                                  onClick={() => addChapter(moduleIndex)} 
+                                  variant="outline"
+                                  className="h-10 rounded-xl"
+                                >
+                                  <Plus className="w-4 h-4 mr-1" />
+                                  Add Chapter
+                                </Button>
                               </div>
-                            ))}
-                            
-                            <Button 
-                              type="button" 
-                              onClick={() => addLesson(moduleIndex, chapterIndex)} 
-                              variant="outline" 
-                              className="rounded-xl sm:rounded-2xl w-full text-xs sm:text-sm"
-                              disabled={activeUploads.length > 0}
-                              size="sm"
-                            >
-                              <Plus className="w-3.5 h-3.5 mr-1.5" />
-                              Add Lesson
-                            </Button>
+                              
+                              {module.chapters.map((chapter, chapterIndex) => (
+                                <Accordion key={chapterIndex} type="single" collapsible className="border border-slate-200/50 dark:border-slate-700/50 rounded-xl">
+                                  <AccordionItem value={`chapter-${moduleIndex}-${chapterIndex}`} className="border-b-0">
+                                    <AccordionTrigger className="px-4 hover:no-underline">
+                                      <div className="flex items-center gap-3 flex-1 text-left">
+                                        <div className="w-10 h-10 bg-gradient-to-r from-blue-600 to-cyan-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-md">
+                                          {chapterIndex + 1}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <p className="font-semibold text-slate-900 dark:text-white truncate">{chapter.title || `Chapter ${chapterIndex + 1}`}</p>
+                                          <p className="text-sm text-slate-500 truncate">
+                                            {chapter.lessons.length} lessons
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </AccordionTrigger>
+                                    <AccordionContent className="px-4 pb-4">
+                                      <div className="space-y-4">
+                                        <FormGroup label="Chapter Title" required icon={Bookmark}>
+                                          <Input
+                                            placeholder="Chapter Title *"
+                                            value={chapter.title}
+                                            onChange={(e) => {
+                                              const updatedModules = [...formData.modules]
+                                              updatedModules[moduleIndex] = {
+                                                ...updatedModules[moduleIndex],
+                                                chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                  chapIdx === chapterIndex ? {
+                                                    ...chap,
+                                                    title: e.target.value
+                                                  } : chap
+                                                )
+                                              }
+                                              setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                            }}
+                                            className="h-11 rounded-lg"
+                                            required
+                                          />
+                                        </FormGroup>
+
+                                        <FormGroup label="Chapter Description" required icon={FileText}>
+                                          <Textarea
+                                            placeholder="Chapter Description *"
+                                            value={chapter.description}
+                                            onChange={(e) => {
+                                              const updatedModules = [...formData.modules]
+                                              updatedModules[moduleIndex] = {
+                                                ...updatedModules[moduleIndex],
+                                                chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                  chapIdx === chapterIndex ? {
+                                                    ...chap,
+                                                    description: e.target.value
+                                                  } : chap
+                                                )
+                                              }
+                                              setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                            }}
+                                            className="min-h-[80px] rounded-lg"
+                                            required
+                                          />
+                                        </FormGroup>
+
+                                        {/* Lessons */}
+                                        <div className="space-y-4">
+                                          <div className="flex items-center justify-between">
+                                            <h5 className="font-semibold text-slate-900 dark:text-white">Lessons</h5>
+                                            <Button 
+                                              type="button" 
+                                              onClick={() => addLesson(moduleIndex, chapterIndex)} 
+                                              variant="outline"
+                                              className="h-9 rounded-lg"
+                                            >
+                                              <Plus className="w-3.5 h-3.5 mr-1" />
+                                              Add Lesson
+                                            </Button>
+                                          </div>
+                                          
+                                          {chapter.lessons.map((lesson, lessonIndex) => (
+                                            <div key={lessonIndex} className="border border-slate-200/50 dark:border-slate-700/50 rounded-xl p-4 space-y-4">
+                                              <div className="flex items-center gap-3">
+                                                <div className="w-8 h-8 bg-gradient-to-r from-slate-600 to-slate-700 rounded-lg flex items-center justify-center text-white font-bold text-xs shadow-md">
+                                                  {lessonIndex + 1}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                  <p className="font-semibold text-slate-900 dark:text-white truncate">{lesson.title || `Lesson ${lessonIndex + 1}`}</p>
+                                                </div>
+                                                <Button 
+                                                  type="button" 
+                                                  variant="ghost" 
+                                                  size="icon"
+                                                  onClick={() => removeLesson(moduleIndex, chapterIndex, lessonIndex)}
+                                                  className="h-8 w-8 rounded-lg text-rose-500 hover:text-rose-600 hover:bg-rose-50"
+                                                >
+                                                  <X className="w-4 h-4" />
+                                                </Button>
+                                              </div>
+
+                                              <FormGroup label="Lesson Title" required icon={Feather}>
+                                                <Input
+                                                  placeholder="Lesson Title *"
+                                                  value={lesson.title}
+                                                  onChange={(e) => {
+                                                    const updatedModules = [...formData.modules]
+                                                    updatedModules[moduleIndex] = {
+                                                      ...updatedModules[moduleIndex],
+                                                      chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                        chapIdx === chapterIndex ? {
+                                                          ...chap,
+                                                          lessons: chap.lessons.map((les, lesIdx) =>
+                                                            lesIdx === lessonIndex ? {
+                                                              ...les,
+                                                              title: e.target.value
+                                                            } : les
+                                                          )
+                                                        } : chap
+                                                      )
+                                                    }
+                                                    setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                  }}
+                                                  className="h-11 rounded-lg"
+                                                  required
+                                                />
+                                              </FormGroup>
+
+                                              <FormGroup label="Lesson Description" required icon={FileText}>
+                                                <Textarea
+                                                  placeholder="Lesson Description *"
+                                                  value={lesson.description}
+                                                  onChange={(e) => {
+                                                    const updatedModules = [...formData.modules]
+                                                    updatedModules[moduleIndex] = {
+                                                      ...updatedModules[moduleIndex],
+                                                      chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                        chapIdx === chapterIndex ? {
+                                                          ...chap,
+                                                          lessons: chap.lessons.map((les, lesIdx) =>
+                                                            lesIdx === lessonIndex ? {
+                                                              ...les,
+                                                              description: e.target.value
+                                                            } : les
+                                                          )
+                                                        } : chap
+                                                      )
+                                                    }
+                                                    setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                  }}
+                                                  className="min-h-[80px] rounded-lg"
+                                                  required
+                                                />
+                                              </FormGroup>
+
+                                              {/* Video Upload */}
+                                              <FileUploadArea
+                                                type="lessonVideo"
+                                                label="Lesson Video * (10GB supported)"
+                                                acceptedFiles="video/mp4,video/webm,video/ogg,video/quicktime,video/mov"
+                                                maxSize="10GB"
+                                                currentFile={lesson.video || null}
+                                                onFileChange={(e) => handleLessonVideoChange(e, moduleIndex, chapterIndex, lessonIndex)}
+                                                moduleIndex={moduleIndex}
+                                                chapterIndex={chapterIndex}
+                                                lessonIndex={lessonIndex}
+                                                uploadProgress={uploadProgress}
+                                                onCancelUpload={cancelUpload}
+                                                onRetryUpload={handleRetryUpload}
+                                              />
+
+                                              <FormGroup label="Duration (minutes)" icon={Clock}>
+                                                <Input
+                                                  type="number"
+                                                  placeholder="e.g., 45"
+                                                  value={lesson.duration}
+                                                  onChange={(e) => {
+                                                    const updatedModules = [...formData.modules]
+                                                    updatedModules[moduleIndex] = {
+                                                      ...updatedModules[moduleIndex],
+                                                      chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                        chapIdx === chapterIndex ? {
+                                                          ...chap,
+                                                          lessons: chap.lessons.map((les, lesIdx) =>
+                                                            lesIdx === lessonIndex ? {
+                                                              ...les,
+                                                              duration: parseInt(e.target.value) || 0
+                                                            } : les
+                                                          )
+                                                        } : chap
+                                                      )
+                                                    }
+                                                    setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                  }}
+                                                  className="h-11 rounded-lg"
+                                                  min="0"
+                                                />
+                                              </FormGroup>
+
+                                              <FormGroup label="Lesson Content" required icon={BookOpen}>
+                                                <Textarea
+                                                  placeholder="Detailed content for this lesson..."
+                                                  value={lesson.content}
+                                                  onChange={(e) => {
+                                                    const updatedModules = [...formData.modules]
+                                                    updatedModules[moduleIndex] = {
+                                                      ...updatedModules[moduleIndex],
+                                                      chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                        chapIdx === chapterIndex ? {
+                                                          ...chap,
+                                                          lessons: chap.lessons.map((les, lesIdx) =>
+                                                            lesIdx === lessonIndex ? {
+                                                              ...les,
+                                                              content: e.target.value
+                                                            } : les
+                                                          )
+                                                        } : chap
+                                                      )
+                                                    }
+                                                    setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                  }}
+                                                  className="min-h-[100px] rounded-lg"
+                                                  required
+                                                />
+                                              </FormGroup>
+
+                                              <div className="flex items-center gap-3 p-3 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-lg">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={lesson.isPreview}
+                                                  onChange={(e) => {
+                                                    const updatedModules = [...formData.modules]
+                                                    updatedModules[moduleIndex] = {
+                                                      ...updatedModules[moduleIndex],
+                                                      chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                        chapIdx === chapterIndex ? {
+                                                          ...chap,
+                                                          lessons: chap.lessons.map((les, lesIdx) =>
+                                                            lesIdx === lessonIndex ? {
+                                                              ...les,
+                                                              isPreview: e.target.checked
+                                                            } : les
+                                                          )
+                                                        } : chap
+                                                      )
+                                                    }
+                                                    setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                  }}
+                                                  className="w-5 h-5 rounded border-slate-300 dark:border-slate-600 text-emerald-600 focus:ring-emerald-500"
+                                                />
+                                                <label className="text-sm font-semibold text-slate-900 dark:text-white">Preview Lesson</label>
+                                                <span className="text-xs text-slate-500">(Free for all students)</span>
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </AccordionContent>
+                                  </AccordionItem>
+                                </Accordion>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                      
-                      <Button 
-                        type="button" 
-                        onClick={() => addChapter(moduleIndex)} 
-                        variant="outline" 
-                        className="rounded-xl sm:rounded-2xl w-full text-xs sm:text-sm"
-                        disabled={activeUploads.length > 0}
-                        size="sm"
-                      >
-                        <Plus className="w-3.5 h-3.5 mr-1.5" />
-                        Add Chapter
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
+                  ))}
+
+                  {formData.modules.length === 0 && (
+                    <div className="text-center py-16 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl">
+                      <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-100 to-indigo-100 dark:from-purple-900/30 dark:to-indigo-900/30 w-20 h-20 mx-auto mb-6 flex items-center justify-center">
+                        <Layers className="w-10 h-10 text-purple-600 dark:text-purple-400" />
+                      </div>
+                      <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-3">
+                        No modules yet
+                      </h3>
+                      <p className="text-slate-600 dark:text-slate-400 mb-8">
+                        Start building your course by adding the first module
+                      </p>
+                      <Button type="button" onClick={addModule} className="h-12 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white">
+                        <Plus className="w-5 h-5 mr-2" />
+                        Add Your First Module
                       </Button>
                     </div>
-                  </div>
-                ))}
+                  )}
+                </CardContent>
+              </FormCard>
+            </div>
 
-                {formData.modules.length === 0 && (
-                  <div className="text-center py-6 sm:py-8 md:py-12 border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl sm:rounded-2xl">
-                    <BookOpen className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 text-slate-400 mx-auto mb-3 sm:mb-4" />
-                    <h3 className="text-sm sm:text-base md:text-lg font-semibold text-slate-700 dark:text-slate-300 mb-1.5 sm:mb-2">
-                      No modules yet
-                    </h3>
-                    <p className="text-xs sm:text-sm text-slate-500 mb-3 sm:mb-4 px-4">
-                      Start building your course by adding the first module
-                    </p>
-                    <Button type="button" onClick={addModule} variant="outline" className="rounded-xl sm:rounded-2xl text-xs sm:text-sm" disabled={activeUploads.length > 0} size="sm">
-                      <Plus className="w-3.5 h-3.5 mr-1.5" />
-                      Add Your First Module
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+            {/* Sidebar - 1 column */}
+            <div className="space-y-6">
+              {/* Upload Stats Panel */}
+              <UploadStatsPanel 
+                uploadStats={uploadStats}
+                activeUploads={activeUploads}
+                uploadProgress={uploadProgress}
+              />
 
-          {/* Sidebar - 1 column */}
-          <div className="space-y-4 sm:space-y-6">
-            {/* Upload Stats */}
-            <Card className="rounded-xl sm:rounded-2xl border-slate-200 dark:border-slate-700">
-              <CardHeader className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 rounded-t-xl sm:rounded-t-2xl p-3 sm:p-4">
-                <CardTitle className="text-sm sm:text-base">Upload Statistics</CardTitle>
-                <CardDescription className="text-xs sm:text-sm">
-                  Current upload progress
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="pt-3 space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 p-2.5 rounded-lg">
-                    <p className="text-[10px] sm:text-xs text-slate-600 dark:text-slate-400">Total Files</p>
-                    <p className="text-lg sm:text-xl font-bold text-blue-600 dark:text-blue-400">
-                      {uploadStats.totalFiles}
-                    </p>
-                  </div>
-                  <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 p-2.5 rounded-lg">
-                    <p className="text-[10px] sm:text-xs text-slate-600 dark:text-slate-400">Completed</p>
-                    <p className="text-lg sm:text-xl font-bold text-green-600 dark:text-green-400">
-                      {uploadStats.completedFiles}
-                    </p>
-                  </div>
-                </div>
-                <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 p-2.5 rounded-lg">
-                  <p className="text-[10px] sm:text-xs text-slate-600 dark:text-slate-400">Total Size</p>
-                  <p className="text-sm sm:text-base font-bold text-purple-600 dark:text-purple-400">
-                    {formatFileSize(uploadStats.totalSize)}
-                  </p>
-                </div>
-                {activeUploads.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
-                    <p className="text-xs sm:text-sm font-medium mb-1.5">Active Uploads</p>
-                    <div className="space-y-1.5">
-                      {activeUploads.map(identifier => {
-                        const upload = uploadProgress[identifier]
-                        return upload ? (
-                          <div key={identifier} className="flex items-center justify-between text-xs">
-                            <span className="truncate max-w-[100px] sm:max-w-[120px]">{upload.fileName}</span>
-                            <span className="font-medium">{upload.progress}%</span>
-                          </div>
-                        ) : null
-                      })}
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Pricing */}
-            <Card className="rounded-xl sm:rounded-2xl border-slate-200 dark:border-slate-700">
-              <CardHeader className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 rounded-t-xl sm:rounded-t-2xl p-3 sm:p-4">
-                <CardTitle className="text-sm sm:text-base">Pricing</CardTitle>
-                <CardDescription className="text-xs sm:text-sm">
-                  Set your course pricing
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="pt-3 space-y-3">
-                <div className="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <div className="relative">
-                      <input
-                        type="checkbox"
-                        checked={formData.isFree}
-                        onChange={(e) => setFormData(prev => ({ ...prev, isFree: e.target.checked }))}
-                        className="sr-only"
-                        disabled={activeUploads.length > 0}
-                      />
-                      <div className={`w-4 h-4 sm:w-5 sm:h-5 rounded border flex items-center justify-center ${formData.isFree ? 'bg-green-500 border-green-500' : 'border-slate-300 dark:border-slate-600'} ${activeUploads.length > 0 ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
-                        {formData.isFree && <CheckCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white" />}
+              {/* Pricing */}
+              <FormCard>
+                <CardHeader>
+                  <SectionHeader 
+                    title="Pricing" 
+                    description="Set your course pricing"
+                    icon={DollarSign}
+                    color="from-amber-500 to-orange-500"
+                  />
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between p-4 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-xl">
+                    <label className="flex items-center gap-4 cursor-pointer">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          checked={formData.isFree}
+                          onChange={(e) => setFormData(prev => ({ ...prev, isFree: e.target.checked }))}
+                          className="sr-only"
+                        />
+                        <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center ${formData.isFree ? 'bg-gradient-to-r from-emerald-500 to-green-500 border-transparent' : 'border-amber-300 dark:border-amber-700'} cursor-pointer`}>
+                          {formData.isFree && <CheckCircle className="w-4 h-4 text-white" />}
+                        </div>
                       </div>
-                    </div>
-                    <div className="min-w-0">
-                      <span className="text-xs sm:text-sm font-medium">Free Course</span>
-                      <p className="text-[10px] sm:text-xs text-slate-500">Available to all students</p>
-                    </div>
-                  </label>
-                </div>
-                
-                {!formData.isFree && (
-                  <div>
-                    <label className="text-xs sm:text-sm font-medium mb-1 block">Price ($)</label>
-                    <div className="relative">
-                      <span className="absolute left-2.5 top-1/2 transform -translate-y-1/2 text-slate-500 text-sm">$</span>
-                      <Input
-                        type="number"
-                        placeholder="0.00"
-                        value={formData.price}
-                        onChange={(e) => setFormData(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
-                        className="rounded-xl sm:rounded-2xl pl-7 text-sm sm:text-base"
-                        min="0"
-                        step="0.01"
-                        disabled={activeUploads.length > 0}
-                      />
-                    </div>
+                      <div>
+                        <span className="font-semibold text-slate-900 dark:text-white">Free Course</span>
+                        <p className="text-sm text-slate-600 dark:text-slate-400">Available to all students</p>
+                      </div>
+                    </label>
                   </div>
-                )}
-              </CardContent>
-            </Card>
+                  
+                  {!formData.isFree && (
+                    <FormGroup label="Price ($)" icon={DollarSign}>
+                      <div className="relative">
+                        <span className="absolute left-4 top-1/2 transform -translate-y-1/2 text-amber-600 dark:text-amber-400">$</span>
+                        <Input
+                          type="number"
+                          placeholder="0.00"
+                          value={formData.price}
+                          onChange={(e) => setFormData(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
+                          className="pl-10 h-12 rounded-xl"
+                          min="0"
+                          step="0.01"
+                        />
+                      </div>
+                    </FormGroup>
+                  )}
+                </CardContent>
+              </FormCard>
 
-            {/* Course Settings */}
-            <Card className="rounded-xl sm:rounded-2xl border-slate-200 dark:border-slate-700">
-              <CardHeader className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 rounded-t-xl sm:rounded-t-2xl p-3 sm:p-4">
-                <CardTitle className="text-sm sm:text-base">Settings</CardTitle>
-              </CardHeader>
-              <CardContent className="pt-3">
-                <div className="space-y-3">
-                  <label className="flex items-center gap-2 cursor-pointer p-2.5 bg-slate-50 dark:bg-slate-800 rounded-lg">
+              {/* Course Settings */}
+              <FormCard>
+                <CardHeader>
+                  <SectionHeader 
+                    title="Settings" 
+                    description="Course visibility and features"
+                    icon={Settings}
+                    color="from-slate-600 to-slate-700"
+                  />
+                </CardHeader>
+                <CardContent>
+                  <label className="flex items-center gap-4 cursor-pointer p-4 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800/50 dark:to-slate-900/50 rounded-xl">
                     <div className="relative">
                       <input
                         type="checkbox"
                         checked={formData.isFeatured}
                         onChange={(e) => setFormData(prev => ({ ...prev, isFeatured: e.target.checked }))}
                         className="sr-only"
-                        disabled={activeUploads.length > 0}
                       />
-                      <div className={`w-4 h-4 sm:w-5 sm:h-5 rounded border flex items-center justify-center ${formData.isFeatured ? 'bg-rose-500 border-rose-500' : 'border-slate-300 dark:border-slate-600'} ${activeUploads.length > 0 ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
-                        {formData.isFeatured && <CheckCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white" />}
+                      <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center ${formData.isFeatured ? 'bg-gradient-to-r from-emerald-500 to-teal-500 border-transparent' : 'border-slate-300 dark:border-slate-700'} cursor-pointer`}>
+                        {formData.isFeatured && <CheckCircle className="w-4 h-4 text-white" />}
                       </div>
                     </div>
-                    <div className="min-w-0">
-                      <span className="text-xs sm:text-sm font-medium">Feature this course</span>
-                      <p className="text-[10px] sm:text-xs text-slate-500">Show on homepage</p>
+                    <div>
+                      <span className="font-semibold text-slate-900 dark:text-white">Feature this course</span>
+                      <p className="text-sm text-slate-600 dark:text-slate-400">Show on homepage</p>
                     </div>
                   </label>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </FormCard>
 
-            {/* Course Summary */}
-            <Card className="rounded-xl sm:rounded-2xl border-slate-200 dark:border-slate-700">
-              <CardHeader className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 rounded-t-xl sm:rounded-t-2xl p-3 sm:p-4">
-                <CardTitle className="text-sm sm:text-base">Course Summary</CardTitle>
-                <CardDescription className="text-xs sm:text-sm">
-                  Overview of your course
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="pt-3 space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 p-2.5 rounded-lg">
-                    <p className="text-[10px] sm:text-xs text-slate-600 dark:text-slate-400">Modules</p>
-                    <p className="text-lg sm:text-xl font-bold text-blue-600 dark:text-blue-400">
-                      {formData.modules.length}
-                    </p>
+              {/* Course Summary */}
+              <FormCard>
+                <CardHeader>
+                  <SectionHeader 
+                    title="Course Summary" 
+                    description="Overview of your course"
+                    icon={Layers}
+                    color="from-cyan-500 to-blue-500"
+                  />
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-gradient-to-br from-cyan-50 to-blue-50 dark:from-cyan-900/20 dark:to-blue-900/20 p-3 rounded-xl">
+                      <p className="text-xs text-slate-600 dark:text-slate-400">Modules</p>
+                      <p className="text-xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 bg-clip-text text-transparent">
+                        {formData.modules.length}
+                      </p>
+                    </div>
+                    <div className="bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 p-3 rounded-xl">
+                      <p className="text-xs text-slate-600 dark:text-slate-400">Chapters</p>
+                      <p className="text-xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
+                        {totalChapters}
+                      </p>
+                    </div>
+                    <div className="bg-gradient-to-br from-rose-50 to-red-50 dark:from-rose-900/20 dark:to-red-900/20 p-3 rounded-xl">
+                      <p className="text-xs text-slate-600 dark:text-slate-400">Lessons</p>
+                      <p className="text-xl font-bold bg-gradient-to-r from-rose-600 to-red-600 bg-clip-text text-transparent">
+                        {totalLessons}
+                      </p>
+                    </div>
+                    <div className="bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/20 p-3 rounded-xl">
+                      <p className="text-xs text-slate-600 dark:text-slate-400">Duration</p>
+                      <p className="text-base font-bold bg-gradient-to-r from-emerald-600 to-green-600 bg-clip-text text-transparent">
+                        {formatDuration(totalDuration)}
+                      </p>
+                    </div>
                   </div>
-                  <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 p-2.5 rounded-lg">
-                    <p className="text-[10px] sm:text-xs text-slate-600 dark:text-slate-400">Chapters</p>
-                    <p className="text-lg sm:text-xl font-bold text-purple-600 dark:text-purple-400">
-                      {totalChapters}
-                    </p>
+                  
+                  <div className="space-y-3 pt-4 border-t border-slate-200 dark:border-slate-700">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-600 dark:text-slate-400">Price</span>
+                      <span className="font-semibold">
+                        {formData.isFree ? (
+                          <Badge className="bg-gradient-to-r from-emerald-500 to-green-500 text-white">Free</Badge>
+                        ) : (
+                          <span className="bg-gradient-to-r from-amber-600 to-orange-500 bg-clip-text text-transparent font-bold">
+                            ${formData.price.toFixed(2)}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-600 dark:text-slate-400">Level</span>
+                      <Badge variant="outline" className="rounded-full capitalize bg-gradient-to-r from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900">
+                        {formData.level}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-600 dark:text-slate-400">Featured</span>
+                      <Badge variant={formData.isFeatured ? "default" : "outline"} className={formData.isFeatured ? "bg-gradient-to-r from-emerald-500 to-teal-500" : ""}>
+                        {formData.isFeatured ? 'Yes' : 'No'}
+                      </Badge>
+                    </div>
                   </div>
-                  <div className="bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/20 dark:to-rose-800/20 p-2.5 rounded-lg">
-                    <p className="text-[10px] sm:text-xs text-slate-600 dark:text-slate-400">Lessons</p>
-                    <p className="text-lg sm:text-xl font-bold text-rose-600 dark:text-rose-400">
-                      {totalLessons}
-                    </p>
-                  </div>
-                  <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 p-2.5 rounded-lg">
-                    <p className="text-[10px] sm:text-xs text-slate-600 dark:text-slate-400">Duration</p>
-                    <p className="text-sm sm:text-base font-bold text-green-600 dark:text-green-400">
-                      {formatDuration(totalDuration)}
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="pt-3 border-t border-slate-200 dark:border-slate-700 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-600 dark:text-slate-400">Price</span>
-                    <span className="font-semibold text-sm">
-                      {formData.isFree ? (
-                        <Badge className="bg-green-500 text-white text-xs px-1.5 py-0.5">Free</Badge>
-                      ) : (
-                        `$${formData.price.toFixed(2)}`
-                      )}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-600 dark:text-slate-400">Level</span>
-                    <Badge variant="outline" className="rounded-full capitalize text-xs px-2 py-0.5">
-                      {formData.level}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-600 dark:text-slate-400">Featured</span>
-                    <Badge variant={formData.isFeatured ? "default" : "outline"} className="rounded-full text-xs px-2 py-0.5">
-                      {formData.isFeatured ? 'Yes' : 'No'}
-                    </Badge>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Actions */}
-            <Card className="rounded-xl sm:rounded-2xl border-slate-200 dark:border-slate-700">
-              <CardHeader className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 rounded-t-xl sm:rounded-t-2xl p-3 sm:p-4">
-                <CardTitle className="text-sm sm:text-base">Actions</CardTitle>
-              </CardHeader>
-              <CardContent className="pt-3 space-y-3">
-                <Button 
-                  type="submit" 
-                  variant="premium" 
-                  className="w-full rounded-xl sm:rounded-2xl py-3 sm:py-4 text-sm sm:text-base font-semibold shadow-lg" 
-                  disabled={loading || activeUploads.length > 0 || !formData.thumbnail || networkStatus === 'offline'}
-                >
-                  {loading ? (
-                    <>
-                      <div className="w-3.5 h-3.5 sm:w-4 sm:h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-                      Creating...
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
-                      Create Course
-                    </>
-                  )}
-                </Button>
-                
-                {activeUploads.length > 0 && (
-                  <div className="text-center text-xs text-amber-600 dark:text-amber-400">
-                    {activeUploads.length} upload{activeUploads.length > 1 ? 's' : ''} in progress
-                  </div>
-                )}
-                
-                {networkStatus === 'offline' && (
-                  <div className="text-center text-xs text-red-600 dark:text-red-400 flex items-center justify-center">
-                    <WifiOff className="w-3 h-3 mr-1" />
-                    You are offline
-                  </div>
-                )}
-                
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  className="w-full rounded-xl sm:rounded-2xl py-3 sm:py-4 text-xs sm:text-sm"
-                  onClick={() => router.push('/admin/courses')}
-                  disabled={loading || activeUploads.length > 0}
-                >
-                  Cancel
-                </Button>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </FormCard>
+            </div>
           </div>
-        </div>
-      </form>
+        </form>
+      </div>
+
+      {/* Sticky Bottom Actions */}
+      <StickyActions 
+        loading={loading}
+        activeUploads={activeUploads}
+        networkStatus={networkStatus}
+        hasThumbnail={!!formData.thumbnail}
+        onSubmit={handleSubmit}
+        canSubmit={canSubmit}
+      />
     </div>
   )
 }

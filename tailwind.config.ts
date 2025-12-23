@@ -222,6 +222,24 @@ const config: Config = {
   		},
   		transitionTimingFunction: {
   			bounce: 'cubic-bezier(0.68, -0.55, 0.265, 1.55)'
+  		},
+  		keyframes: {
+  			'accordion-down': {
+  				from: {
+  					height: '0'
+  				},
+  				to: {
+  					height: 'var(--radix-accordion-content-height)'
+  				}
+  			},
+  			'accordion-up': {
+  				from: {
+  					height: 'var(--radix-accordion-content-height)'
+  				},
+  				to: {
+  					height: '0'
+  				}
+  			}
   		}
   	}
   },
