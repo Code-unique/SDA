@@ -3,9 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
-import Course, { IS3Asset } from '@/lib/models/Course';
+import Course, { IS3Asset, IModule, IChapter, ILesson, ILessonResource } from '@/lib/models/Course';
 import mongoose from 'mongoose';
 import "@/lib/loadmodels";
+
 // GET - Fetch single course for admin
 export async function GET(
   request: NextRequest,
@@ -187,24 +188,68 @@ export async function PATCH(
         .substring(0, 100);
     }
 
-    // Transform modules data with validation
-    const transformedModules = body.modules?.map((module: any, index: number) => ({
-      _id: module._id && mongoose.Types.ObjectId.isValid(module._id) ? module._id : undefined,
-      title: module.title?.substring(0, 200) || '',
-      description: module.description?.substring(0, 1000) || '',
-      order: typeof module.order === 'number' ? module.order : index,
-      lessons: module.lessons?.map((lesson: any, lessonIndex: number) => ({
-        _id: lesson._id && mongoose.Types.ObjectId.isValid(lesson._id) ? lesson._id : undefined,
-        title: lesson.title?.substring(0, 200) || '',
+    // Transform modules data with chapters structure
+    const transformModules = (modules: any[]): IModule[] => {
+      return modules.map((module, moduleIndex) => ({
+        _id: module._id && mongoose.Types.ObjectId.isValid(module._id) 
+          ? new mongoose.Types.ObjectId(module._id) 
+          : new mongoose.Types.ObjectId(),
+        title: module.title?.substring(0, 200) || `Module ${moduleIndex + 1}`,
+        description: module.description?.substring(0, 1000) || '',
+        thumbnailUrl: module.thumbnailUrl || undefined,
+        order: typeof module.order === 'number' ? module.order : moduleIndex,
+        chapters: transformChapters(module.chapters || [], moduleIndex)
+      }));
+    };
+
+    const transformChapters = (chapters: any[], moduleIndex: number): IChapter[] => {
+      return chapters.map((chapter, chapterIndex) => ({
+        _id: chapter._id && mongoose.Types.ObjectId.isValid(chapter._id) 
+          ? new mongoose.Types.ObjectId(chapter._id) 
+          : new mongoose.Types.ObjectId(),
+        title: chapter.title?.substring(0, 200) || `Chapter ${chapterIndex + 1}`,
+        description: chapter.description?.substring(0, 1000) || '',
+        order: typeof chapter.order === 'number' ? chapter.order : chapterIndex,
+        lessons: transformLessons(chapter.lessons || [], chapterIndex)
+      }));
+    };
+
+    const transformLessons = (lessons: any[], chapterIndex: number): ILesson[] => {
+      return lessons.map((lesson, lessonIndex) => ({
+        _id: lesson._id && mongoose.Types.ObjectId.isValid(lesson._id) 
+          ? new mongoose.Types.ObjectId(lesson._id) 
+          : new mongoose.Types.ObjectId(),
+        title: lesson.title?.substring(0, 200) || `Lesson ${lessonIndex + 1}`,
         description: lesson.description?.substring(0, 1000) || '',
         content: lesson.content || '',
-        video: lesson.video as IS3Asset,
+        video: lesson.video as IS3Asset || {
+          key: '',
+          url: '',
+          size: 0,
+          type: 'video'
+        },
         duration: Math.max(0, Math.min(lesson.duration || 0, 10000)),
         isPreview: !!lesson.isPreview,
-        resources: Array.isArray(lesson.resources) ? lesson.resources.slice(0, 10) : [],
+        resources: transformResources(lesson.resources || []),
         order: typeof lesson.order === 'number' ? lesson.order : lessonIndex
-      })) || []
-    })) || [];
+      }));
+    };
+
+    const transformResources = (resources: any[]): ILessonResource[] => {
+      return resources.map((resource, resourceIndex) => ({
+        _id: resource._id && mongoose.Types.ObjectId.isValid(resource._id) 
+          ? new mongoose.Types.ObjectId(resource._id) 
+          : new mongoose.Types.ObjectId(),
+        title: resource.title?.substring(0, 200) || `Resource ${resourceIndex + 1}`,
+        url: resource.url || '',
+        type: ['pdf', 'document', 'link', 'video'].includes(resource.type) 
+          ? resource.type as 'pdf' | 'document' | 'link' | 'video'
+          : 'pdf'
+      }));
+    };
+
+    // Transform modules data
+    const transformedModules = body.modules ? transformModules(body.modules) : existingCourse.modules;
 
     // Update course
     const updateData: any = {
@@ -217,7 +262,7 @@ export async function PATCH(
       ...(body.category && { category: body.category.substring(0, 50) }),
       ...(body.tags && { tags: body.tags.slice(0, 10).map((tag: string) => tag.substring(0, 30)) }),
       ...(body.thumbnail && { thumbnail: body.thumbnail as IS3Asset }),
-      ...(body.previewVideo && { previewVideo: body.previewVideo as IS3Asset }),
+      ...(body.previewVideo !== undefined && { previewVideo: body.previewVideo as IS3Asset }),
       ...(body.modules && { modules: transformedModules }),
       ...(body.requirements && { requirements: body.requirements.slice(0, 10).map((req: string) => req.substring(0, 200)) }),
       ...(body.learningOutcomes && { learningOutcomes: body.learningOutcomes.slice(0, 10).map((lo: string) => lo.substring(0, 200)) }),
@@ -225,6 +270,16 @@ export async function PATCH(
       ...(body.isPublished !== undefined && { isPublished: !!body.isPublished }),
       ...(slug && { slug })
     };
+
+    console.log('Updating course with data:', {
+      id,
+      title: updateData.title,
+      modulesCount: updateData.modules?.length || 0,
+      chaptersCount: updateData.modules?.reduce((total: number, module: any) => total + (module.chapters?.length || 0), 0) || 0,
+      lessonsCount: updateData.modules?.reduce((total: number, module: any) => 
+        total + (module.chapters?.reduce((chapterTotal: number, chapter: any) => 
+          chapterTotal + (chapter.lessons?.length || 0), 0) || 0), 0) || 0
+    });
 
     const updatedCourse = await Course.findByIdAndUpdate(
       id,
@@ -239,10 +294,19 @@ export async function PATCH(
       );
     }
 
+    console.log('Course updated successfully:', {
+      id: updatedCourse._id,
+      title: updatedCourse.title,
+      modulesCount: updatedCourse.modules.length,
+      chaptersCount: updatedCourse.modules.reduce((total, module) => total + module.chapters.length, 0),
+      lessonsCount: updatedCourse.modules.reduce((total, module) => 
+        total + module.chapters.reduce((chapterTotal, chapter) => chapterTotal + chapter.lessons.length, 0), 0)
+    });
+
     return NextResponse.json(updatedCourse);
   } catch (error: any) {
     console.error('Error updating course:', error);
-
+    
     if (error.code === 11000) {
       return NextResponse.json(
         { error: 'Course with this title already exists' },
@@ -250,8 +314,16 @@ export async function PATCH(
       );
     }
 
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map((err: any) => err.message);
+      return NextResponse.json(
+        { error: 'Validation failed', details: errors },
+        { status: 400 }
+      );
+    }
+
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', details: error.message },
       { status: 500 }
     );
   }

@@ -1,3 +1,4 @@
+// lib/models/Course.ts
 import mongoose, { Document, Schema, Model } from 'mongoose';
 
 // S3 Asset Interface
@@ -12,6 +13,7 @@ export interface IS3Asset {
 }
 
 export interface ILessonResource {
+  _id?: mongoose.Types.ObjectId;
   title: string;
   url: string;
   type: 'pdf' | 'document' | 'link' | 'video';
@@ -43,9 +45,9 @@ export interface IModule {
   _id?: mongoose.Types.ObjectId;
   title: string;
   description: string;
-  thumbnailUrl?: string; // NEW FIELD
+  thumbnailUrl?: string;
   order: number;
-  chapters: IChapter[]; // Changed from lessons to chapters
+  chapters: IChapter[];
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -90,6 +92,7 @@ export interface ICourse extends Document {
   averageRating: number;
   totalDuration: number;
   totalLessons: number;
+  totalChapters: number;
   isPublished: boolean;
   isFeatured: boolean;
   requirements: string[];
@@ -136,9 +139,9 @@ const ChapterSchema = new Schema<IChapter>({
 const ModuleSchema = new Schema<IModule>({
   title: { type: String, required: true, maxlength: 200 },
   description: { type: String, required: true, maxlength: 1000 },
-  thumbnailUrl: { type: String }, // NEW FIELD
+  thumbnailUrl: { type: String },
   order: { type: Number, required: true, min: 0 },
-  chapters: [ChapterSchema] // Changed from lessons to chapters
+  chapters: [ChapterSchema]
 }, { timestamps: true });
 
 const RatingSchema = new Schema<IRating>({
@@ -239,6 +242,11 @@ const CourseSchema = new Schema<ICourse>(
       default: 0,
       min: 0
     },
+    totalChapters: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
     isPublished: {
       type: Boolean,
       default: false
@@ -264,6 +272,11 @@ const CourseSchema = new Schema<ICourse>(
 // Pre-save middleware for auto-calculated fields
 CourseSchema.pre('save', function (next) {
   const course = this as ICourse;
+
+  // Calculate total chapters
+  course.totalChapters = course.modules.reduce((total, module) => 
+    total + module.chapters.length, 0
+  );
 
   // Calculate total lessons across all chapters in all modules
   course.totalLessons = course.modules.reduce((total, module) =>
