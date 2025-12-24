@@ -5,14 +5,12 @@ import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
 import Post from '@/lib/models/Post';
 import "@/lib/loadmodels";
+
 export async function GET(request: NextRequest) {
   try {
     const user = await currentUser();
     if (!user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     await connectToDatabase();
@@ -20,35 +18,38 @@ export async function GET(request: NextRequest) {
     // Verify admin role
     const adminUser = await User.findOne({ clerkId: user.id });
     if (!adminUser || adminUser.role !== 'admin') {
-      return NextResponse.json(
-        { error: 'Forbidden' },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     const { searchParams } = new URL(request.url);
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
-    const limit = Math.max(1, Math.min(100, parseInt(searchParams.get('limit') || '50')));
-    const search = searchParams.get('search') || '';
+    const page = parseInt(searchParams.get('page') || '1');
+    const limit = parseInt(searchParams.get('limit') || '50');
+    const type = searchParams.get('type') || 'all';
+    const sort = searchParams.get('sort') || 'recent';
 
-    let query: any = {};
-    if (search) {
-      const sanitizedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      query = {
-        $or: [
-          { caption: { $regex: sanitizedSearch, $options: 'i' } },
-          { 'author.username': { $regex: sanitizedSearch, $options: 'i' } },
-          { 'author.firstName': { $regex: sanitizedSearch, $options: 'i' } },
-          { 'author.lastName': { $regex: sanitizedSearch, $options: 'i' } },
-        ]
-      };
+    // Build query
+    const query: any = {};
+    
+    if (type === 'images') {
+      query.containsVideo = false;
+    } else if (type === 'videos') {
+      query.containsVideo = true;
+    }
+
+    // Build sort
+    const sortOptions: any = {};
+    if (sort === 'recent') {
+      sortOptions.createdAt = -1;
+    } else if (sort === 'popular') {
+      sortOptions.likes = -1;
+    } else if (sort === 'engagement') {
+      sortOptions.engagement = -1;
     }
 
     const [posts, total] = await Promise.all([
       Post.find(query)
         .populate('author', 'username firstName lastName avatar')
-        .populate('comments.user', 'username firstName lastName avatar')
-        .sort({ createdAt: -1 })
+        .sort(sortOptions)
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
@@ -56,7 +57,15 @@ export async function GET(request: NextRequest) {
     ]);
 
     return NextResponse.json({
-      posts,
+      success: true,
+      posts: posts.map(post => ({
+        ...post,
+        _id: post._id.toString(),
+        author: post.author ? {
+          ...post.author,
+          _id: post.author._id.toString()
+        } : null
+      })),
       pagination: {
         page,
         limit,
@@ -64,10 +73,11 @@ export async function GET(request: NextRequest) {
         pages: Math.ceil(total / limit)
       }
     });
-  } catch (error) {
+
+  } catch (error: any) {
     console.error('Error fetching admin posts:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { success: false, error: error.message },
       { status: 500 }
     );
   }

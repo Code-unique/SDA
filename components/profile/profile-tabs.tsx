@@ -3,7 +3,7 @@
 
 import { useState } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { PostCard } from '@/components/posts/post-card'
+import { EnhancedPostCard } from '@/components/posts/enhanced-post-card'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Image, BookOpen, Users, Heart } from 'lucide-react'
@@ -67,7 +67,7 @@ export function ProfileTabs({ user, posts, isOwnProfile }: ProfileTabsProps) {
         <TabsContent value="posts" className="space-y-6">
           {posts.length > 0 ? (
             posts.map((post) => (
-              <PostCard
+              <EnhancedPostCard
                 key={post._id}
                 post={post}
                 onLike={handleLike}

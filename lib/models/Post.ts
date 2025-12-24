@@ -1,7 +1,5 @@
-// lib/models/Post.ts
 import mongoose, { Document, Schema, Types, Model } from 'mongoose';
 
-// Extend the Document interface to include custom methods
 export interface IPost extends Document {
   author: Types.ObjectId;
   media: {
@@ -13,6 +11,9 @@ export interface IPost extends Document {
     width?: number;
     height?: number;
     duration?: number;
+    size?: number;
+    mimetype?: string;
+    order: number;
   }[];
   caption: string;
   hashtags: string[];
@@ -48,6 +49,12 @@ export interface IPost extends Document {
   availableForSale: boolean;
   price?: number;
   currency?: string;
+  
+  // Media metadata
+  mediaCount: number;
+  totalDuration: number;
+  containsVideo: boolean;
+  
   challenge?: {
     name: string;
     id: Types.ObjectId;
@@ -59,12 +66,8 @@ export interface IPost extends Document {
   };
   createdAt: Date;
   updatedAt: Date;
-
-  // Add the custom method to the interface
-  calculateEngagement(): number;
 }
 
-// Define the schema
 const PostSchema = new Schema<IPost>(
   {
     author: {
@@ -88,6 +91,12 @@ const PostSchema = new Schema<IPost>(
       width: Number,
       height: Number,
       duration: Number,
+      size: Number,
+      mimetype: String,
+      order: {
+        type: Number,
+        default: 0
+      }
     }],
     caption: {
       type: String,
@@ -195,6 +204,23 @@ const PostSchema = new Schema<IPost>(
       type: String,
       default: 'USD'
     },
+    // Media metadata
+    mediaCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 4
+    },
+    totalDuration: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 120 // 2 minutes in seconds
+    },
+    containsVideo: {
+      type: Boolean,
+      default: false
+    },
     challenge: {
       name: String,
       id: {
@@ -215,40 +241,79 @@ const PostSchema = new Schema<IPost>(
   }
 );
 
-// Indexes for better query performance
-PostSchema.index({ author: 1, createdAt: -1 });
-PostSchema.index({ hashtags: 1 });
-PostSchema.index({ likes: -1 });
-PostSchema.index({ createdAt: -1 });
-PostSchema.index({ isFeatured: -1, createdAt: -1 });
-PostSchema.index({ engagement: -1 });
-PostSchema.index({ 'challenge.id': 1 });
+// Indexes for media queries
+PostSchema.index({ 'media.type': 1 });
+PostSchema.index({ mediaCount: -1 });
+PostSchema.index({ containsVideo: 1 });
+PostSchema.index({ totalDuration: -1 });
 
-// Virtual for comment count
+// Virtuals
 PostSchema.virtual('commentCount').get(function (this: IPost) {
   return this.comments.length;
 });
 
-// Method to calculate engagement
-PostSchema.methods.calculateEngagement = function (this: IPost): number {
-  const likesWeight = this.likes.length * 1;
-  const commentsWeight = this.comments.length * 2;
-  const viewsWeight = this.views * 0.1;
-  const sharesWeight = this.shares * 3;
+PostSchema.virtual('hasMultipleMedia').get(function (this: IPost) {
+  return this.mediaCount > 1;
+});
 
-  this.engagement = likesWeight + commentsWeight + viewsWeight + sharesWeight;
-  return this.engagement;
-};
-
-// Pre-save middleware to calculate engagement
+// Pre-save middleware to update media metadata
 PostSchema.pre('save', function (this: IPost, next) {
-  if (this.isModified('likes') || this.isModified('comments') || this.isModified('views') || this.isModified('shares')) {
-    this.calculateEngagement();
-  }
+  this.mediaCount = this.media.length;
+  
+  // Calculate total duration and check for videos
+  this.totalDuration = 0;
+  this.containsVideo = false;
+  
+  this.media.forEach(item => {
+    if (item.type === 'video' && item.duration) {
+      this.totalDuration += item.duration;
+      this.containsVideo = true;
+    }
+    
+    // Set order if not provided
+    if (!item.order && item.order !== 0) {
+      item.order = this.media.indexOf(item);
+    }
+  });
+  
+  // Sort media by order
+  this.media.sort((a, b) => a.order - b.order);
+  
   next();
 });
 
-// Create and export the model
+// Validation middleware for media constraints
+PostSchema.pre('validate', function (this: IPost, next) {
+  // Check total media count
+  if (this.media.length > 4) {
+    return next(new Error('Maximum 4 media items allowed'));
+  }
+  
+  // Check video duration
+  const totalDuration = this.media.reduce((sum, item) => {
+    return item.type === 'video' && item.duration ? sum + item.duration : sum;
+  }, 0);
+  
+  if (totalDuration > 120) { // 2 minutes
+    return next(new Error('Total video duration cannot exceed 2 minutes'));
+  }
+  
+  next();
+});
+
+// Method to reorder media
+PostSchema.methods.reorderMedia = function (this: IPost, newOrder: { id: string, order: number }[]) {
+  newOrder.forEach(({ id, order }) => {
+    const mediaItem = this.media.find(item => item.publicId === id);
+    if (mediaItem) {
+      mediaItem.order = order;
+    }
+  });
+  
+  this.media.sort((a, b) => a.order - b.order);
+  return this;
+};
+
 const PostModel = mongoose.models.Post as Model<IPost> || mongoose.model<IPost>('Post', PostSchema);
 
 export default PostModel;

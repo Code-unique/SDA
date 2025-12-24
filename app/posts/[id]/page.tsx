@@ -54,9 +54,79 @@ import {
   Trash2,
   Edit
 } from 'lucide-react'
-import { Post, Comment, ApiResponse } from '@/types/post'
 import { cn } from '@/lib/utils'
 import { useUser } from '@clerk/nextjs'
+
+// Define interfaces locally since imports are failing
+interface ApiResponse<T = any> {
+  success: boolean;
+  data?: T;
+  message?: string;
+  error?: string;
+  status?: number;
+}
+
+interface PostUser {
+  _id: string;
+  clerkId: string;
+  username: string;
+  firstName: string;
+  lastName: string;
+  avatar: string;
+  email: string;
+  isVerified: boolean;
+  isPro: boolean;
+  followers: string[];
+  following: string[];
+  badges?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface Comment {
+  _id: string;
+  text: string;
+  user: PostUser;
+  post: string;
+  likes: string[];
+  replies?: Comment[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface MediaItem {
+  url: string;
+  type: 'image' | 'video';
+  order: number;
+  thumbnail?: string;
+  duration?: number;
+}
+
+interface Post {
+  _id: string;
+  caption: string;
+  content: string;
+  media: MediaItem[];
+  author: PostUser;
+  likes: string[];
+  saves: string[];
+  comments: Comment[];
+  tags: string[];
+  hashtags?: string[];
+  category?: string;
+  location?: string;
+  isFeatured: boolean;
+  aiGenerated?: boolean;
+  availableForSale?: boolean;
+  collaboration?: boolean;
+  price?: number;
+  currency?: string;
+  views?: number;
+  engagement?: number;
+  shares?: number;
+  createdAt: string;
+  updatedAt: string;
+}
 
 // Define status interface
 interface BatchStatuses {
@@ -263,10 +333,7 @@ export default function PostDetailPage() {
 
     console.log("Starting like action:", { postId, currentUserId })
 
-    // Normalize "likes" shape:
-    type LikeEntry = string | { _id?: string; id?: string }
-
-    const likes: LikeEntry[] = post.likes ?? []
+    const likes: string[] = post.likes ?? []
     const wasLiked = statuses.likeStatuses[postId] || false
 
     console.log("Previous state:", { wasLiked })
@@ -275,13 +342,7 @@ export default function PostDetailPage() {
     setPost(prev => {
       if (!prev) return prev
 
-      // Normalize all likes to strings for consistent handling
-      const normalizeLike = (like: string | LikeEntry): string => {
-        if (typeof like === 'string') return like
-        return like._id || like.id || ''
-      }
-
-      const currentLikeIds = (prev.likes ?? []).map(normalizeLike)
+      const currentLikeIds = (prev.likes ?? [])
       let newLikeIds: string[]
 
       if (wasLiked) {
@@ -294,7 +355,7 @@ export default function PostDetailPage() {
 
       return {
         ...prev,
-        likes: newLikeIds, // Store as strings for consistency
+        likes: newLikeIds,
       }
     })
 
@@ -322,15 +383,7 @@ export default function PostDetailPage() {
         throw new Error(`HTTP ${response.status}`)
       }
 
-      type LikeApiResponse = {
-        success: boolean;
-        data?: {
-          post: typeof post;
-        };
-        error?: string;
-      }
-
-      const data: LikeApiResponse = await response.json()
+      const data = await response.json()
 
       console.log("Like API success:", data)
 
@@ -489,9 +542,10 @@ export default function PostDetailPage() {
     }))
 
     try {
-      const response = await fetch(`/api/users/${authorId}/follow`, {
+      const response = await fetch(`/api/users/follow`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: authorId })
       })
 
       console.log("Follow API response:", response.status)
@@ -500,15 +554,7 @@ export default function PostDetailPage() {
         throw new Error(`HTTP ${response.status}`)
       }
 
-      type FollowApiResponse = {
-        success: boolean;
-        data?: {
-          following: boolean;
-        };
-        error?: string;
-      }
-
-      const result: FollowApiResponse = await response.json()
+      const result = await response.json()
 
       console.log("Follow API success:", result)
 
@@ -597,16 +643,21 @@ export default function PostDetailPage() {
       _id: tempCommentId,
       user: {
         _id: currentUserId,
-        clerkId: (currentUser as any).clerkId ?? currentUser.id ?? "",
+        clerkId: currentUser?.id ?? "",
         username: currentUser?.username || 'user',
         firstName: currentUser?.firstName || 'User',
         lastName: currentUser?.lastName || '',
         avatar: currentUser?.imageUrl || '',
         email: currentUser?.primaryEmailAddress?.emailAddress || '',
+        isVerified: false,
+        isPro: false,
+        followers: [],
+        following: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       },
       text: originalCommentText,
+      post: postId,
       likes: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -809,10 +860,7 @@ export default function PostDetailPage() {
   // Check if current user liked a comment
   const isCommentLiked = (comment: Comment) => {
     return comment.likes?.some(
-      (like: any) => 
-        (typeof like === 'string' && like === currentUserId) ||
-        (like._id && like._id === currentUserId) ||
-        (like.id && like.id === currentUserId)
+      (like: string) => like === currentUserId
     ) || false
   }
 
@@ -1113,7 +1161,6 @@ export default function PostDetailPage() {
                           <video
                             ref={videoRef}
                             src={post.media[currentMediaIndex].url}
-                            poster={post.media[currentMediaIndex].thumbnail}
                             muted={isMuted}
                             onTimeUpdate={handleVideoProgress}
                             onEnded={() => setIsPlaying(false)}
@@ -1130,7 +1177,7 @@ export default function PostDetailPage() {
                               {/* Progress Bar */}
                               <div className="w-full bg-slate-600/50 rounded-full h-1.5 mb-3 backdrop-blur-sm">
                                 <div 
-                                  className="bg-white rounded-full h-1.5 transition-all duration-100 shadow-lg"
+                                  className="bg-white rounded-full h-1.5 transition-all duration-100"
                                   style={{ width: `${videoProgress}%` }}
                                 />
                               </div>
@@ -1221,7 +1268,7 @@ export default function PostDetailPage() {
                             className={cn(
                               "w-2 h-2 rounded-full transition-all duration-300 backdrop-blur-sm",
                               index === currentMediaIndex 
-                                ? "bg-white w-6 shadow-lg" 
+                                ? "bg-white w-6" 
                                 : "bg-white/50 hover:bg-white/80"
                             )}
                           />
@@ -1233,25 +1280,25 @@ export default function PostDetailPage() {
                   {/* Media Badges */}
                   <div className="absolute top-4 left-4 flex flex-wrap gap-2">
                     {post.isFeatured && (
-                      <Badge className="rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-white border-0 shadow-lg backdrop-blur-sm">
+                      <Badge className="rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-white border-0 backdrop-blur-sm">
                         <Sparkles className="w-3 h-3 mr-1" />
                         Featured
                       </Badge>
                     )}
                     {post.aiGenerated && (
-                      <Badge variant="secondary" className="rounded-full bg-gradient-to-r from-purple-500 to-pink-500 text-white border-0 shadow-lg backdrop-blur-sm">
+                      <Badge variant="secondary" className="rounded-full bg-gradient-to-r from-purple-500 to-pink-500 text-white border-0 backdrop-blur-sm">
                         <Zap className="w-3 h-3 mr-1" />
                         AI Generated
                       </Badge>
                     )}
                     {post.availableForSale && (
-                      <Badge variant="secondary" className="rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white border-0 shadow-lg backdrop-blur-sm">
+                      <Badge variant="secondary" className="rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white border-0 backdrop-blur-sm">
                         <ShoppingBag className="w-3 h-3 mr-1" />
                         For Sale
                       </Badge>
                     )}
                     {post.collaboration && (
-                      <Badge variant="secondary" className="rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 text-white border-0 shadow-lg backdrop-blur-sm">
+                      <Badge variant="secondary" className="rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 text-white border-0 backdrop-blur-sm">
                         <Users className="w-3 h-3 mr-1" />
                         Collaboration
                       </Badge>
@@ -1264,7 +1311,7 @@ export default function PostDetailPage() {
                       <Button
                         onClick={() => console.log('Purchase:', post._id)}
                         size="sm"
-                        className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-300 backdrop-blur-sm border-0"
+                        className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white hover:shadow-xl hover:scale-105 transition-all duration-300 backdrop-blur-sm border-0"
                       >
                         <ShoppingBag className="w-4 h-4 mr-2" />
                         ${post.price} {post.currency}
@@ -1300,7 +1347,7 @@ export default function PostDetailPage() {
                         disabled={isLiking || !isSignedIn}
                         className={`p-4 rounded-2xl transition-all duration-300 w-full group ${
                           isLiked 
-                            ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-lg shadow-rose-500/25' 
+                            ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-rose-500/25' 
                             : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600 border border-slate-200/60 dark:border-slate-700/60'
                         } ${!isSignedIn ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
@@ -1358,7 +1405,7 @@ export default function PostDetailPage() {
                         disabled={isSaving || !isSignedIn}
                         className={`p-4 rounded-2xl transition-all duration-300 w-full group ${
                           isSaved 
-                            ? 'bg-gradient-to-r from-yellow-500 to-amber-500 text-white shadow-lg shadow-yellow-500/25' 
+                            ? 'bg-gradient-to-r from-yellow-500 to-amber-500 text-white shadow-yellow-500/25' 
                             : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600 border border-slate-200/60 dark:border-slate-700/60'
                         } ${!isSignedIn ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
@@ -1409,7 +1456,7 @@ export default function PostDetailPage() {
                             className="cursor-pointer flex-shrink-0"
                             onClick={() => router.push(`/profile/${comment.user.username}`)}
                           >
-                            <Avatar className="w-10 h-10 ring-2 ring-white dark:ring-slate-800 ring-offset-2 ring-offset-slate-100 dark:ring-offset-slate-800 shadow-lg">
+                            <Avatar className="w-10 h-10 ring-2 ring-white dark:ring-slate-800 ring-offset-2 ring-offset-slate-100 dark:ring-offset-slate-800">
                               <AvatarImage src={comment.user.avatar} />
                               <AvatarFallback className="text-xs bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-semibold">
                                 {comment.user.firstName[0]}{comment.user.lastName[0]}
@@ -1427,10 +1474,10 @@ export default function PostDetailPage() {
                               </motion.p>
                               <div className="flex items-center space-x-1">
                                 {comment.user.isVerified && (
-                                  <Verified className="w-3 h-3 text-blue-500 fill-current" />
+                                  <Verified className="w-3 h-3 text-blue-500" />
                                 )}
                                 {comment.user.isPro && (
-                                  <Crown className="w-3 h-3 text-amber-500 fill-current" />
+                                  <Crown className="w-3 h-3 text-amber-500" />
                                 )}
                               </div>
                               <span className="text-xs text-slate-500">•</span>
@@ -1472,7 +1519,7 @@ export default function PostDetailPage() {
 
                   {/* Add Comment */}
                   <div className="flex items-start space-x-4">
-                    <Avatar className="w-10 h-10 flex-shrink-0 ring-2 ring-white dark:ring-slate-800 ring-offset-2 ring-offset-slate-100 dark:ring-offset-slate-800 shadow-lg">
+                    <Avatar className="w-10 h-10 flex-shrink-0 ring-2 ring-white dark:ring-slate-800 ring-offset-2 ring-offset-slate-100 dark:ring-offset-slate-800">
                       <AvatarImage src={currentUser?.imageUrl} />
                       <AvatarFallback className="text-xs bg-gradient-to-r from-rose-500 to-pink-500 text-white font-semibold">
                         {isSignedIn ? (
@@ -1502,7 +1549,7 @@ export default function PostDetailPage() {
                           whileTap={{ scale: 0.95 }}
                           onClick={handleAddComment}
                           disabled={!commentText.trim() || isCommenting}
-                          className="absolute right-2 top-1/2 transform -translate-y-1/2 p-2 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-lg shadow-rose-500/25 hover:shadow-xl hover:shadow-rose-500/40 transition-all duration-300"
+                          className="absolute right-2 top-1/2 transform -translate-y-1/2 p-2 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-rose-500/25 hover:shadow-rose-500/40 transition-all duration-300"
                         >
                           {isCommenting ? (
                             <Loader2 className="w-4 h-4 animate-spin" />
@@ -1528,9 +1575,9 @@ export default function PostDetailPage() {
                       className="cursor-pointer mx-auto w-20 h-20 mb-4"
                       onClick={() => router.push(`/profile/${post.author.username}`)}
                     >
-                      <Avatar className="w-20 h-20 ring-4 ring-white dark:ring-slate-800 ring-offset-4 ring-offset-slate-100 dark:ring-offset-slate-800 shadow-2xl mx-auto">
+                      <Avatar className="w-20 h-20 ring-4 ring-white dark:ring-slate-800 ring-offset-4 ring-offset-slate-100 dark:ring-offset-slate-800 mx-auto">
                         <AvatarImage src={post.author.avatar} />
-                        <AvatarFallback className="bg-gradient-to-r from-rose-500 to-pink-500 text-white font-semibold text-lg shadow-inner">
+                        <AvatarFallback className="bg-gradient-to-r from-rose-500 to-pink-500 text-white font-semibold text-lg">
                           {post.author.firstName[0]}{post.author.lastName[0]}
                         </AvatarFallback>
                       </Avatar>
@@ -1547,10 +1594,10 @@ export default function PostDetailPage() {
                         </motion.h3>
                         <div className="flex items-center space-x-1">
                           {post.author.isVerified && (
-                            <Verified className="w-4 h-4 text-blue-500 fill-current" />
+                            <Verified className="w-4 h-4 text-blue-500" />
                           )}
                           {post.author.isPro && (
-                            <Crown className="w-4 h-4 text-amber-500 fill-current" />
+                            <Crown className="w-4 h-4 text-amber-500" />
                           )}
                         </div>
                       </div>
@@ -1602,7 +1649,7 @@ export default function PostDetailPage() {
                         className={`w-full rounded-2xl transition-all duration-300 h-12 text-base font-semibold ${
                           isFollowing
                             ? 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
-                            : 'bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white shadow-lg shadow-rose-500/25 hover:shadow-xl hover:shadow-rose-500/40'
+                            : 'bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white shadow-rose-500/25 hover:shadow-rose-500/40'
                         } ${!isSignedIn ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                         {isFollowing ? (
@@ -1639,7 +1686,7 @@ export default function PostDetailPage() {
                         <Badge 
                           key={index} 
                           variant="outline"
-                          className="rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/30 cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-md text-xs"
+                          className="rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/30 cursor-pointer transition-all duration-300 hover:scale-105 text-xs"
                         >
                           #{tag}
                         </Badge>
@@ -1779,7 +1826,7 @@ const NotFoundState = ({ error }: { error?: string | null }) => {
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ delay: 0.2, type: "spring" }}
-              className="w-20 h-20 bg-gradient-to-r from-rose-100 to-pink-100 dark:from-rose-900/20 dark:to-pink-900/20 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg"
+              className="w-20 h-20 bg-gradient-to-r from-rose-100 to-pink-100 dark:from-rose-900/20 dark:to-pink-900/20 rounded-2xl flex items-center justify-center mx-auto mb-6"
             >
               <Sparkles className="w-10 h-10 text-rose-400" />
             </motion.div>
@@ -1792,7 +1839,7 @@ const NotFoundState = ({ error }: { error?: string | null }) => {
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <Button
                 onClick={() => router.back()}
-                className="rounded-2xl bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white shadow-lg shadow-rose-500/25 hover:shadow-xl hover:shadow-rose-500/40 transition-all duration-300"
+                className="rounded-2xl bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white shadow-rose-500/25 hover:shadow-rose-500/40 transition-all duration-300"
               >
                 Go Back
               </Button>

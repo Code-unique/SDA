@@ -1,11 +1,12 @@
-// components/posts/feed.tsx
 'use client'
 
 import { useState, useEffect } from 'react'
 import { useInView } from 'react-intersection-observer'
-import { PostCard } from './post-card'
+import { EnhancedPostCard } from './enhanced-post-card'
 import { Button } from '@/components/ui/button'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Filter } from 'lucide-react'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 interface Post {
   _id: string
@@ -15,16 +16,19 @@ interface Post {
     firstName: string
     lastName: string
     avatar: string
+    isVerified?: boolean
+    isPro?: boolean
   }
   media: Array<{
     type: 'image' | 'video'
     url: string
     thumbnail?: string
+    duration?: number
   }>
   caption: string
   hashtags: string[]
   likes: string[]
-  saves: string[] // Add this
+  saves: string[]
   comments: Array<{
     _id: string
     user: {
@@ -39,6 +43,10 @@ interface Post {
   }>
   createdAt: string
   updatedAt: string
+  mediaCount: number
+  containsVideo: boolean
+  totalDuration?: number
+  isFeatured?: boolean
 }
 
 export function Feed() {
@@ -47,17 +55,34 @@ export function Feed() {
   const [hasMore, setHasMore] = useState(true)
   const [loading, setLoading] = useState(false)
   const [ref, inView] = useInView()
+  const [feedType, setFeedType] = useState<'following' | 'explore' | 'featured'>('following')
+  const [mediaFilter, setMediaFilter] = useState<'all' | 'images' | 'videos'>('all')
+  const [sortBy, setSortBy] = useState<'recent' | 'popular'>('recent')
 
-  const loadPosts = async (pageNum: number = 1) => {
+  const loadPosts = async (pageNum: number = 1, reset: boolean = false) => {
     if (loading) return
 
     setLoading(true)
     try {
-      const response = await fetch(`/api/posts/feed?page=${pageNum}&limit=10`)
+      const params = new URLSearchParams({
+        page: pageNum.toString(),
+        limit: '10',
+        type: mediaFilter,
+        sort: sortBy
+      })
+
+      let endpoint = '/api/posts/feed'
+      if (feedType === 'explore') {
+        endpoint = '/api/posts/explore'
+      } else if (feedType === 'featured') {
+        endpoint = '/api/posts/featured'
+      }
+
+      const response = await fetch(`${endpoint}?${params}`)
       const data = await response.json()
 
       if (response.ok) {
-        if (pageNum === 1) {
+        if (reset || pageNum === 1) {
           setPosts(data.posts)
         } else {
           setPosts(prev => [...prev, ...data.posts])
@@ -72,9 +97,10 @@ export function Feed() {
     }
   }
 
+  // Reload when filters change
   useEffect(() => {
-    loadPosts(1)
-  }, [])
+    loadPosts(1, true)
+  }, [feedType, mediaFilter, sortBy])
 
   useEffect(() => {
     if (inView && hasMore && !loading) {
@@ -86,17 +112,24 @@ export function Feed() {
     try {
       const response = await fetch(`/api/posts/${postId}/like`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
       })
 
       if (response.ok) {
-        const updatedPost = await response.json()
+        // Optimistic update
         setPosts(prev =>
-          prev.map(post =>
-            post._id === postId ? { ...updatedPost, saves: updatedPost.saves || [] } : post
-          )
+          prev.map(post => {
+            if (post._id === postId) {
+              const isLiked = post.likes.includes('current-user') // You'll need actual user ID
+              return {
+                ...post,
+                likes: isLiked 
+                  ? post.likes.filter(id => id !== 'current-user')
+                  : [...post.likes, 'current-user']
+              }
+            }
+            return post
+          })
         )
       }
     } catch (error) {
@@ -104,44 +137,28 @@ export function Feed() {
     }
   }
 
-  const handleComment = async (postId: string, comment: string) => {
-    try {
-      const response = await fetch(`/api/posts/${postId}/comments`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ text: comment }),
-      })
-
-      if (response.ok) {
-        const updatedPost = await response.json()
-        setPosts(prev =>
-          prev.map(post =>
-            post._id === postId ? { ...updatedPost, saves: updatedPost.saves || [] } : post
-          )
-        )
-      }
-    } catch (error) {
-      console.error('Error adding comment:', error)
-    }
-  }
-
   const handleSave = async (postId: string) => {
     try {
       const response = await fetch(`/api/posts/${postId}/save`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
       })
 
       if (response.ok) {
-        const updatedPost = await response.json()
+        // Optimistic update
         setPosts(prev =>
-          prev.map(post =>
-            post._id === postId ? { ...updatedPost, saves: updatedPost.saves || [] } : post
-          )
+          prev.map(post => {
+            if (post._id === postId) {
+              const isSaved = post.saves.includes('current-user') // You'll need actual user ID
+              return {
+                ...post,
+                saves: isSaved 
+                  ? post.saves.filter(id => id !== 'current-user')
+                  : [...post.saves, 'current-user']
+              }
+            }
+            return post
+          })
         )
       }
     } catch (error) {
@@ -149,18 +166,73 @@ export function Feed() {
     }
   }
 
+  const handleComment = async (postId: string, comment: string) => {
+    try {
+      const response = await fetch(`/api/posts/${postId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: comment }),
+      })
+
+      if (response.ok) {
+        // You might want to refresh the post or update locally
+        loadPosts(page, true)
+      }
+    } catch (error) {
+      console.error('Error adding comment:', error)
+    }
+  }
+
   return (
     <div className="space-y-6">
-      {posts.map((post) => (
-        <PostCard
-          key={post._id}
-          post={post as any }
-          onLike={handleLike}
-          onComment={handleComment}
-          onSave={handleSave}
-        />
-      ))}
+      {/* Feed Controls */}
+      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+        <Tabs value={feedType} onValueChange={(value: any) => setFeedType(value)} className="w-full sm:w-auto">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="following">Following</TabsTrigger>
+            <TabsTrigger value="explore">Explore</TabsTrigger>
+            <TabsTrigger value="featured">Featured</TabsTrigger>
+          </TabsList>
+        </Tabs>
 
+        <div className="flex gap-2 w-full sm:w-auto">
+          <Select value={mediaFilter} onValueChange={(value: any) => setMediaFilter(value)}>
+            <SelectTrigger className="w-[140px]">
+              <SelectValue placeholder="Media type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Types</SelectItem>
+              <SelectItem value="images">Images Only</SelectItem>
+              <SelectItem value="videos">Videos Only</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select value={sortBy} onValueChange={(value: any) => setSortBy(value)}>
+            <SelectTrigger className="w-[140px]">
+              <SelectValue placeholder="Sort by" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="recent">Most Recent</SelectItem>
+              <SelectItem value="popular">Most Popular</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Posts Grid */}
+      <div className="space-y-6">
+        {posts.map((post) => (
+          <EnhancedPostCard
+            key={post._id}
+            post={post as any}
+            onLike={() => handleLike(post._id)}
+            onSave={() => handleSave(post._id)}
+            onComment={(postId, text) => handleComment(postId, text)}
+          />
+        ))}
+      </div>
+
+      {/* Load More */}
       {hasMore && (
         <div ref={ref} className="flex justify-center py-8">
           <Button variant="outline" disabled={loading}>
@@ -170,6 +242,7 @@ export function Feed() {
         </div>
       )}
 
+      {/* No Posts */}
       {!hasMore && posts.length > 0 && (
         <div className="text-center py-8 text-slate-500">
           You've reached the end of your feed
@@ -179,7 +252,7 @@ export function Feed() {
       {posts.length === 0 && !loading && (
         <div className="text-center py-12">
           <div className="text-slate-400 mb-4">No posts yet</div>
-          <p className="text-slate-500">Follow some designers to see their posts here!</p>
+          <p className="text-slate-500">Follow some creators to see their posts here!</p>
         </div>
       )}
     </div>

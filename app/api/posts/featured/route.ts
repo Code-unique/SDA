@@ -5,6 +5,7 @@ import Post from '@/lib/models/Post';
 import { ApiResponse, PaginatedResponse } from '@/types/post';
 import { Post as PostType } from '@/types/post';
 import "@/lib/loadmodels";
+
 export async function GET(request: NextRequest) {
   try {
     await connectToDatabase();
@@ -76,14 +77,13 @@ export async function GET(request: NextRequest) {
 
     // Create the paginated response correctly
     const paginatedResponse: PaginatedResponse<PostType> = {
-      items: formattedPosts,
-      pagination: {
-        currentPage: page,
-        totalPages: Math.ceil(totalPosts / limit),
-        totalItems: totalPosts,
-        hasNext: page < Math.ceil(totalPosts / limit),
-        hasPrev: page > 1
-      }
+      data: formattedPosts,
+      total: totalPosts,
+      page: page,
+      limit: limit,
+      totalPages: Math.ceil(totalPosts / limit),
+      hasNextPage: page < Math.ceil(totalPosts / limit),
+      hasPrevPage: page > 1
     };
 
     return NextResponse.json<ApiResponse<PaginatedResponse<PostType>>>({
