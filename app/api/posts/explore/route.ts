@@ -1,4 +1,3 @@
-// app/api/posts/explore/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import Post from '@/lib/models/Post';
@@ -10,7 +9,7 @@ export async function GET(request: NextRequest) {
     
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '12');
+    const limit = Math.min(parseInt(searchParams.get('limit') || '12'), 50);
     const type = searchParams.get('type') || 'all';
     const sort = searchParams.get('sort') || 'trending';
     const hashtag = searchParams.get('hashtag');
@@ -18,33 +17,25 @@ export async function GET(request: NextRequest) {
 
     const filters: any = { isPublic: true };
     
-    // Media type filter
-    if (type === 'images') {
-      filters.containsVideo = false;
-    } else if (type === 'videos') {
-      filters.containsVideo = true;
-    }
+    // Media Type Filter
+    if (type === 'images') filters.containsVideo = false;
+    else if (type === 'videos') filters.containsVideo = true;
     
-    // Hashtag filter
-    if (hashtag) {
-      filters.hashtags = { $in: [hashtag.toLowerCase()] };
-    }
+    // Hashtag Filter
+    if (hashtag) filters.hashtags = { $in: [hashtag.toLowerCase()] };
     
-    // Search filter
+    // Search Filter
     if (search) {
       filters.$or = [
         { caption: { $regex: search, $options: 'i' } },
-        { hashtags: { $in: [new RegExp(search, 'i')] } }
+        { hashtags: { $in: [new RegExp(`^${search}$`, 'i')] } }
       ];
     }
     
-    // Sort options
+    // Sort Logic
     let sortOptions: any = { createdAt: -1 };
-    if (sort === 'popular') {
-      sortOptions = { likes: -1, createdAt: -1 };
-    } else if (sort === 'trending') {
-      sortOptions = { engagement: -1, createdAt: -1 };
-    }
+    if (sort === 'popular') sortOptions = { likes: -1, createdAt: -1 };
+    else if (sort === 'trending') sortOptions = { engagement: -1, createdAt: -1 };
 
     const [posts, total] = await Promise.all([
       Post.find(filters)
@@ -61,13 +52,11 @@ export async function GET(request: NextRequest) {
       posts: posts.map(post => ({
         ...post,
         _id: post._id.toString(),
-        author: post.author ? {
-          ...post.author,
-          _id: post.author._id.toString()
-        } : null,
-        likes: post.likes?.length || 0,
-        saves: post.saves?.length || 0,
-        comments: post.comments?.length || 0
+        author: post.author ? { ...post.author, _id: post.author._id.toString() } : null,
+        // Pre-calculate counts for frontend performance
+        likesCount: post.likes?.length || 0,
+        savesCount: post.saves?.length || 0,
+        commentsCount: post.comments?.length || 0
       })),
       pagination: {
         page,
@@ -80,12 +69,6 @@ export async function GET(request: NextRequest) {
 
   } catch (error: any) {
     console.error('Error fetching explore posts:', error);
-    return NextResponse.json(
-      { 
-        success: false,
-        error: error.message || 'Failed to fetch posts' 
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

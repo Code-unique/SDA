@@ -1,3 +1,4 @@
+// app/posts/[id]/page.tsx
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
@@ -25,7 +26,6 @@ import {
   Crown,
   Verified,
   Zap,
-  TrendingUp,
   BarChart3,
   User,
   ExternalLink,
@@ -52,18 +52,32 @@ import {
   Image as ImageIcon,
   Check,
   Trash2,
-  Edit
+  Edit,
+  ChevronLeft,
+  ChevronRight,
+  Maximize2,
+  Minimize2,
+  Hash,
+  Flame,
+  Target,
+  Palette,
+  Brush,
+  Code,
+  Layers,
+  Filter,
+  TrendingUp as TrendingIcon,
+  RefreshCw
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUser } from '@clerk/nextjs'
 
-// Define interfaces locally since imports are failing
-interface ApiResponse<T = any> {
-  success: boolean;
-  data?: T;
-  message?: string;
-  error?: string;
-  status?: number;
+// Define interfaces
+interface MediaItem {
+  url: string;
+  type: 'image' | 'video';
+  order: number;
+  thumbnail?: string;
+  duration?: number;
 }
 
 interface PostUser {
@@ -79,6 +93,9 @@ interface PostUser {
   followers: string[];
   following: string[];
   badges?: string[];
+  bio?: string;
+  location?: string;
+  website?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -92,14 +109,6 @@ interface Comment {
   replies?: Comment[];
   createdAt: string;
   updatedAt: string;
-}
-
-interface MediaItem {
-  url: string;
-  type: 'image' | 'video';
-  order: number;
-  thumbnail?: string;
-  duration?: number;
 }
 
 interface Post {
@@ -126,519 +135,505 @@ interface Post {
   shares?: number;
   createdAt: string;
   updatedAt: string;
+  isPublic: boolean;
 }
 
-// Define status interface
+interface TrendingHashtag {
+  tag: string;
+  count: number;
+  trendScore?: number;
+  lastUsed?: string;
+}
+
 interface BatchStatuses {
-  likeStatuses: Record<string, boolean>
-  saveStatuses: Record<string, { saved: boolean; savedAt?: string }>
-  followStatuses: Record<string, boolean>
+  likeStatuses: Record<string, boolean>;
+  saveStatuses: Record<string, { saved: boolean; savedAt?: string }>;
+  followStatuses: Record<string, boolean>;
 }
 
 export default function PostDetailPage() {
-  const params = useParams()
-  const router = useRouter()
-  const postId = params.id as string
+  const params = useParams();
+  const router = useRouter();
+  const postId = params.id as string;
   
-  const { user: currentUser, isLoaded: userLoaded, isSignedIn } = useUser()
-  const { toast } = useToast()
-  const [post, setPost] = useState<Post | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [commentText, setCommentText] = useState('')
-  const [isLiking, setIsLiking] = useState(false)
-  const [isCommenting, setIsCommenting] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
-  const [isSaved, setIsSaved] = useState(false)
-  const [isFollowing, setIsFollowing] = useState(false)
-  const [showShareMenu, setShowShareMenu] = useState(false)
-  const [showOptionsMenu, setShowOptionsMenu] = useState(false)
-  const [isScrolled, setIsScrolled] = useState(false)
-  const [optimisticFollowers, setOptimisticFollowers] = useState<number>(0)
-  const [currentMediaIndex, setCurrentMediaIndex] = useState(0)
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [isMuted, setIsMuted] = useState(true)
-  const [imageLoaded, setImageLoaded] = useState(false)
-  const [videoProgress, setVideoProgress] = useState(0)
-  const [isHovered, setIsHovered] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const { user: currentUser, isLoaded: userLoaded, isSignedIn } = useUser();
+  const { toast } = useToast();
+  
+  // State
+  const [post, setPost] = useState<Post | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [commentText, setCommentText] = useState('');
+  const [isLiking, setIsLiking] = useState(false);
+  const [isCommenting, setIsCommenting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [showShareMenu, setShowShareMenu] = useState(false);
+  const [showOptionsMenu, setShowOptionsMenu] = useState(false);
+  const [isScrolled, setIsScrolled] = useState(false);
+  const [optimisticFollowers, setOptimisticFollowers] = useState<number>(0);
+  const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [videoProgress, setVideoProgress] = useState(0);
+  const [isHovered, setIsHovered] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [trendingHashtags, setTrendingHashtags] = useState<TrendingHashtag[]>([]);
+  const [loadingTrends, setLoadingTrends] = useState(false);
   const [statuses, setStatuses] = useState<BatchStatuses>({
     likeStatuses: {},
     saveStatuses: {},
     followStatuses: {}
-  })
+  });
 
-  const headerRef = useRef<HTMLDivElement>(null)
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const optionsRef = useRef<HTMLDivElement>(null)
-  const shareRef = useRef<HTMLDivElement>(null)
-  const { scrollY } = useScroll()
-  const headerOpacity = useTransform(scrollY, [0, 100], [1, 0.95])
-  const headerBlur = useTransform(scrollY, [0, 100], [0, 8])
+  // Refs
+  const headerRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const mediaContainerRef = useRef<HTMLDivElement>(null);
+  const optionsRef = useRef<HTMLDivElement>(null);
+  const shareRef = useRef<HTMLDivElement>(null);
+  
+  // Scroll animations
+  const { scrollY } = useScroll();
+  const headerOpacity = useTransform(scrollY, [0, 100], [1, 0.95]);
+  const headerBlur = useTransform(scrollY, [0, 100], [0, 8]);
 
-  // Get current user ID from Clerk
-  const currentUserId = currentUser?.id || ''
+  // Current user ID
+  const currentUserId = currentUser?.id || '';
 
-  // Debug state
-  useEffect(() => {
-    console.log('Current State:', {
-      postId,
-      currentUserId,
-      userLoaded,
-      isSignedIn,
-      post: post ? {
-        id: post._id,
-        likes: post.likes,
-        author: post.author?._id,
-        commentsCount: post.comments?.length,
-      } : null,
-      isFollowing,
-      optimisticFollowers,
-      isLiking,
-      isCommenting,
-      isSaving,
-      statuses
-    })
-  }, [post, currentUserId, isFollowing, optimisticFollowers, isLiking, isCommenting, isSaving, userLoaded, isSignedIn, statuses])
+  // Fetch trending hashtags
+  const fetchTrendingHashtags = useCallback(async () => {
+    try {
+      setLoadingTrends(true);
+      const response = await fetch('/api/hashtags/trending');
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.hashtags) {
+          setTrendingHashtags(data.hashtags);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching trending hashtags:', error);
+    } finally {
+      setLoadingTrends(false);
+    }
+  }, []);
 
-  // Fetch statuses for the post
+  // Fetch statuses
   const fetchStatuses = useCallback(async () => {
-    if (!postId || !isSignedIn) return
+    if (!postId || !isSignedIn || !post) return;
 
     try {
-      console.log('Fetching statuses for:', { postId, userIds: [post?.author?._id] })
       const response = await fetch('/api/batch-status', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           postIds: [postId],
           userIds: post?.author?._id ? [post.author._id] : []
         })
-      })
+      });
 
-      if (response.ok) {
-        const data = await response.json()
-        console.log('Statuses fetched:', data)
-        if (data.success && data.data) {
-          setStatuses(data.data)
-          
-          // Update saved status
-          if (data.data.saveStatuses[postId]) {
-            setIsSaved(data.data.saveStatuses[postId].saved)
-          }
-          
-          // Update follow status
-          if (post?.author?._id && data.data.followStatuses[post.author._id]) {
-            setIsFollowing(data.data.followStatuses[post.author._id])
-          }
-        }
-      } else {
-        console.error('Failed to fetch statuses:', response.status)
+      if (!response.ok) return;
+
+      const data = await response.json();
+
+      if (!data?.success || !data.data) return;
+
+      setStatuses(data.data);
+      setIsSaved(!!data.data.saveStatuses?.[postId]?.saved);
+
+      if (post?.author?._id) {
+        setIsFollowing(!!data.data.followStatuses?.[post.author._id]);
       }
-    } catch (error) {
-      console.error('Error fetching statuses:', error)
+    } catch (err) {
+      console.error('Error fetching statuses:', err);
     }
-  }, [postId, isSignedIn, post?.author?._id])
+  }, [postId, isSignedIn, post]);
 
-  // Fetch post data
+  // Fetch post data - FIXED: removed fetchStatuses and fetchTrendingHashtags from dependencies
   const fetchPost = useCallback(async () => {
+    if (!postId || !userLoaded) return;
+    
     try {
-      setLoading(true)
-      setError(null)
-      console.log('Fetching post:', postId)
-      const response = await fetch(`/api/posts/${postId}`)
+      setLoading(true);
+      setError(null);
+      
+      const response = await fetch(`/api/posts/${postId}`);
       
       if (response.ok) {
-        const data = await response.json()
-        console.log('Post data received:', data)
+        const data = await response.json();
         if (data.success && data.data) {
-          const postData = data.data
-          setPost(postData)
+          const postData = data.data;
+          setPost(postData);
           
           // Set optimistic follower count
           const followerCount = Array.isArray(postData.author?.followers) 
             ? postData.author.followers.length 
-            : 0
-          setOptimisticFollowers(followerCount)
+            : 0;
+          setOptimisticFollowers(followerCount);
           
-          // Fetch statuses after post is loaded
-          if (isSignedIn) {
-            await fetchStatuses()
+          // Fetch statuses if signed in
+          if (isSignedIn && postData._id) {
+            try {
+              const statusResponse = await fetch('/api/batch-status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  postIds: [postData._id],
+                  userIds: postData.author?._id ? [postData.author._id] : []
+                })
+              });
+
+              if (statusResponse.ok) {
+                const statusData = await statusResponse.json();
+                if (statusData?.success && statusData.data) {
+                  setStatuses(statusData.data);
+                  setIsSaved(!!statusData.data.saveStatuses?.[postData._id]?.saved);
+                  if (postData.author?._id) {
+                    setIsFollowing(!!statusData.data.followStatuses?.[postData.author._id]);
+                  }
+                }
+              }
+            } catch (err) {
+              console.error('Error fetching statuses:', err);
+            }
           }
 
-          console.log('Post loaded successfully:', {
-            postId: postData._id,
-            likes: postData.likes?.length || 0,
-            comments: postData.comments?.length || 0,
-            author: postData.author?._id
-          })
+          // Fetch trending hashtags
+          try {
+            const hashtagsResponse = await fetch('/api/hashtags/trending');
+            if (hashtagsResponse.ok) {
+              const hashtagsData = await hashtagsResponse.json();
+              if (hashtagsData.success && hashtagsData.hashtags) {
+                setTrendingHashtags(hashtagsData.hashtags);
+              }
+            }
+          } catch (error) {
+            console.error('Error fetching trending hashtags:', error);
+          }
         } else {
-          setError(data.error || 'Failed to load post')
+          setError(data.error || 'Failed to load post');
         }
       } else {
-        const errorText = await response.text()
-        console.error('Failed to load post:', response.status, errorText)
-        setError('Failed to load post')
+        setError('Failed to load post');
       }
     } catch (error) {
-      console.error('Error fetching post:', error)
-      setError('Failed to load post')
+      console.error('Error fetching post:', error);
+      setError('Failed to load post');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [postId, fetchStatuses, isSignedIn])
+  }, [postId, userLoaded, isSignedIn]); // FIXED: Removed circular dependencies
 
+  // Load post on mount - FIXED: Only run when postId or userLoaded changes
   useEffect(() => {
     if (postId && userLoaded) {
-      fetchPost()
+      fetchPost();
     }
-  }, [postId, fetchPost, userLoaded])
+  }, [postId, userLoaded]); // FIXED: Only depend on postId and userLoaded
 
+  // Handle scroll
   useEffect(() => {
     const handleScroll = () => {
-      setIsScrolled(window.scrollY > 50)
-    }
-    window.addEventListener('scroll', handleScroll, { passive: true })
-    return () => window.removeEventListener('scroll', handleScroll)
-  }, [])
+      setIsScrolled(window.scrollY > 50);
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
-  // Close menus when clicking outside
+  // Close menus on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (optionsRef.current && !optionsRef.current.contains(event.target as Node)) {
-        setShowOptionsMenu(false)
+        setShowOptionsMenu(false);
       }
       if (shareRef.current && !shareRef.current.contains(event.target as Node)) {
-        setShowShareMenu(false)
+        setShowShareMenu(false);
       }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Video controls
+  const togglePlay = () => {
+    if (videoRef.current) {
+      if (isPlaying) {
+        videoRef.current.pause();
+      } else {
+        videoRef.current.play();
+      }
+      setIsPlaying(!isPlaying);
     }
+  };
 
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
+  const toggleMute = () => {
+    if (videoRef.current) {
+      videoRef.current.muted = !isMuted;
+      setIsMuted(!isMuted);
+    }
+  };
 
-  // FIXED: Like functionality with proper API integration
+  const toggleFullscreen = () => {
+    if (!mediaContainerRef.current) return;
+    
+    if (!document.fullscreenElement) {
+      mediaContainerRef.current.requestFullscreen();
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen();
+      setIsFullscreen(false);
+    }
+  };
+
+  const handleVideoProgress = () => {
+    if (videoRef.current) {
+      const progress = (videoRef.current.currentTime / videoRef.current.duration) * 100;
+      setVideoProgress(progress);
+    }
+  };
+
+  // Handle like
   const handleLike = async () => {
     if (!post || isLiking) {
-      console.log("Like prevented: no post or already liking")
-      return
+      console.log("Like prevented: no post or already liking");
+      return;
     }
 
     if (!isSignedIn) {
-      alert("Please log in to like posts")
-      return
+      toast({
+        title: "Please sign in",
+        description: "You need to be signed in to like posts",
+        variant: "destructive"
+      });
+      return;
     }
 
-    console.log("Starting like action:", { postId, currentUserId })
+    const wasLiked = statuses.likeStatuses[postId] || false;
 
-    const likes: string[] = post.likes ?? []
-    const wasLiked = statuses.likeStatuses[postId] || false
+    // Optimistic update
+    setPost(prev => prev ? {
+      ...prev,
+      likes: wasLiked 
+        ? prev.likes.filter(id => id !== currentUserId)
+        : [...prev.likes, currentUserId]
+    } : null);
 
-    console.log("Previous state:", { wasLiked })
-
-    // Optimistic update - update both local state and statuses
-    setPost(prev => {
-      if (!prev) return prev
-
-      const currentLikeIds = (prev.likes ?? [])
-      let newLikeIds: string[]
-
-      if (wasLiked) {
-        // Remove like
-        newLikeIds = currentLikeIds.filter(likeId => likeId !== currentUserId)
-      } else {
-        // Add like
-        newLikeIds = [...currentLikeIds, currentUserId]
-      }
-
-      return {
-        ...prev,
-        likes: newLikeIds,
-      }
-    })
-
-    // Update statuses optimistically
     setStatuses(prev => ({
       ...prev,
-      likeStatuses: {
-        ...prev.likeStatuses,
-        [postId]: !wasLiked
-      }
-    }))
+      likeStatuses: { ...prev.likeStatuses, [postId]: !wasLiked }
+    }));
 
-    setIsLiking(true)
+    setIsLiking(true);
 
     try {
       const response = await fetch(`/api/posts/${postId}/like`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: currentUserId }),
-      })
-
-      console.log("Like API response:", response.status)
+      });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
+        throw new Error('Failed to like post');
       }
 
-      const data = await response.json()
-
-      console.log("Like API success:", data)
-
+      const data = await response.json();
+      
       if (data.success && data.data?.post) {
-        // Server-authoritative state update
-        setPost(data.data.post)
-        // Refresh statuses to ensure consistency
-        await fetchStatuses()
+        setPost(data.data.post);
+        // Refresh statuses
+        const statusResponse = await fetch('/api/batch-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            postIds: [postId],
+            userIds: post?.author?._id ? [post.author._id] : []
+          })
+        });
+        if (statusResponse.ok) {
+          const statusData = await statusResponse.json();
+          if (statusData?.success && statusData.data) {
+            setStatuses(statusData.data);
+          }
+        }
       } else {
-        await fetchPost() // revert UI
-        throw new Error(data.error || "Failed to like post")
+        await fetchPost();
+        throw new Error(data.error || "Failed to like post");
       }
     } catch (error) {
-      console.error("Error liking post:", error)
-      // Revert optimistic updates
-      await fetchPost()
-      await fetchStatuses()
+      await fetchPost();
       toast({
         title: "Error",
         description: "Failed to like post. Please try again.",
         variant: "destructive",
-        duration: 5000,
-      })
+      });
     } finally {
-      setIsLiking(false)
+      setIsLiking(false);
     }
-  }
+  };
 
-  // FIXED: Save functionality with batch status integration
+  // Handle save
   const handleSave = async () => {
-    if (!post || isSaving) return
+    if (!post || isSaving) return;
 
     if (!isSignedIn) {
-      alert('Please log in to save posts')
-      return
+      toast({
+        title: "Please sign in",
+        description: "You need to be signed in to save posts",
+        variant: "destructive"
+      });
+      return;
     }
 
-    console.log("Starting save action:", { postId, currentUserId })
-    const wasSaved = statuses.saveStatuses[postId]?.saved || false
+    const wasSaved = statuses.saveStatuses[postId]?.saved || false;
 
     // Optimistic update
-    setIsSaved(!wasSaved)
-    setStatuses(prev => ({
-      ...prev,
-      saveStatuses: {
-        ...prev.saveStatuses,
-        [postId]: { saved: !wasSaved, savedAt: !wasSaved ? new Date().toISOString() : undefined }
-      }
-    }))
+    setIsSaved(!wasSaved);
+    setIsSaving(true);
 
-    setIsSaving(true)
     try {
       const response = await fetch(`/api/posts/${postId}/save`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: currentUserId }),
-      })
-
-      console.log('Save API response:', response.status)
+      });
 
       if (response.ok) {
-        const data = await response.json()
-        console.log('Save API success:', data)
+        const data = await response.json();
         if (data.success) {
-          // Update status from server response
-          if (data.data?.saved !== undefined) {
-            setIsSaved(data.data.saved)
-            setStatuses(prev => ({
-              ...prev,
-              saveStatuses: {
-                ...prev.saveStatuses,
-                [postId]: { 
-                  saved: data.data.saved, 
-                  savedAt: data.data.savedAt 
-                }
-              }
-            }))
-          }
-        } else {
-          // Revert optimistic update on error
-          setIsSaved(wasSaved)
-          setStatuses(prev => ({
-            ...prev,
-            saveStatuses: {
-              ...prev.saveStatuses,
-              [postId]: { saved: wasSaved }
+          setIsSaved(data.data?.saved || !wasSaved);
+          // Refresh statuses
+          const statusResponse = await fetch('/api/batch-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              postIds: [postId],
+              userIds: post?.author?._id ? [post.author._id] : []
+            })
+          });
+          if (statusResponse.ok) {
+            const statusData = await statusResponse.json();
+            if (statusData?.success && statusData.data) {
+              setStatuses(statusData.data);
             }
-          }))
-          alert(data.error || 'Failed to save post')
-        }
-      } else {
-        // Revert optimistic update on error
-        setIsSaved(wasSaved)
-        setStatuses(prev => ({
-          ...prev,
-          saveStatuses: {
-            ...prev.saveStatuses,
-            [postId]: { saved: wasSaved }
           }
-        }))
-        alert('Failed to save post')
+          
+          toast({
+            title: wasSaved ? "Unsaved" : "Saved",
+            description: wasSaved 
+              ? "Post removed from your saves" 
+              : "Post added to your saves",
+          });
+        }
       }
     } catch (error) {
-      console.error('Error saving post:', error)
-      // Revert optimistic update on error
-      setIsSaved(wasSaved)
-      setStatuses(prev => ({
-        ...prev,
-        saveStatuses: {
-          ...prev.saveStatuses,
-          [postId]: { saved: wasSaved }
-        }
-      }))
-      alert('Failed to save post')
+      setIsSaved(wasSaved);
+      toast({
+        title: "Error",
+        description: "Failed to save post",
+        variant: "destructive"
+      });
     } finally {
-      setIsSaving(false)
+      setIsSaving(false);
     }
-  }
+  };
 
-  // FIXED: Follow functionality with batch status integration
+  // Handle follow
   const handleFollow = async () => {
     if (!post?.author?._id) {
-      console.log("Follow prevented: No author ID")
-      return
+      console.log("Follow prevented: No author ID");
+      return;
     }
 
     if (!isSignedIn) {
-      alert("Please log in to follow users")
-      return
+      toast({
+        title: "Please sign in",
+        description: "You need to be signed in to follow users",
+        variant: "destructive"
+      });
+      return;
     }
 
-    const authorId = post.author._id
-    const previousIsFollowing = statuses.followStatuses[authorId] || false
-    const previousFollowerCount = optimisticFollowers
+    const authorId = post.author._id;
+    const previousIsFollowing = statuses.followStatuses[authorId] || false;
 
-    console.log("Starting follow action:", {
-      authorId,
-      currentUserId,
-      previousIsFollowing,
-      previousFollowerCount,
-    })
-
-    // Optimistic UI update
-    setIsFollowing(!previousIsFollowing)
+    // Optimistic update
+    setIsFollowing(!previousIsFollowing);
     setOptimisticFollowers(prev => 
       previousIsFollowing ? Math.max(0, prev - 1) : prev + 1
-    )
-    setStatuses(prev => ({
-      ...prev,
-      followStatuses: {
-        ...prev.followStatuses,
-        [authorId]: !previousIsFollowing
-      }
-    }))
+    );
 
     try {
       const response = await fetch(`/api/users/follow`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: authorId })
-      })
+      });
 
-      console.log("Follow API response:", response.status)
+      if (!response.ok) throw new Error("Follow request failed");
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-
-      const result = await response.json()
-
-      console.log("Follow API success:", result)
-
-      if (!result.success) {
-        throw new Error(result.error || "Follow request failed")
-      }
-
-      // If server returned proper state, use it
-      if (result.data) {
-        const following = result.data.following
-
-        setIsFollowing(following)
-        setStatuses(prev => ({
-          ...prev,
-          followStatuses: {
-            ...prev.followStatuses,
-            [authorId]: following
+      const result = await response.json();
+      
+      if (result.success) {
+        // Refresh statuses
+        const statusResponse = await fetch('/api/batch-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            postIds: [postId],
+            userIds: post?.author?._id ? [post.author._id] : []
+          })
+        });
+        if (statusResponse.ok) {
+          const statusData = await statusResponse.json();
+          if (statusData?.success && statusData.data) {
+            setStatuses(statusData.data);
           }
-        }))
-
-        // Adjust follower count to actual value
-        setOptimisticFollowers(prev =>
-          following
-            ? previousIsFollowing
-              ? prev // no change
-              : prev + 1
-            : previousIsFollowing
-            ? prev - 1
-            : prev
-        )
-
+        }
+        
         toast({
-          title: following ? "Following" : "Unfollowed",
-          description: following
+          title: !previousIsFollowing ? "Following" : "Unfollowed",
+          description: !previousIsFollowing
             ? `You are now following ${post.author.firstName}`
             : `You unfollowed ${post.author.firstName}`,
-          duration: 3000,
-        })
+        });
       }
     } catch (error) {
-      console.error("Error following user:", error)
-
-      // Revert optimistic update
-      setIsFollowing(previousIsFollowing)
-      setOptimisticFollowers(previousFollowerCount)
-      setStatuses(prev => ({
-        ...prev,
-        followStatuses: {
-          ...prev.followStatuses,
-          [authorId]: previousIsFollowing
-        }
-      }))
-
+      setIsFollowing(previousIsFollowing);
+      setOptimisticFollowers(prev => 
+        previousIsFollowing ? prev + 1 : Math.max(0, prev - 1)
+      );
+      
       toast({
         title: "Error",
-        description:
-          (error as Error).message ||
-          "Failed to follow user. Please try again.",
-        variant: "destructive",
-        duration: 5000,
-      })
+        description: "Failed to follow user",
+        variant: "destructive"
+      });
     }
-  }
+  };
 
-  // FIXED: Comment functionality with proper API integration
+  // Handle comment
   const handleAddComment = async () => {
     if (!commentText.trim() || !post || isCommenting) {
-      console.log('Comment prevented:', { 
-        hasText: !!commentText.trim(), 
-        hasPost: !!post, 
-        isCommenting
-      })
-      return
+      if (!isSignedIn) {
+        toast({
+          title: "Please sign in",
+          description: "You need to be signed in to comment",
+          variant: "destructive"
+        });
+      }
+      return;
     }
 
-    if (!isSignedIn) {
-      alert('Please log in to comment')
-      return
-    }
-
-    const tempCommentId = `temp-${Date.now()}`
-    const originalCommentText = commentText.trim()
+    const tempCommentId = `temp-${Date.now()}`;
+    const originalCommentText = commentText.trim();
     
-    // Create temp comment with Clerk user data
+    // Create temp comment
     const tempComment: Comment = {
       _id: tempCommentId,
       user: {
@@ -661,128 +656,117 @@ export default function PostDetailPage() {
       likes: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
-    }
-
-    console.log('Adding comment:', { tempCommentId, text: originalCommentText })
+    };
 
     // Optimistic update
     setPost(prev => prev ? {
       ...prev,
       comments: [...(prev.comments || []), tempComment]
-    } : null)
+    } : null);
     
-    const previousCommentText = commentText
-    setCommentText('')
-    setIsCommenting(true)
+    setCommentText('');
+    setIsCommenting(true);
 
     try {
       const response = await fetch(`/api/posts/${postId}/comments`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          text: originalCommentText
-        }),
-      })
-
-      console.log('Comment API response:', response.status)
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: originalCommentText }),
+      });
 
       if (response.ok) {
-        const data = await response.json()
-        console.log('Comment API success:', data)
-        
+        const data = await response.json();
         if (data.success && data.data) {
-          // Use server response data
-          setPost(data.data)
+          setPost(data.data);
         } else {
           // Remove temp comment on error
           setPost(prev => prev ? {
             ...prev,
-            comments: prev.comments?.filter(comment => comment._id !== tempCommentId) || []
-          } : null)
-          setCommentText(previousCommentText)
-          console.error('Comment API returned error:', data.error)
-          alert(data.error || 'Failed to post comment')
+            comments: prev.comments?.filter(c => c._id !== tempCommentId) || []
+          } : null);
+          setCommentText(originalCommentText);
         }
-      } else {
-        // Remove temp comment on error
-        setPost(prev => prev ? {
-          ...prev,
-          comments: prev.comments?.filter(comment => comment._id !== tempCommentId) || []
-        } : null)
-        setCommentText(previousCommentText)
-        console.error('Comment API failed with status:', response.status)
-        alert('Failed to post comment. Please try again.')
       }
     } catch (error) {
       // Remove temp comment on error
       setPost(prev => prev ? {
         ...prev,
-        comments: prev.comments?.filter(comment => comment._id !== tempCommentId) || []
-      } : null)
-      setCommentText(previousCommentText)
-      console.error('Error adding comment:', error)
-      alert('Failed to post comment. Please check your connection and try again.')
+        comments: prev.comments?.filter(c => c._id !== tempCommentId) || []
+      } : null);
+      setCommentText(originalCommentText);
     } finally {
-      setIsCommenting(false)
+      setIsCommenting(false);
     }
-  }
+  };
 
-  // FIXED: Delete comment functionality
+  // Delete comment
   const handleDeleteComment = async (commentId: string) => {
     if (!isSignedIn) {
-      alert('Please log in to delete comments')
-      return
+      toast({
+        title: "Please sign in",
+        description: "You need to be signed in to delete comments",
+        variant: "destructive"
+      });
+      return;
     }
 
     try {
       const response = await fetch(`/api/posts/${postId}/comments/${commentId}`, {
         method: 'DELETE',
-      })
+      });
 
       if (response.ok) {
-        const data = await response.json()
+        const data = await response.json();
         if (data.success) {
-          // Remove comment from state
           setPost(prev => prev ? {
             ...prev,
             comments: prev.comments?.filter(comment => comment._id !== commentId) || []
-          } : null)
+          } : null);
+          
+          toast({
+            title: "Comment deleted",
+            description: "Your comment has been deleted",
+          });
         } else {
-          alert(data.error || 'Failed to delete comment')
+          toast({
+            title: "Error",
+            description: data.error || "Failed to delete comment",
+            variant: "destructive"
+          });
         }
-      } else {
-        alert('Failed to delete comment')
       }
     } catch (error) {
-      console.error('Error deleting comment:', error)
-      alert('Failed to delete comment')
+      toast({
+        title: "Error",
+        description: "Failed to delete comment",
+        variant: "destructive"
+      });
     }
-  }
+  };
 
-  // FIXED: Like comment functionality
+  // Like comment
   const handleLikeComment = async (commentId: string) => {
     if (!isSignedIn) {
-      alert('Please log in to like comments')
-      return
+      toast({
+        title: "Please sign in",
+        description: "You need to be signed in to like comments",
+        variant: "destructive"
+      });
+      return;
     }
 
     try {
       const response = await fetch(`/api/posts/${postId}/comments/${commentId}/like`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: currentUserId }),
-      })
+      });
 
       if (response.ok) {
-        const data = await response.json()
+        const data = await response.json();
         if (data.success && data.data) {
-          // Update comment likes in state
           setPost(prev => {
-            if (!prev) return null
+            if (!prev) return null;
             return {
               ...prev,
               comments: prev.comments?.map(comment => 
@@ -790,132 +774,184 @@ export default function PostDetailPage() {
                   ? { ...comment, likes: data.data.likes }
                   : comment
               ) || []
-            }
-          })
+            };
+          });
         }
       }
     } catch (error) {
-      console.error('Error liking comment:', error)
+      console.error('Error liking comment:', error);
     }
-  }
+  };
 
+  // Handle share
   const handleShare = async (method: 'link' | 'social' = 'link') => {
-    setShowShareMenu(false)
+    setShowShareMenu(false);
     
     if (method === 'link') {
       try {
-        await navigator.clipboard.writeText(window.location.href)
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
+        await navigator.clipboard.writeText(window.location.href);
+        setCopied(true);
+        toast({
+          title: "Link copied!",
+          description: "Post link copied to clipboard",
+        });
+        setTimeout(() => setCopied(false), 2000);
       } catch (error) {
-        console.error('Failed to copy link:', error)
+        toast({
+          title: "Failed to copy",
+          description: "Could not copy link to clipboard",
+          variant: "destructive"
+        });
       }
     } else if (method === 'social' && navigator.share) {
       try {
         await navigator.share({
-          title: `Check out this design by ${post?.author.firstName} ${post?.author.lastName}`,
-          text: post?.caption,
+          title: post?.caption || 'Check out this design',
+          text: `Check out this design by ${post?.author.firstName}`,
           url: window.location.href,
-        })
+        });
       } catch (error) {
-        console.error('Error sharing:', error)
+        // Share dialog was cancelled
       }
     }
-  }
+  };
 
-  // Video controls
-  const togglePlay = () => {
-    if (videoRef.current) {
-      if (isPlaying) {
-        videoRef.current.pause()
+  // Delete post
+  const handleDeletePost = async () => {
+    if (!post || !isSignedIn) return;
+
+    if (!confirm('Are you sure you want to delete this post?')) return;
+
+    try {
+      const response = await fetch(`/api/posts/${postId}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        toast({
+          title: "Post deleted",
+          description: "Your post has been deleted",
+        });
+        router.push('/');
       } else {
-        videoRef.current.play()
+        toast({
+          title: "Error",
+          description: "Failed to delete post",
+          variant: "destructive"
+        });
       }
-      setIsPlaying(!isPlaying)
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to delete post",
+        variant: "destructive"
+      });
     }
-  }
+  };
 
-  const toggleMute = () => {
-    if (videoRef.current) {
-      videoRef.current.muted = !isMuted
-      setIsMuted(!isMuted)
-    }
-  }
-
-  const handleVideoProgress = () => {
-    if (videoRef.current) {
-      const progress = (videoRef.current.currentTime / videoRef.current.duration) * 100
-      setVideoProgress(progress)
-    }
-  }
-
-  // Get like status from batch statuses
-  const isLiked = statuses.likeStatuses[postId] || false
-
-  // Check if current user is comment author
-  const isCommentAuthor = (commentUserId: string) => {
-    return commentUserId === currentUserId
-  }
-
-  // Check if current user liked a comment
-  const isCommentLiked = (comment: Comment) => {
-    return comment.likes?.some(
-      (like: string) => like === currentUserId
-    ) || false
-  }
-
-  // Get follower count with optimistic updates
-  const getFollowerCount = () => {
-    return optimisticFollowers > 0 ? optimisticFollowers : 
-      (Array.isArray(post?.author?.followers) ? post.author.followers.length : 0)
-  }
-
-  // Get following count
-  const getFollowingCount = () => {
-    if (!post?.author?.following) return 0
-    return Array.isArray(post.author.following) ? post.author.following.length : 0
-  }
+  // Helper functions
+  const isLiked = statuses.likeStatuses[postId] || false;
+  const isCommentAuthor = (commentUserId: string) => commentUserId === currentUserId;
+  const isCommentLiked = (comment: Comment) => comment.likes?.some(like => like === currentUserId) || false;
+  
+  const getFollowerCount = () => optimisticFollowers > 0 
+    ? optimisticFollowers 
+    : (Array.isArray(post?.author?.followers) ? post.author.followers.length : 0);
 
   const getTimeAgo = (date: string): string => {
-    const now = new Date()
-    const postDate = new Date(date)
-    const diffInHours = (now.getTime() - postDate.getTime()) / (1000 * 60 * 60)
+    const now = new Date();
+    const postDate = new Date(date);
+    const diffInHours = (now.getTime() - postDate.getTime()) / (1000 * 60 * 60);
     
-    if (diffInHours < 1) return 'Just now'
-    if (diffInHours < 24) return `${Math.floor(diffInHours)}h ago`
-    if (diffInHours < 168) return `${Math.floor(diffInHours / 24)}d ago`
-    return postDate.toLocaleDateString()
-  }
+    if (diffInHours < 1) return 'Just now';
+    if (diffInHours < 24) return `${Math.floor(diffInHours)}h ago`;
+    if (diffInHours < 168) return `${Math.floor(diffInHours / 24)}d ago`;
+    return postDate.toLocaleDateString();
+  };
 
-  // Refresh statuses when user signs in/out
+  // Check if current media is video
+  const isCurrentMediaVideo = post?.media?.[currentMediaIndex]?.type === 'video';
+
+  // Refresh statuses on auth change
   useEffect(() => {
-    if (post && userLoaded) {
-      if (isSignedIn) {
-        fetchStatuses()
-      } else {
-        // Reset statuses when user logs out
-        setStatuses({
-          likeStatuses: {},
-          saveStatuses: {},
-          followStatuses: {}
-        })
-        setIsSaved(false)
-        setIsFollowing(false)
-      }
+    if (!userLoaded || !post) return;
+
+    if (!isSignedIn) {
+      setStatuses({
+        likeStatuses: {},
+        saveStatuses: {},
+        followStatuses: {}
+      });
+      setIsSaved(false);
+      setIsFollowing(false);
+      return;
     }
-  }, [post, userLoaded, isSignedIn, fetchStatuses])
 
-  // Show loading while user is being loaded
+    // Refresh statuses if user is signed in and we have a post
+    const refreshStatuses = async () => {
+      try {
+        const response = await fetch('/api/batch-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            postIds: [postId],
+            userIds: post?.author?._id ? [post.author._id] : []
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data?.success && data.data) {
+            setStatuses(data.data);
+            setIsSaved(!!data.data.saveStatuses?.[postId]?.saved);
+            if (post?.author?._id) {
+              setIsFollowing(!!data.data.followStatuses?.[post.author._id]);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error refreshing statuses:', err);
+      }
+    };
+
+    refreshStatuses();
+  }, [userLoaded, isSignedIn, postId, post?._id, post?.author?._id]);
+
+  // Fullscreen change handler
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  // Get trending color based on index
+  const getTrendColor = (index: number) => {
+    if (index === 0) return 'bg-gradient-to-r from-amber-500 to-orange-500';
+    if (index === 1) return 'bg-gradient-to-r from-rose-500 to-pink-500';
+    if (index === 2) return 'bg-gradient-to-r from-purple-500 to-pink-500';
+    if (index < 5) return 'bg-gradient-to-r from-blue-500 to-cyan-500';
+    if (index < 10) return 'bg-gradient-to-r from-emerald-500 to-teal-500';
+    return 'bg-gradient-to-r from-slate-500 to-slate-600';
+  };
+
+  // Show loading state
   if (!userLoaded || loading) {
-    return <LoadingState />
+    return <LoadingState />;
   }
 
+  // Show error state
   if (error || !post) {
-    return <NotFoundState error={error} />
+    return <NotFoundState error={error} />;
   }
+
+  const currentMedia = post.media[currentMediaIndex];
+  const hasVideos = post.media?.some(media => media.type === 'video');
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-rose-50/30 to-purple-50/20 dark:from-slate-900 dark:via-rose-900/10 dark:to-purple-900/10">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-rose-50/30 dark:from-slate-950 dark:via-slate-900 dark:to-rose-950/20">
       {/* Enhanced Sticky Header */}
       <motion.div
         ref={headerRef}
@@ -939,7 +975,7 @@ export default function PostDetailPage() {
               <Button
                 variant="ghost"
                 onClick={() => router.back()}
-                className="rounded-2xl flex items-center space-x-2 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white group bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border border-slate-200/60 dark:border-slate-700/60 hover:shadow-lg transition-all duration-300"
+                className="rounded-2xl flex items-center space-x-2 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white group bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border border-slate-200/60 dark:border-slate-700/60 hover:shadow-lg transition-all duration-300 shadow-lg"
               >
                 <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
                 <span className="hidden sm:block">Back</span>
@@ -968,10 +1004,10 @@ export default function PostDetailPage() {
                 size="icon"
                 onClick={handleSave}
                 disabled={isSaving || !isSignedIn}
-                className={`rounded-2xl transition-all duration-300 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border border-slate-200/60 dark:border-slate-700/60 hover:shadow-lg ${
+                className={`rounded-2xl transition-all duration-300 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border border-slate-200/60 dark:border-slate-700/60 hover:shadow-lg shadow-lg ${
                   isSaved 
-                    ? 'text-yellow-600 hover:text-yellow-700 bg-yellow-50 dark:bg-yellow-900/20 shadow-lg shadow-yellow-500/10' 
-                    : 'hover:text-yellow-600'
+                    ? 'text-amber-500 hover:text-amber-600 bg-amber-50 dark:bg-amber-900/20 shadow-lg shadow-amber-500/10' 
+                    : 'hover:text-amber-500'
                 } ${!isSignedIn ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {isSaving ? (
@@ -986,7 +1022,7 @@ export default function PostDetailPage() {
                   variant="ghost"
                   size="icon"
                   onClick={() => setShowShareMenu(!showShareMenu)}
-                  className="rounded-2xl hover:text-green-600 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border border-slate-200/60 dark:border-slate-700/60 hover:shadow-lg transition-all duration-300"
+                  className="rounded-2xl hover:text-emerald-500 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border border-slate-200/60 dark:border-slate-700/60 hover:shadow-lg transition-all duration-300 shadow-lg"
                 >
                   <Share2 className="w-4 h-4" />
                 </Button>
@@ -1009,7 +1045,7 @@ export default function PostDetailPage() {
                         >
                           <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center group-hover:bg-blue-200 dark:group-hover:bg-blue-800/40 transition-colors">
                             {copied ? (
-                              <Check className="w-4 h-4 text-green-600 dark:text-green-400" />
+                              <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                             ) : (
                               <LinkIcon className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                             )}
@@ -1023,18 +1059,20 @@ export default function PostDetailPage() {
                             </div>
                           </div>
                         </button>
-                        <button
-                          onClick={() => handleShare('social')}
-                          className="flex items-center space-x-3 w-full p-3 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-all duration-200 group"
-                        >
-                          <div className="w-8 h-8 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center group-hover:bg-green-200 dark:group-hover:bg-green-800/40 transition-colors">
-                            <Share2 className="w-4 h-4 text-green-600 dark:text-green-400" />
-                          </div>
-                          <div className="flex-1 text-left">
-                            <div className="font-medium text-sm">Share via...</div>
-                            <div className="text-xs text-slate-500 dark:text-slate-400">Share with other apps</div>
-                          </div>
-                        </button>
+                        {typeof navigator.share === 'function' && (
+                          <button
+                            onClick={() => handleShare('social')}
+                            className="flex items-center space-x-3 w-full p-3 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-all duration-200 group"
+                          >
+                            <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center group-hover:bg-emerald-200 dark:group-hover:bg-emerald-800/40 transition-colors">
+                              <Share2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                            </div>
+                            <div className="flex-1 text-left">
+                              <div className="font-medium text-sm">Share via...</div>
+                              <div className="text-xs text-slate-500 dark:text-slate-400">Share with other apps</div>
+                            </div>
+                          </button>
+                        )}
                       </div>
                     </motion.div>
                   )}
@@ -1047,7 +1085,7 @@ export default function PostDetailPage() {
                   variant="ghost"
                   size="icon"
                   onClick={() => setShowOptionsMenu(!showOptionsMenu)}
-                  className="rounded-2xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border border-slate-200/60 dark:border-slate-700/60 hover:shadow-lg transition-all duration-300"
+                  className="rounded-2xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border border-slate-200/60 dark:border-slate-700/60 hover:shadow-lg transition-all duration-300 shadow-lg"
                 >
                   <MoreHorizontal className="w-4 h-4" />
                 </Button>
@@ -1064,12 +1102,12 @@ export default function PostDetailPage() {
                         <p className="text-sm font-semibold text-slate-900 dark:text-white">Post Options</p>
                       </div>
                       <div className="space-y-1 py-2">
-                        {currentUserId === post.author._id ? (
+                        {currentUserId === post.author.clerkId ? (
                           <>
                             <button 
                               onClick={() => {
-                                console.log('Edit post:', post._id)
-                                setShowOptionsMenu(false)
+                                console.log('Edit post:', post._id);
+                                setShowOptionsMenu(false);
                               }}
                               className="flex items-center space-x-3 w-full p-3 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all duration-200 group"
                             >
@@ -1078,8 +1116,8 @@ export default function PostDetailPage() {
                             </button>
                             <button 
                               onClick={() => {
-                                console.log('Delete post:', post._id)
-                                setShowOptionsMenu(false)
+                                setShowOptionsMenu(false);
+                                handleDeletePost();
                               }}
                               className="flex items-center space-x-3 w-full p-3 rounded-xl hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400 transition-all duration-200 group"
                             >
@@ -1091,13 +1129,13 @@ export default function PostDetailPage() {
                           <>
                             <button 
                               onClick={() => {
-                                handleFollow()
-                                setShowOptionsMenu(false)
+                                handleFollow();
+                                setShowOptionsMenu(false);
                               }}
-                              className="flex items-center space-x-3 w-full p-3 rounded-xl hover:bg-green-50 dark:hover:bg-green-900/20 transition-all duration-200 group"
+                              className="flex items-center space-x-3 w-full p-3 rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-all duration-200 group"
                             >
                               {isFollowing ? (
-                                <UserCheck className="w-4 h-4 text-green-600 dark:text-green-400" />
+                                <UserCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                               ) : (
                                 <UserPlus className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                               )}
@@ -1108,11 +1146,18 @@ export default function PostDetailPage() {
                             <button 
                               onClick={() => {
                                 if (!isSignedIn) {
-                                  alert('Please log in to report posts')
-                                  return
+                                  toast({
+                                    title: "Please sign in",
+                                    description: "You need to be signed in to report posts",
+                                    variant: "destructive"
+                                  });
+                                  return;
                                 }
-                                console.log('Report post:', post._id)
-                                setShowOptionsMenu(false)
+                                setShowOptionsMenu(false);
+                                toast({
+                                  title: "Report submitted",
+                                  description: "Thank you for reporting this post. Our team will review it.",
+                                });
                               }}
                               className="flex items-center space-x-3 w-full p-3 rounded-xl hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400 transition-all duration-200 group"
                             >
@@ -1121,7 +1166,18 @@ export default function PostDetailPage() {
                             </button>
                           </>
                         )}
-                        <button className="flex items-center space-x-3 w-full p-3 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-all duration-200 group">
+                        <button 
+                          onClick={() => {
+                            const link = document.createElement('a');
+                            link.href = currentMedia?.url || '';
+                            link.download = `design-${postId}`;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            setShowOptionsMenu(false);
+                          }}
+                          className="flex items-center space-x-3 w-full p-3 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-all duration-200 group"
+                        >
                           <Download className="w-4 h-4" />
                           <span className="text-sm font-medium">Download</span>
                         </button>
@@ -1150,17 +1206,18 @@ export default function PostDetailPage() {
               <Card className="rounded-3xl border-2 border-slate-200/60 dark:border-slate-700/60 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm overflow-hidden shadow-2xl shadow-slate-200/20 dark:shadow-slate-800/20 hover:shadow-2xl hover:shadow-slate-300/30 dark:hover:shadow-slate-700/30 transition-all duration-500">
                 {/* Media Container */}
                 <div 
+                  ref={mediaContainerRef}
                   className="relative aspect-square bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-800 group overflow-hidden"
                   onMouseEnter={() => setIsHovered(true)}
                   onMouseLeave={() => setIsHovered(false)}
                 >
-                  {post.media.length > 0 && (
+                  {currentMedia && (
                     <>
-                      {post.media[currentMediaIndex]?.type === 'video' ? (
+                      {isCurrentMediaVideo ? (
                         <div className="relative w-full h-full">
                           <video
                             ref={videoRef}
-                            src={post.media[currentMediaIndex].url}
+                            src={currentMedia.url}
                             muted={isMuted}
                             onTimeUpdate={handleVideoProgress}
                             onEnded={() => setIsPlaying(false)}
@@ -1201,20 +1258,26 @@ export default function PostDetailPage() {
                                     {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
                                   </Button>
                                   <span className="text-white text-sm font-medium">
-                                    {post.media[currentMediaIndex].duration && 
-                                      new Date(post.media[currentMediaIndex].duration * 1000).toISOString().substr(14, 5)
+                                    {currentMedia.duration && 
+                                      new Date(currentMedia.duration * 1000).toISOString().substr(14, 5)
                                     }
                                   </span>
                                 </div>
                                 
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="w-9 h-9 bg-white/20 backdrop-blur-sm text-white hover:bg-white/30 hover:scale-110 transition-all"
-                                  onClick={() => window.open(post.media[currentMediaIndex].url, '_blank')}
-                                >
-                                  <ZoomIn className="w-4 h-4" />
-                                </Button>
+                                <div className="flex items-center space-x-2">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={toggleFullscreen}
+                                    className="w-9 h-9 bg-white/20 backdrop-blur-sm text-white hover:bg-white/30 hover:scale-110 transition-all"
+                                  >
+                                    {isFullscreen ? (
+                                      <Minimize2 className="w-4 h-4" />
+                                    ) : (
+                                      <Maximize2 className="w-4 h-4" />
+                                    )}
+                                  </Button>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -1230,7 +1293,7 @@ export default function PostDetailPage() {
                             <div className="absolute inset-0 bg-gradient-to-br from-slate-300 to-slate-400 dark:from-slate-600 dark:to-slate-500 animate-pulse" />
                           )}
                           <img
-                            src={post.media[currentMediaIndex].url}
+                            src={currentMedia.url}
                             alt={post.caption}
                             className={cn(
                               "w-full h-full object-cover transition-all duration-700",
@@ -1238,6 +1301,21 @@ export default function PostDetailPage() {
                             )}
                             onLoad={() => setImageLoaded(true)}
                           />
+                          
+                          {/* Fullscreen button for images */}
+                          <div className={cn(
+                            "absolute inset-0 transition-opacity duration-300",
+                            isHovered ? "opacity-100" : "opacity-0"
+                          )}>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={toggleFullscreen}
+                              className="absolute top-4 right-4 h-10 w-10 bg-black/50 backdrop-blur-sm text-white hover:bg-black/70 hover:scale-110 transition-all"
+                            >
+                              <Maximize2 className="h-5 w-5" />
+                            </Button>
+                          </div>
                         </motion.div>
                       )}
                     </>
@@ -1250,13 +1328,13 @@ export default function PostDetailPage() {
                         onClick={() => setCurrentMediaIndex(prev => (prev - 1 + post.media.length) % post.media.length)}
                         className="absolute left-4 top-1/2 transform -translate-y-1/2 w-10 h-10 bg-black/50 backdrop-blur-sm text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 hover:bg-black/70 hover:scale-110"
                       >
-                        ←
+                        <ChevronLeft className="w-5 h-5" />
                       </button>
                       <button
                         onClick={() => setCurrentMediaIndex(prev => (prev + 1) % post.media.length)}
                         className="absolute right-4 top-1/2 transform -translate-y-1/2 w-10 h-10 bg-black/50 backdrop-blur-sm text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 hover:bg-black/70 hover:scale-110"
                       >
-                        →
+                        <ChevronRight className="w-5 h-5" />
                       </button>
                       
                       {/* Media Indicators */}
@@ -1279,6 +1357,19 @@ export default function PostDetailPage() {
 
                   {/* Media Badges */}
                   <div className="absolute top-4 left-4 flex flex-wrap gap-2">
+                    <Badge className="rounded-full bg-black/50 backdrop-blur-sm text-white border-0">
+                      {isCurrentMediaVideo ? (
+                        <>
+                          <Video className="w-3 h-3 mr-1" />
+                          Video
+                        </>
+                      ) : (
+                        <>
+                          <ImageIcon className="w-3 h-3 mr-1" />
+                          Photo
+                        </>
+                      )}
+                    </Badge>
                     {post.isFeatured && (
                       <Badge className="rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-white border-0 backdrop-blur-sm">
                         <Sparkles className="w-3 h-3 mr-1" />
@@ -1311,27 +1402,13 @@ export default function PostDetailPage() {
                       <Button
                         onClick={() => console.log('Purchase:', post._id)}
                         size="sm"
-                        className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white hover:shadow-xl hover:scale-105 transition-all duration-300 backdrop-blur-sm border-0"
+                        className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white hover:shadow-xl hover:scale-105 transition-all duration-300 backdrop-blur-sm border-0 shadow-lg"
                       >
                         <ShoppingBag className="w-4 h-4 mr-2" />
                         ${post.price} {post.currency}
                       </Button>
                     </div>
                   )}
-
-                  {/* Engagement Overlay */}
-                  <div className="absolute bottom-16 left-4 flex items-center space-x-2">
-                    <div className="flex items-center space-x-1 text-white text-sm bg-black/60 backdrop-blur-sm rounded-full px-3 py-1.5 border border-white/20">
-                      <Eye className="w-3.5 h-3.5" />
-                      <span className="font-medium">{post.views?.toLocaleString() || 0}</span>
-                    </div>
-                    {post.engagement && post.engagement > 0 && (
-                      <div className="flex items-center space-x-1 text-white text-sm bg-black/60 backdrop-blur-sm rounded-full px-3 py-1.5 border border-white/20">
-                        <BarChart3 className="w-3.5 h-3.5" />
-                        <span className="font-medium">{post.engagement}%</span>
-                      </div>
-                    )}
-                  </div>
                 </div>
 
                 {/* Enhanced Engagement Stats */}
@@ -1347,8 +1424,8 @@ export default function PostDetailPage() {
                         disabled={isLiking || !isSignedIn}
                         className={`p-4 rounded-2xl transition-all duration-300 w-full group ${
                           isLiked 
-                            ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-rose-500/25' 
-                            : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600 border border-slate-200/60 dark:border-slate-700/60'
+                            ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-rose-500/25 hover:shadow-rose-500/40' 
+                            : 'bg-gradient-to-r from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200/60 dark:border-slate-700/60'
                         } ${!isSignedIn ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                         {isLiking ? (
@@ -1369,7 +1446,7 @@ export default function PostDetailPage() {
                       className="text-center group cursor-pointer"
                       whileHover={{ scale: 1.05 }}
                     >
-                      <div className="p-4 rounded-2xl bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 border border-slate-200/60 dark:border-slate-700/60 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/20 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-all duration-300">
+                      <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200/60 dark:border-slate-700/60 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/20 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-all duration-300">
                         <MessageCircle className="w-5 h-5 mx-auto" />
                       </div>
                       <p className="text-sm font-semibold mt-2 text-slate-900 dark:text-white">
@@ -1384,14 +1461,18 @@ export default function PostDetailPage() {
                       className="text-center group cursor-pointer"
                       whileHover={{ scale: 1.05 }}
                     >
-                      <div className="p-4 rounded-2xl bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 border border-slate-200/60 dark:border-slate-700/60 group-hover:bg-green-100 dark:group-hover:bg-green-900/20 group-hover:text-green-600 dark:group-hover:text-green-400 transition-all duration-300">
-                        <Eye className="w-5 h-5 mx-auto" />
+                      <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200/60 dark:border-slate-700/60 group-hover:bg-emerald-100 dark:group-hover:bg-emerald-900/20 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-all duration-300">
+                        {hasVideos ? (
+                          <Video className="w-5 h-5 mx-auto" />
+                        ) : (
+                          <ImageIcon className="w-5 h-5 mx-auto" />
+                        )}
                       </div>
                       <p className="text-sm font-semibold mt-2 text-slate-900 dark:text-white">
-                        {post.views?.toLocaleString() || 0}
+                        {post.media?.length || 0}
                       </p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 group-hover:text-green-500 transition-colors">
-                        Views
+                      <p className="text-xs text-slate-500 dark:text-slate-400 group-hover:text-emerald-500 transition-colors">
+                        {hasVideos ? 'Videos' : 'Photos'}
                       </p>
                     </motion.div>
 
@@ -1405,8 +1486,8 @@ export default function PostDetailPage() {
                         disabled={isSaving || !isSignedIn}
                         className={`p-4 rounded-2xl transition-all duration-300 w-full group ${
                           isSaved 
-                            ? 'bg-gradient-to-r from-yellow-500 to-amber-500 text-white shadow-yellow-500/25' 
-                            : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600 border border-slate-200/60 dark:border-slate-700/60'
+                            ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-white shadow-amber-500/25 hover:shadow-amber-500/40' 
+                            : 'bg-gradient-to-r from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200/60 dark:border-slate-700/60'
                         } ${!isSignedIn ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                         {isSaving ? (
@@ -1418,7 +1499,7 @@ export default function PostDetailPage() {
                       <p className="text-sm font-semibold mt-2 text-slate-900 dark:text-white">
                         {post.saves?.length || 0}
                       </p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 group-hover:text-yellow-500 transition-colors">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 group-hover:text-amber-500 transition-colors">
                         Saves
                       </p>
                     </motion.div>
@@ -1434,7 +1515,7 @@ export default function PostDetailPage() {
                       <MessageCircle className="w-5 h-5 mr-3 text-blue-500" />
                       Comments ({post.comments?.length || 0})
                     </h4>
-                    <Badge variant="outline" className="rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800">
+                    <Badge variant="outline" className="rounded-full bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800">
                       {post.comments?.length || 0} total
                     </Badge>
                   </div>
@@ -1499,9 +1580,6 @@ export default function PostDetailPage() {
                                 <ThumbsUp className={`w-3 h-3 ${isCommentLiked(comment) ? 'fill-current' : ''}`} />
                                 <span>{comment.likes?.length || 0}</span>
                               </button>
-                              <button className="text-xs text-slate-500 hover:text-blue-500 transition-colors">
-                                Reply
-                              </button>
                               {isCommentAuthor(comment.user._id) && (
                                 <button 
                                   onClick={() => handleDeleteComment(comment._id)}
@@ -1536,8 +1614,8 @@ export default function PostDetailPage() {
                         onChange={(e) => setCommentText(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' && !e.shiftKey && isSignedIn) {
-                            e.preventDefault()
-                            handleAddComment()
+                            e.preventDefault();
+                            handleAddComment();
                           }
                         }}
                         disabled={!isSignedIn}
@@ -1630,7 +1708,7 @@ export default function PostDetailPage() {
                         onClick={() => router.push(`/profile/${post.author.username}?tab=following`)}
                       >
                         <p className="font-bold text-slate-900 dark:text-white text-2xl">
-                          {getFollowingCount().toLocaleString()}
+                          {post.author.following?.length.toLocaleString() || 0}
                         </p>
                         <p className="text-slate-500 dark:text-slate-400 group-hover:text-blue-500 transition-colors flex items-center justify-center space-x-1 text-sm">
                           <User className="w-3 h-3" />
@@ -1648,16 +1726,21 @@ export default function PostDetailPage() {
                         disabled={!isSignedIn}
                         className={`w-full rounded-2xl transition-all duration-300 h-12 text-base font-semibold ${
                           isFollowing
-                            ? 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
+                            ? 'bg-gradient-to-r from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
                             : 'bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white shadow-rose-500/25 hover:shadow-rose-500/40'
                         } ${!isSignedIn ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                         {isFollowing ? (
-                          <UserCheck className="w-4 h-4 mr-2" />
+                          <>
+                            <UserCheck className="w-4 h-4 mr-2" />
+                            Following
+                          </>
                         ) : (
-                          <UserPlus className="w-4 h-4 mr-2" />
+                          <>
+                            <UserPlus className="w-4 h-4 mr-2" />
+                            Follow Designer
+                          </>
                         )}
-                        {isFollowing ? 'Following' : 'Follow Designer'}
                       </Button>
                     </motion.div>
                   </div>
@@ -1686,7 +1769,8 @@ export default function PostDetailPage() {
                         <Badge 
                           key={index} 
                           variant="outline"
-                          className="rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/30 cursor-pointer transition-all duration-300 hover:scale-105 text-xs"
+                          className="rounded-full bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/30 cursor-pointer transition-all duration-300 hover:scale-105 text-xs"
+                          onClick={() => router.push(`/explore?hashtag=${tag}`)}
                         >
                           #{tag}
                         </Badge>
@@ -1714,45 +1798,129 @@ export default function PostDetailPage() {
 
                     {post.category && (
                       <div className="flex items-center space-x-3 text-slate-600 dark:text-slate-400 p-3 rounded-2xl hover:bg-slate-100/50 dark:hover:bg-slate-700/50 transition-all duration-300">
-                        <Tag className="w-4 h-4 text-green-500" />
+                        <Tag className="w-4 h-4 text-emerald-500" />
                         <span className="capitalize">{post.category}</span>
                       </div>
                     )}
-
-                    {post.engagement && (
-                      <div className="flex items-center space-x-3 text-slate-600 dark:text-slate-400 p-3 rounded-2xl hover:bg-slate-100/50 dark:hover:bg-slate-700/50 transition-all duration-300">
-                        <BarChart3 className="w-4 h-4 text-purple-500" />
-                        <span>{post.engagement}% engagement rate</span>
-                      </div>
-                    )}
-
-                    {post.shares && post.shares > 0 && (
-                      <div className="flex items-center space-x-3 text-slate-600 dark:text-slate-400 p-3 rounded-2xl hover:bg-slate-100/50 dark:hover:bg-slate-700/50 transition-all duration-300">
-                        <Share2 className="w-4 h-4 text-emerald-500" />
-                        <span>{post.shares} shares</span>
-                      </div>
-                    )}
                   </div>
+                </CardContent>
+              </Card>
+
+              {/* Trending Hashtags Section */}
+              <Card className="rounded-3xl border-2 border-slate-200/60 dark:border-slate-700/60 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm shadow-2xl shadow-slate-200/20 dark:shadow-slate-800/20">
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="font-bold text-lg text-slate-900 dark:text-white flex items-center">
+                      <TrendingIcon className="w-5 h-5 mr-2 text-rose-500" />
+                      Trending Hashtags
+                    </h4>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={fetchTrendingHashtags}
+                      disabled={loadingTrends}
+                      className="h-8 w-8 p-0 rounded-full"
+                    >
+                      <RefreshCw className={cn("w-3 h-3", loadingTrends && "animate-spin")} />
+                    </Button>
+                  </div>
+                  
+                  {loadingTrends ? (
+                    <div className="flex items-center justify-center py-6">
+                      <Loader2 className="w-6 h-6 animate-spin text-rose-500" />
+                    </div>
+                  ) : trendingHashtags.length > 0 ? (
+                    <div className="space-y-3">
+                      {trendingHashtags.slice(0, 5).map((hashtag, index) => (
+                        <motion.div
+                          key={hashtag.tag}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: index * 0.1 }}
+                          className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-100/50 dark:hover:bg-slate-700/50 transition-all duration-300 cursor-pointer group"
+                          onClick={() => router.push(`/?hashtag=${hashtag.tag}`)}
+                        >
+                          <div className="flex items-center space-x-3">
+                            <div className={cn(
+                              "w-8 h-8 rounded-lg flex items-center justify-center text-white",
+                              getTrendColor(index)
+                            )}>
+                              {index < 3 ? <Flame className="w-3 h-3" /> : <Hash className="w-3 h-3" />}
+                            </div>
+                            <div>
+                              <div className="flex items-center space-x-2">
+                                <span className="font-semibold group-hover:text-rose-500 transition-colors">
+                                  #{hashtag.tag}
+                                </span>
+                                {index < 3 && (
+                                  <Badge 
+                                    variant="outline" 
+                                    className="text-xs px-1.5 py-0 rounded-full border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-400"
+                                  >
+                                    #{index + 1}
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="text-xs text-slate-500 dark:text-slate-400">
+                                {hashtag.count.toLocaleString()} posts
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <div className="text-right">
+                            <div className="text-sm font-semibold text-slate-900 dark:text-white">
+                              {hashtag.count.toLocaleString()}
+                            </div>
+                            <div className="text-xs text-slate-500">posts</div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-6 text-slate-500 dark:text-slate-400">
+                      <Hash className="w-8 h-8 mx-auto mb-2" />
+                      <p>No trending hashtags found</p>
+                    </div>
+                  )}
+                  
+                  {trendingHashtags.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full rounded-xl"
+                        onClick={() => router.push('/explore/trending')}
+                      >
+                        View All Trends
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
               {/* Related Tags & Actions */}
-              <Card className="rounded-3xl border-2 border-slate-200/60 dark:border-slate-700/60 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm shadow-2xl shadow-slate-200/20 dark:shadow-slate-800/20">
-                <CardContent className="p-6">
-                  <h4 className="font-bold text-lg mb-4 text-slate-900 dark:text-white">Design Tags</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {post.tags?.map((tag, index) => (
-                      <Badge 
-                        key={index}
-                        variant="secondary"
-                        className="rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-600 cursor-pointer transition-all duration-300 hover:scale-105 text-xs"
-                      >
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
+              {post.tags && post.tags.length > 0 && (
+                <Card className="rounded-3xl border-2 border-slate-200/60 dark:border-slate-700/60 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm shadow-2xl shadow-slate-200/20 dark:shadow-slate-800/20">
+                  <CardContent className="p-6">
+                    <h4 className="font-bold text-lg mb-4 text-slate-900 dark:text-white flex items-center">
+                      <Tag className="w-5 h-5 mr-2 text-emerald-500" />
+                      Design Tags
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      {post.tags.map((tag, index) => (
+                        <Badge 
+                          key={index}
+                          variant="secondary"
+                          className="rounded-full bg-gradient-to-r from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-600 cursor-pointer transition-all duration-300 hover:scale-105 text-xs"
+                          onClick={() => router.push(`/explore?tag=${tag}`)}
+                        >
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </motion.div>
         </div>
@@ -1781,7 +1949,7 @@ export default function PostDetailPage() {
         }
       `}</style>
     </div>
-  )
+  );
 }
 
 // Loading State Component
@@ -1807,11 +1975,11 @@ const LoadingState = () => (
       </motion.p>
     </motion.div>
   </div>
-)
+);
 
 // Not Found State Component
 const NotFoundState = ({ error }: { error?: string | null }) => {
-  const router = useRouter()
+  const router = useRouter();
   
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-rose-50/30 to-purple-50/20 dark:from-slate-900 dark:via-rose-900/10 dark:to-purple-900/10 flex items-center justify-center">
@@ -1855,5 +2023,5 @@ const NotFoundState = ({ error }: { error?: string | null }) => {
         </Card>
       </motion.div>
     </div>
-  )
-}
+  );
+};

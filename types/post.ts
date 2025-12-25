@@ -93,6 +93,9 @@ export interface Post {
   isEdited?: boolean;
   createdAt: string;
   updatedAt?: string;
+  likesCount?: number;
+  savesCount?: number;
+  commentsCount?: number;
   
   // Media constraints
   mediaCount?: number;

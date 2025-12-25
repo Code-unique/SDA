@@ -1,3 +1,4 @@
+// app/api/hashtags/trending/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import Post from '@/lib/models/Post';
@@ -11,27 +12,55 @@ export async function GET(request: NextRequest) {
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
 
+    // Log to debug
+    console.log('Fetching hashtags from:', oneWeekAgo);
+
     const posts = await Post.aggregate([
       {
         $match: {
           createdAt: { $gte: oneWeekAgo },
-          isPublic: true
+          isPublic: true,
+          $or: [
+            { hashtags: { $exists: true, $ne: [] } },
+            { hashtags: { $exists: true, $ne: null } }
+          ]
         }
       },
-      { $unwind: '$hashtags' },
+      { $unwind: { 
+        path: '$hashtags', 
+        preserveNullAndEmptyArrays: false 
+      }},
+      {
+        $match: {
+          hashtags: { 
+  $exists: true,
+  $nin: [null, '']
+}
+        }
+      },
       {
         $group: {
-          _id: '$hashtags',
-          count: { $sum: 1 }
+          _id: { $toLower: '$hashtags' }, // Case insensitive grouping
+          count: { $sum: 1 },
+          lastUsed: { $max: '$createdAt' }
         }
       },
-      { $sort: { count: -1 } },
+      { 
+        $sort: { 
+          count: -1,
+          lastUsed: -1 
+        } 
+      },
       { $limit: 20 }
     ]);
 
+    console.log('Aggregation result:', posts.length, 'hashtags found');
+
     const hashtags = posts.map(item => ({
       tag: item._id,
-      count: item.count
+      count: item.count,
+      trendScore: Math.round(item.count * 100),
+      lastUsed: item.lastUsed
     }));
 
     return NextResponse.json({

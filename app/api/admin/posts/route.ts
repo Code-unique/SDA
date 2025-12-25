@@ -1,4 +1,3 @@
-// app/api/admin/posts/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';
@@ -9,13 +8,10 @@ import "@/lib/loadmodels";
 export async function GET(request: NextRequest) {
   try {
     const user = await currentUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     await connectToDatabase();
 
-    // Verify admin role
     const adminUser = await User.findOne({ clerkId: user.id });
     if (!adminUser || adminUser.role !== 'admin') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -27,24 +23,15 @@ export async function GET(request: NextRequest) {
     const type = searchParams.get('type') || 'all';
     const sort = searchParams.get('sort') || 'recent';
 
-    // Build query
     const query: any = {};
     
-    if (type === 'images') {
-      query.containsVideo = false;
-    } else if (type === 'videos') {
-      query.containsVideo = true;
-    }
+    if (type === 'images') query.containsVideo = false;
+    else if (type === 'videos') query.containsVideo = true;
 
-    // Build sort
     const sortOptions: any = {};
-    if (sort === 'recent') {
-      sortOptions.createdAt = -1;
-    } else if (sort === 'popular') {
-      sortOptions.likes = -1;
-    } else if (sort === 'engagement') {
-      sortOptions.engagement = -1;
-    }
+    if (sort === 'recent') sortOptions.createdAt = -1;
+    else if (sort === 'popular') sortOptions.likes = -1;
+    else if (sort === 'engagement') sortOptions.engagement = -1;
 
     const [posts, total] = await Promise.all([
       Post.find(query)
@@ -76,9 +63,6 @@ export async function GET(request: NextRequest) {
 
   } catch (error: any) {
     console.error('Error fetching admin posts:', error);
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

@@ -888,32 +888,7 @@ export function EnhancedPostCard({
   // Get safe comments array
   const commentsArray = useMemo(() => getCommentsArray(post.comments), [post.comments])
 
-  // Debug log for initial state
-  useEffect(() => {
-    console.log('EnhancedPostCard Debug:', {
-      postId: post._id,
-      userId,
-      isSignedIn,
-      userLoaded,
-      state: {
-        isLiked: state.isLiked,
-        isSaved: state.isSaved,
-        isFollowing: state.isFollowing,
-        isLoadingStatus: state.isLoadingStatus
-      },
-      statuses: {
-        likeStatuses: statuses.likeStatuses[post._id],
-        saveStatuses: statuses.saveStatuses[post._id]?.saved,
-        followStatuses: statuses.followStatuses[post.author?._id]
-      },
-      postData: {
-        likes: post.likes,
-        saves: post.saves,
-        authorFollowers: post.author?.followers,
-        comments: commentsArray.length
-      }
-    })
-  }, [post._id, userId, isSignedIn, userLoaded, state, statuses, post.likes, post.saves, post.author?.followers, commentsArray])
+  
 
   // ==============================================
   // BEAUTIFUL VIEW MODES
