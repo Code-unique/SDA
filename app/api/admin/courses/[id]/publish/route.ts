@@ -2,15 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { currentUser } from '@clerk/nextjs/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import User from '@/lib/models/User'
-import Post from '@/lib/models/Post'
+import Course from '@/lib/models/Course'
 import '@/lib/loadmodels'
 
 export async function PATCH(
   request: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await context.params
+    const { id } = await params
 
     const user = await currentUser()
     if (!user) {
@@ -24,19 +24,30 @@ export async function PATCH(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const post = await Post.findById(id)
-    if (!post) {
-      return NextResponse.json({ error: 'Post not found' }, { status: 404 })
+    if (!id || id.length !== 24) {
+      return NextResponse.json(
+        { error: 'Invalid course ID' },
+        { status: 400 }
+      )
     }
 
-    post.isPublic = !post.isPublic
-    await post.save()
+    const course = await Course.findById(id)
+    if (!course) {
+      return NextResponse.json({ error: 'Course not found' }, { status: 404 })
+    }
 
-    await post.populate('author', 'username firstName lastName avatar')
+    // Toggle publish state
+    course.isPublished = !course.isPublished
+    await course.save()
 
-    return NextResponse.json(post)
+    return NextResponse.json({
+      _id: course._id,
+      title: course.title,
+      isPublished: course.isPublished,
+      message: `Course ${course.isPublished ? 'published' : 'unpublished'} successfully`
+    }, { status: 200 })
   } catch (error) {
-    console.error('Error updating post visibility:', error)
+    console.error('Error updating course publish status:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
