@@ -29,7 +29,6 @@ export async function PATCH(
       return NextResponse.json({ error: 'Post not found' }, { status: 404 })
     }
 
-    // ✅ Toggle publish state automatically
     post.isPublic = !post.isPublic
     await post.save()
 
