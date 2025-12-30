@@ -1,4 +1,3 @@
-// lib/models/Course.ts
 import mongoose, { Document, Schema, Model } from 'mongoose';
 
 // S3 Asset Interface
@@ -61,15 +60,18 @@ export interface IRating {
   updatedAt?: Date;
 }
 
+// UPDATED: Student progress interface with manual enrollment support
 export interface IStudentProgress {
   user: mongoose.Types.ObjectId;
   enrolledAt: Date;
   progress: number;
   completed: boolean;
   completedAt?: Date;
-  paymentMethod?: string;
+  paymentMethod?: 'bank_transfer' | 'digital_wallet' | 'cash' | 'other' | 'manual_grant';
   paymentAmount?: number;
-  enrolledThrough?: string;
+  enrolledThrough: 'free' | 'manual_payment' | 'manual_grant' | 'promo';
+  grantedBy?: mongoose.Types.ObjectId; // Admin who granted manual access
+  paymentRequestId?: mongoose.Types.ObjectId; // Reference to payment request
 }
 
 export interface ICourse extends Document {
@@ -99,6 +101,8 @@ export interface ICourse extends Document {
   learningOutcomes: string[];
   createdAt: Date;
   updatedAt: Date;
+  // NEW: Track manual enrollment stats
+  manualEnrollments: number;
 }
 
 // S3 Asset Schema
@@ -151,15 +155,25 @@ const RatingSchema = new Schema<IRating>({
   createdAt: { type: Date, default: Date.now }
 });
 
+// UPDATED: Student progress schema
 const StudentProgressSchema = new Schema<IStudentProgress>({
   user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   enrolledAt: { type: Date, default: Date.now },
   progress: { type: Number, default: 0, min: 0, max: 1 },
   completed: { type: Boolean, default: false },
   completedAt: Date,
-  paymentMethod: String,
+  paymentMethod: {
+    type: String,
+    enum: ['bank_transfer', 'digital_wallet', 'cash', 'other', 'manual_grant']
+  },
   paymentAmount: Number,
-  enrolledThrough: String
+  enrolledThrough: {
+    type: String,
+    enum: ['free', 'manual_payment', 'manual_grant', 'promo'],
+    default: 'free'
+  },
+  grantedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+  paymentRequestId: { type: Schema.Types.ObjectId, ref: 'PaymentRequest' }
 });
 
 const CourseSchema = new Schema<ICourse>(
@@ -262,7 +276,13 @@ const CourseSchema = new Schema<ICourse>(
     learningOutcomes: [{
       type: String,
       maxlength: 200
-    }]
+    }],
+    // NEW: Track manual enrollments
+    manualEnrollments: {
+      type: Number,
+      default: 0,
+      min: 0
+    }
   },
   {
     timestamps: true
@@ -311,6 +331,13 @@ CourseSchema.pre('save', function (next) {
     course.averageRating = Math.round((sum / course.ratings.length) * 10) / 10;
   }
 
+  // Calculate manual enrollments count
+  if (this.isModified('students')) {
+    course.manualEnrollments = course.students.filter(
+      student => student.enrolledThrough === 'manual_payment' || student.enrolledThrough === 'manual_grant'
+    ).length;
+  }
+
   next();
 });
 
@@ -320,14 +347,22 @@ CourseSchema.index({ isPublished: 1, isFeatured: 1 });
 CourseSchema.index({ category: 1 });
 CourseSchema.index({ 'students.user': 1 });
 CourseSchema.index({ createdAt: -1 });
+CourseSchema.index({ manualEnrollments: -1 }); // NEW: Index for manual enrollments
 
 // Static method to find published courses
 CourseSchema.statics.findPublished = function () {
   return this.find({ isPublished: true });
 };
 
-// Instance method to add a student
-CourseSchema.methods.addStudent = function (userId: mongoose.Types.ObjectId) {
+// UPDATED: Instance method to add a student with manual enrollment support
+CourseSchema.methods.addStudent = function (
+  userId: mongoose.Types.ObjectId,
+  enrolledThrough: 'free' | 'manual_payment' | 'manual_grant' | 'promo' = 'free',
+  paymentMethod?: 'bank_transfer' | 'digital_wallet' | 'cash' | 'other' | 'manual_grant',
+  paymentAmount?: number,
+  grantedBy?: mongoose.Types.ObjectId,
+  paymentRequestId?: mongoose.Types.ObjectId
+) {
   const course = this as ICourse;
   const existingStudent = course.students.find(student =>
     student.user.toString() === userId.toString()
@@ -338,12 +373,38 @@ CourseSchema.methods.addStudent = function (userId: mongoose.Types.ObjectId) {
       user: userId,
       enrolledAt: new Date(),
       progress: 0,
-      completed: false
+      completed: false,
+      enrolledThrough,
+      paymentMethod,
+      paymentAmount,
+      grantedBy,
+      paymentRequestId
     } as IStudentProgress);
     course.totalStudents += 1;
+    
+    // Increment manual enrollments count if applicable
+    if (enrolledThrough === 'manual_payment' || enrolledThrough === 'manual_grant') {
+      course.manualEnrollments += 1;
+    }
   }
 
   return this.save();
+};
+
+// NEW: Method to check if user is enrolled
+CourseSchema.methods.isUserEnrolled = function (userId: mongoose.Types.ObjectId): boolean {
+  const course = this as ICourse;
+  return course.students.some(student =>
+    student.user.toString() === userId.toString()
+  );
+};
+
+// NEW: Method to get user's enrollment status
+CourseSchema.methods.getUserEnrollment = function (userId: mongoose.Types.ObjectId) {
+  const course = this as ICourse;
+  return course.students.find(student =>
+    student.user.toString() === userId.toString()
+  );
 };
 
 // Define the model interface

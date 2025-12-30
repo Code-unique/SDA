@@ -41,12 +41,12 @@ export default async function AdminLayout({
 
         <div className="flex">
           {/* Sidebar - Hidden on mobile, visible on desktop */}
-          <div className="hidden lg:block fixed inset-y-0 left-0 z-40">
+          <div className="hidden lg:block">
             <AdminSidebar user={safeUserData} />
           </div>
           
-          {/* Main Content */}
-          <div className="flex-1 lg:ml-64 w-full">
+          {/* Main Content - Adjusts based on sidebar width */}
+          <div className="flex-1 lg:pl-20 lg:group-hover:pl-64 w-full transition-all duration-300">
             <div className="p-4 lg:p-6">
               {children}
             </div>

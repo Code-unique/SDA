@@ -11,7 +11,8 @@ import {
   Play, 
   Search,
   Filter,
-  Grid,
+  Upload,
+  Grid, 
   List,
   Award,
   Clock,
@@ -35,9 +36,28 @@ import {
   Crown,
   CheckCircle,
   Brain,
-  ChevronRight
+  ChevronRight,
+  CreditCard,
+  AlertTriangle,
+  FileCheck
 } from 'lucide-react'
-import { PaymentModal } from '@/components/payment/PaymentModal'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Textarea as ShadcnTextarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 interface S3Asset {
   key: string
@@ -70,6 +90,7 @@ interface Course {
   totalLessons: number
   isFeatured: boolean
   createdAt: string
+  manualEnrollments: number
 }
 
 interface UserProgress {
@@ -88,6 +109,308 @@ interface FilterState {
   price: 'all' | 'free' | 'paid'
   rating: number
   sort: 'popular' | 'newest' | 'rating' | 'price-low' | 'price-high'
+}
+
+// Payment Request Modal Component
+const PaymentRequestModal = ({
+  course,
+  isOpen,
+  onClose,
+  onSuccess
+}: {
+  course: Course
+  isOpen: boolean
+  onClose: () => void
+  onSuccess: (requestId: string) => void
+}) => {
+  const [loading, setLoading] = useState(false)
+  const [formData, setFormData] = useState({
+    paymentMethod: '',
+    transactionId: '',
+    notes: '',
+    paymentProof: null as File | null
+  })
+  const { toast } = useToast()
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      if (file.size > 10 * 1024 * 1024) {
+        toast({
+  title: "Error",
+  description: "File size must be less than 10MB",
+  variant: "destructive"
+})
+        return
+      }
+      const validTypes = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf']
+      if (!validTypes.includes(file.type)) {
+        toast({
+  title: "Error",
+  description: "Please upload a JPEG, PNG, or PDF file",
+  variant: "destructive"
+})
+        return
+      }
+      setFormData(prev => ({ ...prev, paymentProof: file }))
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    if (!formData.paymentMethod) {
+      toast({
+  title: "Error",
+  description: "Please select a payment method",
+  variant: "destructive"
+})
+
+      return
+    }
+
+    setLoading(true)
+
+    try {
+      let proofUrl = ''
+      let proofFileName = ''
+      
+      if (formData.paymentProof) {
+        const formDataObj = new FormData()
+        formDataObj.append('file', formData.paymentProof)
+        formDataObj.append('courseId', course._id) // CORRECTED: courseId, not type
+        
+        console.log('📤 Uploading payment proof:')
+        console.log('FormData entries:')
+        for (let [key, value] of formDataObj.entries()) {
+          console.log(key, value instanceof File ? `${value.name} (${value.size} bytes)` : value)
+        }
+        
+        const uploadResponse = await fetch('/api/upload/payment-proof', {
+          method: 'POST',
+          body: formDataObj
+        })
+        
+        console.log('📥 Upload response status:', uploadResponse.status)
+        
+        if (!uploadResponse.ok) {
+          const errorText = await uploadResponse.text()
+          console.error('❌ Upload error:', errorText)
+          throw new Error('Failed to upload payment proof')
+        }
+        
+        const uploadData = await uploadResponse.json()
+        console.log('✅ Upload success:', uploadData)
+        
+        proofUrl = uploadData.fileUrl
+        proofFileName = uploadData.fileName || formData.paymentProof.name
+      }
+
+      const response = await fetch(`/api/courses/${course._id}/payment/initiate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paymentMethod: formData.paymentMethod,
+          transactionId: formData.transactionId,
+          paymentProof: proofUrl ? {
+            url: proofUrl,
+            fileName: proofFileName || formData.paymentProof?.name || 'payment_proof'
+          } : undefined,
+          notes: formData.notes
+        })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        toast({
+  title: "Success",
+  description: "Payment request submitted successfully!",
+})
+        toast({
+  title: "Info",
+  description: "Admin will review your request within 24-48 hours. You'll be notified via email.",
+})
+        onSuccess(data.requestId || data._id)
+        onClose()
+      } else {
+        
+toast({
+  title: "Error",
+  description: data.error || 'Failed to submit payment request',
+  variant: "destructive"
+})
+      }
+    } catch (error) {
+      console.error('❌ Error submitting payment request:', error)
+      toast({
+  title: "Error",
+  description: "An error occurred. Please try again.",
+  variant: "destructive"
+})
+
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CreditCard className="h-5 w-5" />
+            Request Course Access
+          </DialogTitle>
+          <DialogDescription>
+            Submit payment details for {course.title}
+          </DialogDescription>
+        </DialogHeader>
+        
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-4 py-4">
+            {/* Course Info */}
+            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h3 className="font-semibold">{course.title}</h3>
+                  <p className="text-sm text-muted-foreground">Course Access Request</p>
+                </div>
+                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                  ${course.price.toFixed(2)}
+                </div>
+              </div>
+            </div>
+
+            {/* Payment Method */}
+            <div className="space-y-2">
+              <Label htmlFor="payment-method">Payment Method *</Label>
+              <Select
+                value={formData.paymentMethod}
+                onValueChange={(value) => setFormData(prev => ({ ...prev, paymentMethod: value }))}
+                required
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select payment method" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="digital_wallet">Digital Wallet</SelectItem>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Transaction ID */}
+            <div className="space-y-2">
+              <Label htmlFor="transaction-id">Transaction ID (Optional)</Label>
+              <Input
+                id="transaction-id"
+                placeholder="Enter transaction/reference ID"
+                value={formData.transactionId}
+                onChange={(e) => setFormData(prev => ({ ...prev, transactionId: e.target.value }))}
+              />
+            </div>
+
+            {/* Payment Proof */}
+            <div className="space-y-2">
+              <Label>Payment Proof (Optional)</Label>
+              <div className="border-2 border-dashed rounded-lg p-6 text-center">
+                {formData.paymentProof ? (
+                  <div className="space-y-2">
+                    <CheckCircle className="h-8 w-8 text-green-500 mx-auto" />
+                    <p className="font-medium">{formData.paymentProof.name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {(formData.paymentProof.size / 1024 / 1024).toFixed(2)} MB
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setFormData(prev => ({ ...prev, paymentProof: null }))}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <Upload className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                      Upload payment receipt/screenshot
+                    </p>
+                    <p className="text-xs text-gray-500 mb-4">
+                      JPG, PNG, or PDF (max 10MB)
+                    </p>
+                    <Label htmlFor="payment-proof" className="cursor-pointer">
+                      <Button type="button" variant="outline" asChild>
+                        <span>Choose File</span>
+                      </Button>
+                    </Label>
+                    <Input
+                      id="payment-proof"
+                      type="file"
+                      accept=".jpg,.jpeg,.png,.pdf"
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Additional Notes */}
+            <div className="space-y-2">
+              <Label htmlFor="notes">Additional Notes (Optional)</Label>
+              <ShadcnTextarea
+                id="notes"
+                placeholder="Any additional information about your payment..."
+                value={formData.notes}
+                onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                rows={3}
+              />
+            </div>
+
+            {/* Important Notice */}
+            <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+              <h4 className="font-semibold text-yellow-800 dark:text-yellow-300 mb-2">Important Information</h4>
+              <ul className="text-sm text-yellow-700 dark:text-yellow-400 space-y-1">
+                <li>• Your request will be reviewed by an admin within 24-48 hours</li>
+                <li>• You will receive an email notification once approved</li>
+                <li>• Keep your payment proof ready for verification if needed</li>
+                <li>• Contact support for any questions</li>
+              </ul>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              disabled={loading}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={loading || !formData.paymentMethod}
+              className="bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Submitting...
+                </>
+              ) : (
+                'Submit Payment Request'
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 export default function CoursesPage() {
@@ -297,128 +620,144 @@ export default function CoursesPage() {
     }
   }
 
-  const enrollInCourse = async (course: Course, e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (isEnrolling) return
-    
-    setIsEnrolling(course._id)
-    
-    try {
-      const response = await fetch(`/api/courses/${course._id}/enroll`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include'
-      })
+  // UPDATED: Enrollment handler with manual payment flow
+  // In your CoursesPage component, update the enrollInCourse function:
 
-      const result = await response.json()
+const enrollInCourse = async (course: Course, e: React.MouseEvent) => {
+  e.stopPropagation()
+  if (isEnrolling) return
+  
+  setIsEnrolling(course._id)
+  
+  try {
+    // First, ensure user is synced
+    const syncResponse = await fetch('/api/users/sync', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include'
+    });
 
-      if (response.status === 402 && result.requiresPayment) {
-        setEnrollingCourse(course)
-        setShowPaymentModal(true)
-        setIsEnrolling(null)
-        return
-      }
-
-      if (response.ok) {
-        if (result.enrolled) {
-          setCourses(prev => prev.map(c => 
-            c._id === course._id 
-              ? { 
-                  ...c, 
-                  totalStudents: result.course?.totalStudents || c.totalStudents + 1
-                }
-              : c
-          ))
-          
-          setUserProgress(prev => ({
-            ...prev,
-            [course._id]: {
-              _id: `temp-${course._id}`,
-              courseId: course._id,
-              enrolled: true,
-              progress: 0,
-              completed: false,
-              completedLessons: []
-            }
-          }))
-          
-          toast({
-            title: '🎉 Successfully Enrolled!',
-            description: 'You can now start learning immediately',
-          })
-
-          setTimeout(() => {
-            navigateToCourse(course)
-          }, 1500)
-        } 
-        else if (result.alreadyEnrolled) {
-          toast({
-            title: 'Already Enrolled!',
-            description: 'You are already enrolled in this course',
-          })
-        }
-        else {
-          throw new Error('Unexpected response from server')
-        }
-      } else {
-        throw new Error(result.error || `Failed to enroll (${response.status})`)
-      }
-
-    } catch (err: any) {
-      console.error('Error enrolling:', err)
-      
-      if (err.message && !err.message.includes('402')) {
-        if (err.message.includes('Unauthorized') || err.message.includes('401')) {
-          toast({
-            title: 'Login Required',
-            description: 'Please log in to enroll in courses',
-            variant: 'destructive',
-          })
-          const currentUrl = encodeURIComponent(window.location.pathname + window.location.search)
-          router.push(`/login?redirect=${currentUrl}`)
-        } else {
-          toast({
-            title: 'Enrollment Failed',
-            description: err.message || 'Failed to enroll in course. Please try again.',
-            variant: 'destructive',
-          })
-        }
-      }
-    } finally {
-      setIsEnrolling(null)
+    if (!syncResponse.ok) {
+      const syncError = await syncResponse.json();
+      throw new Error(syncError.error || 'Failed to sync user');
     }
-  }
 
-  const handlePaymentSuccess = (courseId: string) => {
-    setUserProgress(prev => ({
-      ...prev,
-      [courseId]: {
-        _id: `temp-${courseId}`,
-        courseId,
-        enrolled: true,
-        progress: 0,
-        completed: false,
-        completedLessons: []
+    const syncData = await syncResponse.json();
+    console.log('User sync result:', syncData);
+
+    // Now proceed with enrollment
+    const response = await fetch(`/api/courses/${course._id}/enroll`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include'
+    })
+
+    const result = await response.json()
+
+    if (response.status === 402 && result.requiresPayment) {
+      setEnrollingCourse(course)
+      setShowPaymentModal(true)
+      setIsEnrolling(null)
+      return
+    }
+
+    if (response.ok) {
+      if (result.enrolled) {
+        setCourses(prev => prev.map(c => 
+          c._id === course._id 
+            ? { 
+                ...c, 
+                totalStudents: result.course?.totalStudents || c.totalStudents + 1,
+                manualEnrollments: result.course?.manualEnrollments || c.manualEnrollments
+              }
+            : c
+        ))
+        
+        setUserProgress(prev => ({
+          ...prev,
+          [course._id]: {
+            _id: `temp-${course._id}`,
+            courseId: course._id,
+            enrolled: true,
+            progress: 0,
+            completed: false,
+            completedLessons: []
+          }
+        }))
+        
+        toast({
+          title: '🎉 Successfully Enrolled!',
+          description: 'You can now start learning immediately',
+        })
+
+        setTimeout(() => {
+          navigateToCourse(course)
+        }, 1500)
+      } 
+      else if (result.alreadyEnrolled) {
+        toast({
+          title: 'Already Enrolled!',
+          description: 'You are already enrolled in this course',
+        })
       }
-    }))
+      else {
+        throw new Error('Unexpected response from server')
+      }
+    } else {
+      throw new Error(result.error || `Failed to enroll (${response.status})`)
+    }
+
+  } catch (err: any) {
+    console.error('Error enrolling:', err)
+    
+    if (err.message && !err.message.includes('402')) {
+      if (err.message.includes('Unauthorized') || err.message.includes('401')) {
+        toast({
+          title: 'Login Required',
+          description: 'Please log in to enroll in courses',
+          variant: 'destructive',
+        })
+        const currentUrl = encodeURIComponent(window.location.pathname + window.location.search)
+        router.push(`/login?redirect=${currentUrl}`)
+      } else {
+        toast({
+          title: 'Enrollment Failed',
+          description: err.message || 'Failed to enroll in course. Please try again.',
+          variant: 'destructive',
+        })
+      }
+    }
+  } finally {
+    setIsEnrolling(null)
+  }
+}
+
+  // UPDATED: Payment request success handler
+  const handlePaymentRequestSuccess = (requestId: string) => {
+    if (enrollingCourse) {
+      toast({
+        title: '✅ Payment Request Submitted',
+        description: 'Your request is under review. You\'ll be notified via email once approved.',
+        variant: 'default',
+      })
+      
+      // Update course stats to show pending request
+      setCourses(prev => prev.map(c => 
+        c._id === enrollingCourse._id 
+          ? { 
+              ...c,
+              manualEnrollments: c.manualEnrollments + 1
+            }
+          : c
+      ))
+    }
     
     setShowPaymentModal(false)
     setEnrollingCourse(null)
-    
-    toast({
-      title: '🎉 Enrollment Successful!',
-      description: 'You have been successfully enrolled in the course',
-      variant: 'default',
-    })
-
-    const enrolledCourse = courses.find(c => c._id === courseId)
-    if (enrolledCourse) {
-      setTimeout(() => {
-        navigateToCourse(enrolledCourse)
-      }, 1200)
-    }
   }
 
   const isUserEnrolled = (courseId: string) => {
@@ -559,7 +898,7 @@ export default function CoursesPage() {
             </div>
           </div>
           
-          {/* Enrollment Button */}
+          {/* UPDATED: Enrollment Button with manual payment text */}
           <div className="relative">
             <div className="absolute inset-0 bg-gradient-to-r from-red-600 to-orange-500 rounded-2xl blur opacity-0 group-hover:opacity-30 transition-opacity duration-300" />
             {progressLoading.has(course._id) || isEnrolling === course._id ? (
@@ -591,10 +930,20 @@ export default function CoursesPage() {
                 onClick={(e) => enrollInCourse(course, e)}
               >
                 <Sparkles className="w-4 h-4 mr-2" />
-                {course.isFree ? 'Enroll Free' : `Enroll Now`}
+                {course.isFree ? 'Enroll Free' : 'Request Access'}
               </Button>
             )}
           </div>
+
+          {/* Manual Enrollment Info for Paid Courses */}
+          {!course.isFree && course.manualEnrollments > 0 && (
+            <div className="mt-3 flex items-center justify-center">
+              <Badge className="bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs px-3 py-1.5">
+                <FileCheck className="w-3 h-3 mr-1.5" />
+                {course.manualEnrollments}+ students enrolled
+              </Badge>
+            </div>
+          )}
         </div>
       </div>
     )
@@ -757,7 +1106,8 @@ export default function CoursesPage() {
         
         return {
           ...course,
-          slug: slug
+          slug: slug,
+          manualEnrollments: course.manualEnrollments || 0
         }
       }
 
@@ -1099,16 +1449,16 @@ export default function CoursesPage() {
         </div>
       </div>
 
-      {/* Payment Modal */}
+      {/* Payment Request Modal */}
       {enrollingCourse && (
-        <PaymentModal
+        <PaymentRequestModal
           course={enrollingCourse}
           isOpen={showPaymentModal}
           onClose={() => {
             setShowPaymentModal(false)
             setEnrollingCourse(null)
           }}
-          onSuccess={handlePaymentSuccess}
+          onSuccess={handlePaymentRequestSuccess}
         />
       )}
 

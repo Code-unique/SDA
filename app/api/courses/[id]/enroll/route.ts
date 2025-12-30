@@ -2,33 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
-import Course, { ICourse } from '@/lib/models/Course'; // ADD TYPE IMPORT
+import Course, { ICourse } from '@/lib/models/Course';
 import UserProgress from '@/lib/models/UserProgress';
-import { rateLimit } from '@/lib/rate-limit';
 import mongoose from 'mongoose';
-import { NotificationService } from '@/lib/services/notificationService';
 import "@/lib/loadmodels";
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    // Rate limiting
     const user = await currentUser();
     if (!user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
-      );
-    }
-
-    const rateLimitKey = `enroll:${user.id}`;
-    const rateLimitResult = rateLimit(rateLimitKey, 5); // 5 attempts per minute
-
-    if (rateLimitResult.isRateLimited) {
-      return NextResponse.json(
-        { error: 'Too many enrollment attempts. Please try again later.' },
-        { status: 429, headers: rateLimitResult.headers }
       );
     }
 
@@ -75,7 +63,7 @@ export async function POST(
       );
     }
 
-    // Check if user is already enrolled using your Course model
+    // Check if user is already enrolled
     const isAlreadyEnrolled = course.students.some(
       (student: any) => student.user.toString() === currentUserDoc._id.toString()
     );
@@ -87,96 +75,59 @@ export async function POST(
       });
     }
 
-    // For paid courses, redirect to payment
-    if (!course.isFree && course.price > 0) {
-      return NextResponse.json({
-        requiresPayment: true,
-        price: course.price,
-        message: 'Course requires payment'
-      }, { status: 402 }); // Payment Required
-    }
+    // For free courses, enroll directly
+    if (course.isFree || course.price === 0) {
+      // Enroll user
+      await Course.findByIdAndUpdate(
+        course._id,
+        {
+          $push: {
+            students: {
+              user: currentUserDoc._id,
+              enrolledAt: new Date(),
+              progress: 0,
+              completed: false,
+              enrolledThrough: 'free'
+            }
+          },
+          $inc: { totalStudents: 1 }
+        }
+      );
 
-    // For free courses, use your Course model's addStudent method
-    await Course.findByIdAndUpdate(
-      course._id,
-      {
-        $push: {
-          students: {
-            user: currentUserDoc._id,
-            enrolledAt: new Date(),
-            progress: 0,
-            completed: false,
-            enrolledThrough: 'free'
-          }
-        },
-        $inc: { totalStudents: 1 }
-      }
-    );
-
-    // Create initial user progress
-    const firstChapter = course.modules[0]?.chapters?.[0];
-const firstLesson = firstChapter?.lessons?.[0];
-    const userProgress = await UserProgress.create({
-      courseId: course._id,
-      userId: currentUserDoc._id,
-      completedLessons: [],
-      currentLesson: firstLesson?._id || null,
-      progress: 0,
-      timeSpent: 0,
-      lastAccessed: new Date(),
-      completed: false
-    });
-
-    // Create enrollment activity
-    await mongoose.connection.collection('activities').insertOne({
-      type: 'enrollment',
-      userId: currentUserDoc._id,
-      courseId: course._id,
-      courseTitle: course.title,
-      createdAt: new Date(),
-      metadata: {
-        price: course.price,
-        isFree: course.isFree,
-        instructor: course.instructor,
-        enrolledThrough: 'free'
-      }
-    });
-
-    // CREATE ENROLLMENT NOTIFICATION
-    if (currentUserDoc.notificationPreferences?.courses) {
-      await NotificationService.createNotification({
+      // Create initial user progress
+      const firstChapter = course.modules[0]?.chapters?.[0];
+      const firstLesson = firstChapter?.lessons?.[0];
+      
+      const userProgress = await UserProgress.create({
+        courseId: course._id,
         userId: currentUserDoc._id,
-        type: 'course',
-        courseId: course._id as mongoose.Types.ObjectId, // FIX: Type cast
-        message: `You enrolled in "${course.title}"`,
-        actionUrl: `/courses/${course.slug || course._id}`
+        completedLessons: [],
+        currentLesson: firstLesson?._id || null,
+        progress: 0,
+        timeSpent: 0,
+        lastAccessed: new Date(),
+        completed: false
+      });
+
+      return NextResponse.json({
+        success: true,
+        enrolled: true,
+        message: 'Successfully enrolled in course',
+        courseId: course._id,
+        slug: course.slug,
+        progress: userProgress
       });
     }
 
-    // Refresh course data to get updated student count
-    const updatedCourse = await Course.findById(course._id)
-      .populate('instructor', 'firstName lastName username avatar bio rating totalStudents');
-
-    // Fix: Add null check for updatedCourse
-    if (!updatedCourse) {
-      throw new Error('Failed to retrieve updated course data');
-    }
-
+    // For paid courses, redirect to payment request page
     return NextResponse.json({
-      success: true,
-      enrolled: true,
-      message: 'Successfully enrolled in course',
+      requiresPayment: true,
+      price: course.price,
+      message: 'This course requires payment approval',
+      action: 'request_payment',
       courseId: course._id,
-      slug: course.slug,
-      progress: userProgress,
-      course: {
-        _id: updatedCourse._id,
-        title: updatedCourse.title,
-        totalStudents: updatedCourse.totalStudents,
-        instructor: updatedCourse.instructor
-      },
-      headers: rateLimitResult.headers
-    });
+      courseTitle: course.title
+    }, { status: 402 });
 
   } catch (error: any) {
     console.error('Error enrolling in course:', error);

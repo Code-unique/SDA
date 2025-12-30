@@ -9,6 +9,7 @@ import {
   PlayCircle, 
   BookOpen, 
   ChevronDown,
+  Upload,
   Heart,
   Share2,
   Download,
@@ -81,7 +82,11 @@ import {
   Mail,
   Check as CheckIcon,
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  DollarSign,
+  CreditCard,
+  AlertTriangle,
+  FileCheck
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -89,7 +94,6 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { useToast } from "@/components/ui/use-toast"
 import { Textarea } from '@/components/ui/textarea'
-import { PaymentModal } from '@/components/payment/PaymentModal'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import { Input } from '@/components/ui/input'
@@ -105,6 +109,24 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Textarea as ShadcnTextarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 // ==================== TYPES ====================
 interface S3Asset {
@@ -201,6 +223,7 @@ interface Course {
   updatedAt: string
   completionRate?: number
   similarCourses?: Course[]
+  manualEnrollments: number
 }
 
 interface UserProgress {
@@ -215,6 +238,14 @@ interface UserProgress {
   timeSpent: number
   lastAccessed: Date
   completedAt?: Date
+}
+
+interface PaymentRequest {
+  _id: string
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled'
+  createdAt: string
+  paymentMethod: string
+  transactionId?: string
 }
 
 // ==================== MEMOIZED COMPONENTS ====================
@@ -427,7 +458,460 @@ const ErrorState = memo(({ error, onRetry }: { error: string, onRetry: () => voi
 ))
 ErrorState.displayName = 'ErrorState'
 
-// ==================== HELPER FUNCTIONS ====================
+// ==================== NEW COMPONENTS FOR MANUAL PAYMENT ====================
+
+const PaymentRequestModal = memo(({
+  course,
+  isOpen,
+  onClose,
+  onSuccess
+}: {
+  course: Course
+  isOpen: boolean
+  onClose: () => void
+  onSuccess: (requestId: string) => void
+}) => {
+  const [loading, setLoading] = useState(false)
+  const [formData, setFormData] = useState({
+    paymentMethod: '',
+    transactionId: '',
+    notes: '',
+    paymentProof: null as File | null
+  })
+  const { toast } = useToast()
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      // Validate file size (max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        toast({
+  title: "Error",
+  description: "File size must be less than 10MB",
+  variant: "destructive"
+})
+
+        return
+      }
+      // Validate file type
+      const validTypes = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf']
+      if (!validTypes.includes(file.type)) {
+        toast({
+  title: "Error",
+  description: "Please upload a JPEG, PNG, or PDF file",
+  variant: "destructive"
+})
+        return
+      }
+      setFormData(prev => ({ ...prev, paymentProof: file }))
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    if (!formData.paymentMethod) {
+      // ✅ Correct:
+toast({
+  title: "Error",
+  description: "Please select a payment method",
+  variant: "destructive"
+})
+
+// ✅ Correct:
+toast({
+  title: "Error",
+  description: "Please select a payment method",
+  variant: "destructive"
+})
+      return
+    }
+
+    setLoading(true)
+
+    try {
+      // Upload payment proof if provided
+      let proofUrl = ''
+      let proofFileName = ''
+
+      if (formData.paymentProof) {
+        const formDataObj = new FormData()
+        formDataObj.append('file', formData.paymentProof)
+        formDataObj.append('courseId', course._id)
+        
+        console.log('📤 Uploading payment proof with FormData:')
+        console.log('File:', {
+          name: formData.paymentProof.name,
+          size: formData.paymentProof.size,
+          type: formData.paymentProof.type
+        })
+        console.log('Course ID:', course._id)
+        
+        console.log('📋 FormData contents:')
+        for (let [key, value] of formDataObj.entries()) {
+          console.log(key, value instanceof File ? `${value.name} (${value.type})` : value)
+        }
+        
+        try {
+          const uploadResponse = await fetch('/api/upload/payment-proof', {
+            method: 'POST',
+            body: formDataObj
+          })
+          
+          console.log('📥 Upload response status:', uploadResponse.status)
+          
+          const responseText = await uploadResponse.text()
+          console.log('📥 Upload response text:', responseText)
+          
+          let uploadData
+          try {
+            uploadData = JSON.parse(responseText)
+          } catch (parseError) {
+            console.error('Failed to parse JSON:', parseError)
+            throw new Error(`Invalid response: ${responseText.slice(0, 100)}`)
+          }
+          
+          if (!uploadResponse.ok) {
+            console.error('Upload failed:', uploadData)
+            throw new Error(uploadData.error || `Upload failed with status ${uploadResponse.status}`)
+          }
+          
+          console.log('✅ Upload success:', uploadData)
+          
+          if (!uploadData.success) {
+            throw new Error(uploadData.error || 'Upload failed')
+          }
+          
+          proofUrl = uploadData.fileUrl
+          proofFileName = uploadData.fileName || formData.paymentProof.name
+          
+          if (!proofUrl) {
+            throw new Error('No file URL returned from upload')
+          }
+        } catch (uploadError) {
+          console.error('Upload error:', uploadError)
+          throw uploadError
+        }
+      }
+
+      // Submit payment request
+      const response = await fetch(`/api/courses/${course._id}/payment/initiate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paymentMethod: formData.paymentMethod,
+          transactionId: formData.transactionId,
+          paymentProof: proofUrl ? {
+            url: proofUrl,
+            fileName: proofFileName || formData.paymentProof?.name || 'payment_proof'
+          } : undefined,
+          notes: formData.notes
+        })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        toast({
+          title: "Success",
+          description: "Payment request submitted successfully!",
+        })
+        toast({
+          title: "Info",
+          description: "Admin will review your request within 24-48 hours. You'll be notified via email.",
+        })
+        onSuccess(data.requestId || data._id)
+        onClose()
+      } else {
+        toast({
+          title: "Error",
+          description: data.error || 'Failed to submit payment request',
+          variant: "destructive"
+        })
+      }
+    } catch (error) {
+      console.error('❌ Error submitting payment request:', error)
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : 'An error occurred. Please try again.',
+        variant: "destructive"
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CreditCard className="h-5 w-5" />
+            Request Course Access
+          </DialogTitle>
+          <DialogDescription>
+            Submit payment details for {course.title}
+          </DialogDescription>
+        </DialogHeader>
+        
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-4 py-4">
+            {/* Course Info */}
+            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h3 className="font-semibold">{course.title}</h3>
+                  <p className="text-sm text-muted-foreground">Course Access Request</p>
+                </div>
+                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                  ${course.price.toFixed(2)}
+                </div>
+              </div>
+            </div>
+
+            {/* Payment Method */}
+            <div className="space-y-2">
+              <Label htmlFor="payment-method">Payment Method *</Label>
+              <Select
+                value={formData.paymentMethod}
+                onValueChange={(value) => setFormData(prev => ({ ...prev, paymentMethod: value }))}
+                required
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select payment method" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="digital_wallet">Digital Wallet</SelectItem>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Transaction ID */}
+            <div className="space-y-2">
+              <Label htmlFor="transaction-id">Transaction ID (Optional)</Label>
+              <Input
+                id="transaction-id"
+                placeholder="Enter transaction/reference ID"
+                value={formData.transactionId}
+                onChange={(e) => setFormData(prev => ({ ...prev, transactionId: e.target.value }))}
+              />
+            </div>
+
+            {/* Payment Proof */}
+            <div className="space-y-2">
+              <Label>Payment Proof (Optional)</Label>
+              <div className="border-2 border-dashed rounded-lg p-6 text-center">
+                {formData.paymentProof ? (
+                  <div className="space-y-2">
+                    <CheckCircle className="h-8 w-8 text-green-500 mx-auto" />
+                    <p className="font-medium">{formData.paymentProof.name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {(formData.paymentProof.size / 1024 / 1024).toFixed(2)} MB
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setFormData(prev => ({ ...prev, paymentProof: null }))}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <Upload className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                      Upload payment receipt/screenshot
+                    </p>
+                    <p className="text-xs text-gray-500 mb-4">
+                      JPG, PNG, or PDF (max 10MB)
+                    </p>
+                    <Label htmlFor="payment-proof" className="cursor-pointer">
+                      <Button type="button" variant="outline" asChild>
+                        <span>Choose File</span>
+                      </Button>
+                    </Label>
+                    <Input
+                      id="payment-proof"
+                      type="file"
+                      accept=".jpg,.jpeg,.png,.pdf"
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Additional Notes */}
+            <div className="space-y-2">
+              <Label htmlFor="notes">Additional Notes (Optional)</Label>
+              <ShadcnTextarea
+                id="notes"
+                placeholder="Any additional information about your payment..."
+                value={formData.notes}
+                onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                rows={3}
+              />
+            </div>
+
+            {/* Important Notice */}
+            <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+              <h4 className="font-semibold text-yellow-800 dark:text-yellow-300 mb-2">Important Information</h4>
+              <ul className="text-sm text-yellow-700 dark:text-yellow-400 space-y-1">
+                <li>• Your request will be reviewed by an admin within 24-48 hours</li>
+                <li>• You will receive an email notification once approved</li>
+                <li>• Keep your payment proof ready for verification if needed</li>
+                <li>• Contact support for any questions</li>
+              </ul>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              disabled={loading}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={loading || !formData.paymentMethod}
+              className="bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-700 hover:to-teal-600"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Submitting...
+                </>
+              ) : (
+                'Submit Payment Request'
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+})
+
+const PaymentStatusBadge = memo(({ status }: { status: string }) => {
+  const getStatusConfig = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return {
+          text: 'Pending Review',
+          color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
+          icon: Clock
+        }
+      case 'approved':
+        return {
+          text: 'Approved',
+          color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+          icon: CheckCircle
+        }
+      case 'rejected':
+        return {
+          text: 'Rejected',
+          color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+          icon: AlertCircle
+        }
+      case 'cancelled':
+        return {
+          text: 'Cancelled',
+          color: 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300',
+          icon: X
+        }
+      default:
+        return {
+          text: status,
+          color: 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300',
+          icon: HelpCircle
+        }
+    }
+  }
+
+  const config = getStatusConfig(status)
+  const Icon = config.icon
+
+  return (
+    <Badge className={`${config.color} flex items-center gap-1 px-2 py-1 rounded-full`}>
+      <Icon className="w-3 h-3" />
+      {config.text}
+    </Badge>
+  )
+})
+PaymentStatusBadge.displayName = 'PaymentStatusBadge'
+
+const PaymentRequestStatus = memo(({ courseId }: { courseId: string }) => {
+  const [requests, setRequests] = useState<PaymentRequest[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetchPaymentRequests()
+  }, [courseId])
+
+  const fetchPaymentRequests = async () => {
+    try {
+      const response = await fetch(`/api/courses/${courseId}/payment/initiate`)
+      const data = await response.json()
+      if (response.ok) {
+        setRequests(data.requests || [])
+      }
+    } catch (error) {
+      console.error('Error fetching payment requests:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-4">
+        <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (requests.length === 0) {
+    return null
+  }
+
+  const latestRequest = requests[0]
+
+  return (
+    <div className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+      <div className="flex items-center gap-3">
+        <div className="p-2 bg-gradient-to-r from-blue-100 to-cyan-100 dark:from-blue-800 dark:to-cyan-800 rounded-lg">
+          <FileCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+        </div>
+        <div className="flex-1">
+          <div className="flex items-center justify-between">
+            <p className="font-medium text-slate-900 dark:text-white">Payment Request Status</p>
+            <PaymentStatusBadge status={latestRequest.status} />
+          </div>
+          <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+            Submitted on {new Date(latestRequest.createdAt).toLocaleDateString()}
+            {latestRequest.transactionId && ` • Transaction ID: ${latestRequest.transactionId}`}
+          </p>
+          {latestRequest.status === 'pending' && (
+            <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
+              ⏳ Your request is under review. You'll be notified once approved.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+})
+PaymentRequestStatus.displayName = 'PaymentRequestStatus'
+
+// ==================== UPDATED HELPER FUNCTIONS ====================
 const formatDuration = (minutes: number): string => {
   const hours = Math.floor(minutes / 60)
   const mins = minutes % 60
@@ -464,7 +948,7 @@ export default function CourseDetailPage() {
   const [updatingProgress, setUpdatingProgress] = useState<string | null>(null)
   const [activeLesson, setActiveLesson] = useState<Lesson | null>(null)
   const [completedLessons, setCompletedLessons] = useState<Set<string>>(new Set())
-  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [showPaymentRequestModal, setShowPaymentRequestModal] = useState(false)
   const [showEnrollmentSuccess, setShowEnrollmentSuccess] = useState(false)
   const [showMobileCurriculum, setShowMobileCurriculum] = useState(false)
   const [isBookmarked, setIsBookmarked] = useState(false)
@@ -528,7 +1012,8 @@ export default function CourseDetailPage() {
               } : undefined
             })) || []
           })) || []
-        })) || []
+        })) || [],
+        manualEnrollments: data.manualEnrollments || 0
       }
 
       setCourse(processedCourse)
@@ -601,7 +1086,7 @@ export default function CourseDetailPage() {
     }
   }, [slug, fetchCourseData])
 
-  // Enrollment handler
+  // UPDATED: Enrollment handler with manual payment flow
   const enrollInCourse = useCallback(async () => {
     if (!course || isEnrolling) return
     
@@ -623,8 +1108,8 @@ export default function CourseDetailPage() {
       console.log('📥 Enrollment response data:', result);
 
       if (response.status === 402 && result.requiresPayment) {
-        console.log('💳 Payment required, showing payment modal');
-        setShowPaymentModal(true);
+        console.log('💳 Payment required, showing payment request modal');
+        setShowPaymentRequestModal(true);
         setIsEnrolling(null);
         return;
       }
@@ -689,8 +1174,6 @@ export default function CourseDetailPage() {
           description: 'This course is no longer available',
           variant: 'destructive',
         });
-      } else if (err.message.includes('Payment Required') || err.message.includes('402')) {
-        setShowPaymentModal(true);
       } else {
         toast({
           title: 'Enrollment Failed',
@@ -961,34 +1444,18 @@ export default function CourseDetailPage() {
     }
   }, [course, toast])
 
-  // Payment success handler
-  const handlePaymentSuccess = useCallback((courseId: string) => {
-    setShowPaymentModal(false)
-    
-    const newProgress: UserProgress = {
-      _id: `temp-${courseId}`,
-      courseId,
-      userId: 'current-user',
-      enrolled: true,
-      progress: 0,
-      completed: false,
-      completedLessons: [],
-      currentLesson: course?.modules[0]?.chapters[0]?.lessons[0]?._id || null,
-      timeSpent: 0,
-      lastAccessed: new Date()
-    }
-    
-    setUserProgress(newProgress)
-    setCompletedLessons(new Set(newProgress.completedLessons))
+  // UPDATED: Payment success handler for manual requests
+  const handlePaymentRequestSuccess = useCallback((requestId: string) => {
+    setShowPaymentRequestModal(false)
     
     toast({
-      title: '🎉 Payment Successful!',
-      description: 'Welcome aboard! Let\'s start learning.',
+      title: '✅ Payment Request Submitted',
+      description: 'Your request is under review. You\'ll be notified via email once approved.',
       variant: 'default',
     })
     
     fetchCourseData()
-  }, [course, fetchCourseData, toast])
+  }, [fetchCourseData, toast])
 
   // Memoized components
   const EnrollmentButton = useMemo(() => {
@@ -1010,8 +1477,8 @@ export default function CourseDetailPage() {
             ) : (
               <>
                 <Rocket className="w-4 h-4" />
-                <span>{course?.isFree ? 'Start Learning Free' : `Enroll Now - $${course?.price}`}</span>
-                {!course?.isFree && <span className="text-xs opacity-80">(Save 50%)</span>}
+                <span>{course?.isFree ? 'Start Learning Free' : `Request Access - $${course?.price}`}</span>
+                {!course?.isFree && <span className="text-xs opacity-80">(Manual Approval)</span>}
               </>
             )}
           </div>
@@ -1431,6 +1898,13 @@ export default function CourseDetailPage() {
         </div>
       </div>
 
+      {/* Payment Request Status Banner */}
+      {!userProgress?.enrolled && !course.isFree && course.price > 0 && (
+        <div className="px-4 pt-4">
+          <PaymentRequestStatus courseId={course._id} />
+        </div>
+      )}
+
       {/* Hero Section */}
       <div className="relative overflow-hidden">
         {/* Background Gradient */}
@@ -1472,6 +1946,15 @@ export default function CourseDetailPage() {
               }`}>
                 {course.level.charAt(0).toUpperCase() + course.level.slice(1)} Level
               </Badge>
+              {course.isFree ? (
+                <Badge className="bg-gradient-to-r from-green-500 to-emerald-500 text-white border-0 px-3 py-1 rounded-full">
+                  Free
+                </Badge>
+              ) : (
+                <Badge className="bg-gradient-to-r from-blue-500 to-cyan-500 text-white border-0 px-3 py-1 rounded-full">
+                  ${course.price}
+                </Badge>
+              )}
               {course.isFeatured && (
                 <Badge className="bg-gradient-to-r from-purple-500 to-pink-500 text-white border-0 px-3 py-1 rounded-full flex items-center gap-1">
                   <Sparkle className="w-3 h-3" />
@@ -1489,6 +1972,23 @@ export default function CourseDetailPage() {
             <p className="text-slate-600 dark:text-slate-400 leading-relaxed">
               {course.shortDescription}
             </p>
+
+            {/* Manual Enrollment Notice for Paid Courses */}
+            {!course.isFree && course.price > 0 && (
+              <div className="p-4 bg-gradient-to-r from-blue-50/80 to-cyan-50/80 dark:from-blue-900/20 dark:to-cyan-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 bg-gradient-to-r from-blue-100 to-cyan-100 dark:from-blue-800 dark:to-cyan-800 rounded-lg flex-shrink-0">
+                    <AlertTriangle className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="font-bold text-slate-900 dark:text-white mb-1">Manual Enrollment Process</h4>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
+                      This course requires manual payment approval. After submitting your payment request, an admin will review it within 24-48 hours. You'll receive an email notification once approved.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Instructor Info */}
             <div className="flex items-center gap-3 p-3 bg-gradient-to-r from-emerald-50/50 to-teal-50/50 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-xl border border-slate-200 dark:border-slate-700">
@@ -2142,14 +2642,16 @@ export default function CourseDetailPage() {
           <div className="flex items-center justify-between gap-4">
             <div className="min-w-0">
               <div className="text-xl font-bold text-slate-900 dark:text-white">
-                {userProgress?.enrolled ? 'Continue Learning' : course.isFree ? 'Start Learning Free' : `$${course.price}`}
+                {userProgress?.enrolled ? 'Continue Learning' : course.isFree ? 'Start Learning Free' : `Request Access`}
               </div>
               {!userProgress?.enrolled && !course.isFree && (
                 <div className="flex items-center gap-2 mt-1">
-                  <p className="text-slate-500 dark:text-slate-400 line-through text-sm">${course.price * 2}</p>
-                  <Badge className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-xs px-2 py-0.5">
-                    50% OFF
-                  </Badge>
+                  <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">${course.price}</p>
+                  {course.manualEnrollments > 0 && (
+                    <Badge className="bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs px-2 py-0.5">
+                      {course.manualEnrollments}+ enrolled
+                    </Badge>
+                  )}
                 </div>
               )}
             </div>
@@ -2177,13 +2679,13 @@ export default function CourseDetailPage() {
         )}
       </AnimatePresence>
 
-      {/* Payment Modal */}
-      {course && (
-        <PaymentModal
+      {/* Payment Request Modal */}
+      {course && !course.isFree && (
+        <PaymentRequestModal
           course={course}
-          isOpen={showPaymentModal}
-          onClose={() => setShowPaymentModal(false)}
-          onSuccess={handlePaymentSuccess}
+          isOpen={showPaymentRequestModal}
+          onClose={() => setShowPaymentRequestModal(false)}
+          onSuccess={handlePaymentRequestSuccess}
         />
       )}
 
