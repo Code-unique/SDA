@@ -39,7 +39,6 @@ const UserSchema = new Schema<IUser>(
     clerkId: {
       type: String,
       required: true,
-      unique: true,
       index: true
     },
     email: {
@@ -52,7 +51,7 @@ const UserSchema = new Schema<IUser>(
       type: String,
       required: true,
       unique: true,
-      index: true,
+      sparse: true,
       minlength: 3,
       maxlength: 30
     },
