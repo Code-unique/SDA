@@ -14,36 +14,99 @@ async function getDashboardData(clerkId: string) {
   try {
     await connectToDatabase()
     
-    const user = await User.findOne({ clerkId })
+    // First, find existing user
+    let user = await User.findOne({ clerkId })
       .populate('followers', 'username avatar')
       .populate('following', 'username avatar')
     
+    // If user doesn't exist, get clerk user info
     if (!user) {
-      // Create user if doesn't exist
       const clerkUser = await currentUser()
-      const newUser = await User.create({
-        clerkId,
-        email: clerkUser?.emailAddresses[0]?.emailAddress || 'user@example.com',
-        username: clerkUser?.username || `user_${clerkId.slice(0, 8)}`,
-        firstName: clerkUser?.firstName || 'User',
-        lastName: clerkUser?.lastName || 'Name',
-        avatar: clerkUser?.imageUrl || '',
-        onboardingCompleted: false,
-        isVerified: false,
-      })
-      return {
-        user: newUser,
-        stats: {
-          posts: 0,
-          courses: 0,
-          followers: 0,
-          following: 0
-        },
-        recentPosts: [],
-        popularCourses: []
+      if (!clerkUser) {
+        throw new Error('User not found in Clerk')
+      }
+      
+      const email = clerkUser.emailAddresses[0]?.emailAddress || ''
+      
+      // IMPORTANT: Check if email already exists in database
+      const existingUserByEmail = await User.findOne({ email })
+      
+      if (existingUserByEmail) {
+        // User exists by email but has different clerkId
+        // Update with current clerkId
+        user = await User.findOneAndUpdate(
+          { email },
+          { 
+            $set: { 
+              clerkId,
+              username: clerkUser.username || existingUserByEmail.username,
+              firstName: clerkUser.firstName || existingUserByEmail.firstName,
+              lastName: clerkUser.lastName || existingUserByEmail.lastName,
+              avatar: clerkUser.imageUrl || existingUserByEmail.avatar
+            }
+          },
+          { new: true }
+        )
+      } else {
+        // Create new user if email doesn't exist
+        try {
+          user = await User.create({
+            clerkId,
+            email,
+            username: clerkUser.username || `user_${clerkId.slice(0, 8)}`,
+            firstName: clerkUser.firstName || 'User',
+            lastName: clerkUser.lastName || 'Name',
+            avatar: clerkUser.imageUrl || '',
+            banner: '',
+            bio: '',
+            location: '',
+            website: '',
+            role: 'user',
+            interests: [],
+            skills: [],
+            isVerified: false,
+            followers: [],
+            following: [],
+            onboardingCompleted: false,
+            notificationPreferences: {
+              likes: true,
+              comments: true,
+              follows: true,
+              courses: true,
+              achievements: true,
+              messages: true,
+              announcements: true,
+              marketing: false
+            },
+            lastNotificationReadAt: new Date()
+          })
+        } catch (error: any) {
+          // Handle duplicate key error
+          if (error.code === 11000) {
+            // Race condition - try to find existing user again
+            user = await User.findOne({ email })
+            if (!user) {
+              throw error
+            }
+          } else {
+            throw error
+          }
+        }
+      }
+      
+      // Repopulate after creation/update
+      if (user) {
+        user = await User.findOne({ clerkId })
+          .populate('followers', 'username avatar')
+          .populate('following', 'username avatar')
       }
     }
+    
+    if (!user) {
+      throw new Error('Failed to create or find user')
+    }
 
+    // Get dashboard data
     const [postCount, courseCount, recentPosts, popularCourses] = await Promise.all([
       Post.countDocuments({ author: user._id }),
       Course.countDocuments({ 'students.user': user._id }),
