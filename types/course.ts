@@ -27,8 +27,8 @@ export interface LessonResource {
 export interface Lesson {
   _id?: string
   title: string
-  description: string
-  content: string
+  description?: string // Made optional
+  content?: string // Made optional
   video?: S3Asset
   duration: number
   isPreview: boolean
@@ -41,7 +41,7 @@ export interface Lesson {
 export interface Chapter {
   _id?: string
   title: string
-  description: string
+  description?: string // Made optional
   order: number
   lessons: Lesson[]
   createdAt?: string
@@ -51,9 +51,9 @@ export interface Chapter {
 export interface Module {
   _id?: string
   title: string
-  description: string
-  thumbnailUrl?: string // NEW FIELD
-  chapters: Chapter[] // Changed from lessons to chapters
+  description?: string // Made optional
+  thumbnailUrl?: string
+  chapters: Chapter[]
   order: number
   createdAt?: string
   updatedAt?: string
@@ -77,7 +77,7 @@ export interface Course {
   price: number
   isFree: boolean
   level: 'beginner' | 'intermediate' | 'advanced'
-  category: string
+  category?: string // Made optional
   tags: string[]
   thumbnail: S3Asset | null
   previewVideo: S3Asset | null

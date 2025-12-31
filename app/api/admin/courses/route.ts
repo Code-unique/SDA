@@ -4,6 +4,7 @@ import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
 import Course, { IS3Asset } from '@/lib/models/Course';
 import "@/lib/loadmodels";
+
 // app/api/admin/courses/route.ts (POST method - preserve S3 pattern)
 export async function POST(request: NextRequest) {
   try {
@@ -27,8 +28,8 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
 
-    // Enhanced validation (preserve original pattern with improvements)
-    const requiredFields = ['title', 'description', 'shortDescription', 'level', 'category', 'thumbnail'];
+    // UPDATED: Remove category from required fields
+    const requiredFields = ['title', 'description', 'shortDescription', 'level', 'thumbnail'];
     const missingFields = requiredFields.filter(field => !body[field]);
 
     if (missingFields.length > 0) {
@@ -95,17 +96,17 @@ export async function POST(request: NextRequest) {
     // Transform modules data with validation (NEW: includes chapters)
     const transformedModules = body.modules?.map((module: any, index: number) => ({
       title: module.title?.substring(0, 200) || '',
-      description: module.description?.substring(0, 1000) || '',
+      description: module.description?.substring(0, 1000) || '', // Optional
       thumbnailUrl: module.thumbnailUrl || '', // NEW FIELD
       order: typeof module.order === 'number' ? module.order : index,
       chapters: module.chapters?.map((chapter: any, chapterIndex: number) => ({
         title: chapter.title?.substring(0, 200) || '',
-        description: chapter.description?.substring(0, 1000) || '',
+        description: chapter.description?.substring(0, 1000) || '', // Optional
         order: typeof chapter.order === 'number' ? chapter.order : chapterIndex,
         lessons: chapter.lessons?.map((lesson: any, lessonIndex: number) => ({
           title: lesson.title?.substring(0, 200) || '',
-          description: lesson.description?.substring(0, 1000) || '',
-          content: lesson.content || '',
+          description: lesson.description?.substring(0, 1000) || '', // Optional
+          content: lesson.content || '', // Optional
           video: lesson.video as IS3Asset, // Preserve S3 asset pattern
           duration: Math.max(0, Math.min(lesson.duration || 0, 10000)),
           isPreview: !!lesson.isPreview,
@@ -124,7 +125,8 @@ export async function POST(request: NextRequest) {
       price: body.isFree ? 0 : (body.price || 0),
       isFree: !!body.isFree,
       level: body.level,
-      category: body.category.substring(0, 50),
+      // UPDATED: category is now optional
+      category: body.category ? body.category.substring(0, 50) : undefined,
       tags: (body.tags || []).slice(0, 10).map((tag: string) => tag.substring(0, 30)),
       thumbnail: body.thumbnail as IS3Asset, // Preserve S3 asset pattern
       previewVideo: body.previewVideo as IS3Asset | undefined, // Preserve S3 asset pattern

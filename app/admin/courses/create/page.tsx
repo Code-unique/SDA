@@ -1797,15 +1797,15 @@ export default function CreateCoursePage() {
   // Module management
   const addModule = useCallback(() => {
     setFormData(prev => ({
-      ...prev,
-      modules: [...prev.modules, {
-        title: '',
-        description: '',
-        thumbnailUrl: undefined,
-        chapters: [],
-        order: prev.modules.length
-      }]
-    }))
+  ...prev,
+  modules: [...prev.modules, {
+    title: '',
+    description: '', // Now optional - can be empty string
+    thumbnailUrl: undefined,
+    chapters: [],
+    order: prev.modules.length
+  }]
+}))
   }, [])
 
   const removeModule = useCallback((moduleIndex: number) => {
@@ -1821,14 +1821,14 @@ export default function CreateCoursePage() {
     updatedModules[moduleIndex] = {
       ...updatedModules[moduleIndex],
       chapters: [
-        ...updatedModules[moduleIndex].chapters,
-        {
-          title: '',
-          description: '',
-          order: updatedModules[moduleIndex].chapters.length,
-          lessons: []
-        }
-      ]
+  ...updatedModules[moduleIndex].chapters,
+  {
+    title: '',
+    description: '', // Now optional - can be empty string
+    order: updatedModules[moduleIndex].chapters.length,
+    lessons: []
+  }
+]
     }
     setFormData(prev => ({ ...prev, modules: updatedModules }))
   }, [formData.modules])
@@ -1853,17 +1853,17 @@ export default function CreateCoursePage() {
         chapIdx === chapterIndex ? {
           ...chapter,
           lessons: [
-            ...chapter.lessons,
-            {
-              title: '',
-              description: '',
-              content: '',
-              duration: 0,
-              isPreview: false,
-              resources: [],
-              order: chapter.lessons.length
-            }
-          ]
+  ...chapter.lessons,
+  {
+    title: '',
+    description: '', // Now optional - can be empty string
+    content: '', // Now optional - can be empty string
+    duration: 0,
+    isPreview: false,
+    resources: [],
+    order: chapter.lessons.length
+  }
+]
         } : chapter
       )
     }
@@ -2416,22 +2416,21 @@ export default function CreateCoursePage() {
                                 />
                               </FormGroup>
 
-                              <FormGroup label="Module Description" required icon={FileText}>
-                                <Textarea
-                                  placeholder="Module Description *"
-                                  value={module.description}
-                                  onChange={(e) => {
-                                    const updatedModules = [...formData.modules]
-                                    updatedModules[moduleIndex] = {
-                                      ...updatedModules[moduleIndex],
-                                      description: e.target.value
-                                    }
-                                    setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                  }}
-                                  className="min-h-[100px] rounded-xl"
-                                  required
-                                />
-                              </FormGroup>
+                              <FormGroup label="Module Description" icon={FileText}>
+  <Textarea
+    placeholder="Module Description (Optional)"
+    value={module.description || ''}
+    onChange={(e) => {
+      const updatedModules = [...formData.modules]
+      updatedModules[moduleIndex] = {
+        ...updatedModules[moduleIndex],
+        description: e.target.value
+      }
+      setFormData(prev => ({ ...prev, modules: updatedModules }))
+    }}
+    className="min-h-[100px] rounded-xl"
+  />
+</FormGroup>
 
                               {/* Module thumbnail upload */}
                               <FileUploadArea
@@ -2508,27 +2507,26 @@ export default function CreateCoursePage() {
                                             />
                                           </FormGroup>
 
-                                          <FormGroup label="Chapter Description" required icon={FileText}>
-                                            <Textarea
-                                              placeholder="Chapter Description *"
-                                              value={chapter.description}
-                                              onChange={(e) => {
-                                                const updatedModules = [...formData.modules]
-                                                updatedModules[moduleIndex] = {
-                                                  ...updatedModules[moduleIndex],
-                                                  chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
-                                                    chapIdx === chapterIndex ? {
-                                                      ...chap,
-                                                      description: e.target.value
-                                                    } : chap
-                                                  )
-                                                }
-                                                setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                              }}
-                                              className="min-h-[80px] rounded-lg"
-                                              required
-                                            />
-                                          </FormGroup>
+                                          <FormGroup label="Chapter Description" icon={FileText}>
+  <Textarea
+    placeholder="Chapter Description (Optional)"
+    value={chapter.description || ''}
+    onChange={(e) => {
+      const updatedModules = [...formData.modules]
+      updatedModules[moduleIndex] = {
+        ...updatedModules[moduleIndex],
+        chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+          chapIdx === chapterIndex ? {
+            ...chap,
+            description: e.target.value
+          } : chap
+        )
+      }
+      setFormData(prev => ({ ...prev, modules: updatedModules }))
+    }}
+    className="min-h-[80px] rounded-lg"
+  />
+</FormGroup>
 
                                           {/* Lessons */}
                                           <div className="space-y-4">
@@ -2592,32 +2590,31 @@ export default function CreateCoursePage() {
                                                   />
                                                 </FormGroup>
 
-                                                <FormGroup label="Lesson Description" required icon={FileText}>
-                                                  <Textarea
-                                                    placeholder="Lesson Description *"
-                                                    value={lesson.description}
-                                                    onChange={(e) => {
-                                                      const updatedModules = [...formData.modules]
-                                                      updatedModules[moduleIndex] = {
-                                                        ...updatedModules[moduleIndex],
-                                                        chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
-                                                          chapIdx === chapterIndex ? {
-                                                            ...chap,
-                                                            lessons: chap.lessons.map((les, lesIdx) =>
-                                                              lesIdx === lessonIndex ? {
-                                                                ...les,
-                                                                description: e.target.value
-                                                              } : les
-                                                            )
-                                                          } : chap
-                                                        )
-                                                      }
-                                                      setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                                    }}
-                                                    className="min-h-[80px] rounded-lg"
-                                                    required
-                                                  />
-                                                </FormGroup>
+                                                <FormGroup label="Lesson Description" icon={FileText}>
+  <Textarea
+    placeholder="Lesson Description (Optional)"
+    value={lesson.description || ''}
+    onChange={(e) => {
+      const updatedModules = [...formData.modules]
+      updatedModules[moduleIndex] = {
+        ...updatedModules[moduleIndex],
+        chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+          chapIdx === chapterIndex ? {
+            ...chap,
+            lessons: chap.lessons.map((les, lesIdx) =>
+              lesIdx === lessonIndex ? {
+                ...les,
+                description: e.target.value
+              } : les
+            )
+          } : chap
+        )
+      }
+      setFormData(prev => ({ ...prev, modules: updatedModules }))
+    }}
+    className="min-h-[80px] rounded-lg"
+  />
+</FormGroup>
 
                                                 {/* Video Upload */}
                                                 <FileUploadArea
@@ -2663,32 +2660,31 @@ export default function CreateCoursePage() {
                                                   />
                                                 </FormGroup>
 
-                                                <FormGroup label="Lesson Content" required icon={BookOpen}>
-                                                  <Textarea
-                                                    placeholder="Detailed content for this lesson..."
-                                                    value={lesson.content}
-                                                    onChange={(e) => {
-                                                      const updatedModules = [...formData.modules]
-                                                      updatedModules[moduleIndex] = {
-                                                        ...updatedModules[moduleIndex],
-                                                        chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
-                                                          chapIdx === chapterIndex ? {
-                                                            ...chap,
-                                                            lessons: chap.lessons.map((les, lesIdx) =>
-                                                              lesIdx === lessonIndex ? {
-                                                                ...les,
-                                                                content: e.target.value
-                                                              } : les
-                                                            )
-                                                          } : chap
-                                                        )
-                                                      }
-                                                      setFormData(prev => ({ ...prev, modules: updatedModules }))
-                                                    }}
-                                                    className="min-h-[100px] rounded-lg"
-                                                    required
-                                                  />
-                                                </FormGroup>
+                                                <FormGroup label="Lesson Content" icon={BookOpen}>
+  <Textarea
+    placeholder="Detailed content for this lesson... (Optional)"
+    value={lesson.content || ''}
+    onChange={(e) => {
+      const updatedModules = [...formData.modules]
+      updatedModules[moduleIndex] = {
+        ...updatedModules[moduleIndex],
+        chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+          chapIdx === chapterIndex ? {
+            ...chap,
+            lessons: chap.lessons.map((les, lesIdx) =>
+              lesIdx === lessonIndex ? {
+                ...les,
+                content: e.target.value
+              } : les
+            )
+          } : chap
+        )
+      }
+      setFormData(prev => ({ ...prev, modules: updatedModules }))
+    }}
+    className="min-h-[100px] rounded-lg"
+  />
+</FormGroup>
 
                                                 <div className="flex items-center gap-3 p-3 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-lg">
                                                   <input
@@ -3094,15 +3090,14 @@ export default function CreateCoursePage() {
                   </FormGroup>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <FormGroup label="Category" required icon={Tag}>
-                      <Input
-                        placeholder="e.g., Fashion Design, Pattern Making"
-                        value={formData.category}
-                        onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
-                        className="h-12 rounded-xl border-slate-300 dark:border-slate-700 text-base"
-                        required
-                      />
-                    </FormGroup>
+                    <FormGroup label="Category" icon={Tag}>
+  <Input
+    placeholder="e.g., Fashion Design, Pattern Making (Optional)"
+    value={formData.category || ''}
+    onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
+    className="h-12 rounded-xl border-slate-300 dark:border-slate-700 text-base"
+  />
+</FormGroup>
 
                     <FormGroup label="Tags" icon={Tag}>
                       <div className="flex flex-wrap gap-2 mb-3">
@@ -3306,9 +3301,9 @@ export default function CreateCoursePage() {
                               />
                             </FormGroup>
 
-                            <FormGroup label="Module Description" required icon={FileText}>
+                            <FormGroup label="Module Description" icon={FileText}>
                               <Textarea
-                                placeholder="Module Description *"
+                                placeholder="Module Description (Optional)"
                                 value={module.description}
                                 onChange={(e) => {
                                   const updatedModules = [...formData.modules]

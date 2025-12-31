@@ -21,8 +21,8 @@ export interface ILessonResource {
 export interface ILesson {
   _id?: mongoose.Types.ObjectId;
   title: string;
-  description: string;
-  content: string;
+  description?: string; // Made optional
+  content?: string; // Made optional
   video: IS3Asset;
   duration: number;
   isPreview: boolean;
@@ -33,7 +33,7 @@ export interface ILesson {
 export interface IChapter {
   _id?: mongoose.Types.ObjectId;
   title: string;
-  description: string;
+  description?: string; // Made optional
   order: number;
   lessons: ILesson[];
   createdAt?: Date;
@@ -43,7 +43,7 @@ export interface IChapter {
 export interface IModule {
   _id?: mongoose.Types.ObjectId;
   title: string;
-  description: string;
+  description?: string; // Made optional
   thumbnailUrl?: string;
   order: number;
   chapters: IChapter[];
@@ -83,7 +83,7 @@ export interface ICourse extends Document {
   price: number;
   isFree: boolean;
   level: 'beginner' | 'intermediate' | 'advanced';
-  category: string;
+  category?: string; // Made optional
   tags: string[];
   thumbnail: IS3Asset;
   previewVideo?: IS3Asset;
@@ -124,8 +124,8 @@ const LessonResourceSchema = new Schema<ILessonResource>({
 
 const LessonSchema = new Schema<ILesson>({
   title: { type: String, required: true, maxlength: 200 },
-  description: { type: String, required: true, maxlength: 1000 },
-  content: { type: String, required: true },
+  description: { type: String, maxlength: 1000 }, // Removed required: true
+  content: { type: String }, // Removed required: true
   video: { type: S3AssetSchema, required: true },
   duration: { type: Number, default: 0, min: 0, max: 10000 },
   isPreview: { type: Boolean, default: false },
@@ -135,14 +135,14 @@ const LessonSchema = new Schema<ILesson>({
 
 const ChapterSchema = new Schema<IChapter>({
   title: { type: String, required: true, maxlength: 200 },
-  description: { type: String, required: true, maxlength: 1000 },
+  description: { type: String, maxlength: 1000 }, // Removed required: true
   order: { type: Number, required: true, min: 0 },
   lessons: [LessonSchema]
 }, { timestamps: true });
 
 const ModuleSchema = new Schema<IModule>({
   title: { type: String, required: true, maxlength: 200 },
-  description: { type: String, required: true, maxlength: 1000 },
+  description: { type: String, maxlength: 1000 }, // Removed required: true
   thumbnailUrl: { type: String },
   order: { type: Number, required: true, min: 0 },
   chapters: [ChapterSchema]
@@ -220,8 +220,7 @@ const CourseSchema = new Schema<ICourse>(
     },
     category: {
       type: String,
-      required: true,
-      maxlength: 50
+      maxlength: 50 // Removed required: true
     },
     tags: [{
       type: String,

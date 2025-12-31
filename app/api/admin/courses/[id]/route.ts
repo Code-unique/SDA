@@ -1,4 +1,3 @@
-// app/api/admin/courses/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';
@@ -195,7 +194,8 @@ export async function PATCH(
           ? new mongoose.Types.ObjectId(module._id) 
           : new mongoose.Types.ObjectId(),
         title: module.title?.substring(0, 200) || `Module ${moduleIndex + 1}`,
-        description: module.description?.substring(0, 1000) || '',
+        // UPDATED: description is optional
+        description: module.description?.substring(0, 1000) || undefined,
         thumbnailUrl: module.thumbnailUrl || undefined,
         order: typeof module.order === 'number' ? module.order : moduleIndex,
         chapters: transformChapters(module.chapters || [], moduleIndex)
@@ -208,7 +208,8 @@ export async function PATCH(
           ? new mongoose.Types.ObjectId(chapter._id) 
           : new mongoose.Types.ObjectId(),
         title: chapter.title?.substring(0, 200) || `Chapter ${chapterIndex + 1}`,
-        description: chapter.description?.substring(0, 1000) || '',
+        // UPDATED: description is optional
+        description: chapter.description?.substring(0, 1000) || undefined,
         order: typeof chapter.order === 'number' ? chapter.order : chapterIndex,
         lessons: transformLessons(chapter.lessons || [], chapterIndex)
       }));
@@ -220,8 +221,9 @@ export async function PATCH(
           ? new mongoose.Types.ObjectId(lesson._id) 
           : new mongoose.Types.ObjectId(),
         title: lesson.title?.substring(0, 200) || `Lesson ${lessonIndex + 1}`,
-        description: lesson.description?.substring(0, 1000) || '',
-        content: lesson.content || '',
+        // UPDATED: description and content are optional
+        description: lesson.description?.substring(0, 1000) || undefined,
+        content: lesson.content || undefined,
         video: lesson.video as IS3Asset || {
           key: '',
           url: '',
@@ -259,7 +261,10 @@ export async function PATCH(
       ...(body.price !== undefined && { price: body.price }),
       ...(body.isFree !== undefined && { isFree: !!body.isFree }),
       ...(body.level && { level: body.level }),
-      ...(body.category && { category: body.category.substring(0, 50) }),
+      // UPDATED: category is now optional
+      ...(body.category !== undefined && { 
+        category: body.category ? body.category.substring(0, 50) : undefined 
+      }),
       ...(body.tags && { tags: body.tags.slice(0, 10).map((tag: string) => tag.substring(0, 30)) }),
       ...(body.thumbnail && { thumbnail: body.thumbnail as IS3Asset }),
       ...(body.previewVideo !== undefined && { previewVideo: body.previewVideo as IS3Asset }),

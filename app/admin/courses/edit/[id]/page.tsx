@@ -134,8 +134,8 @@ interface MultipartUploadState {
 interface Lesson {
   _id?: string
   title: string
-  description: string
-  content: string
+  description?: string
+  content?: string
   video?: S3Asset
   duration: number
   isPreview: boolean
@@ -151,7 +151,7 @@ interface Lesson {
 interface Chapter {
   _id?: string
   title: string
-  description: string
+  description?: string
   order: number
   lessons: Lesson[]
 }
@@ -159,7 +159,7 @@ interface Chapter {
 interface Module {
   _id?: string
   title: string
-  description: string
+  description?: string
   thumbnailUrl?: string
   chapters: Chapter[]
   order: number
@@ -174,7 +174,7 @@ interface Course {
   price: number
   isFree: boolean
   level: 'beginner' | 'intermediate' | 'advanced'
-  category: string
+  category?: string
   tags: string[]
   thumbnail: S3Asset | null
   previewVideo: S3Asset | null
@@ -1705,7 +1705,7 @@ export default function EditCoursePage() {
         price: courseData.price,
         isFree: courseData.isFree,
         level: courseData.level,
-        category: courseData.category,
+        category: courseData.category || '', // Handle undefined
         tags: courseData.tags,
         thumbnail: transformAsset(courseData.thumbnail),
         previewVideo: transformAsset(courseData.previewVideo),
@@ -1985,17 +1985,17 @@ export default function EditCoursePage() {
 
   // Module management
   const addModule = useCallback(() => {
-  setFormData(prev => ({
-    ...prev,
-    modules: [...prev.modules, {
-      title: '',
-      description: '',
-      thumbnailUrl: undefined,
-      chapters: [],
-      order: prev.modules.length // Make sure order is set
-    }]
-  }))
-}, [])
+    setFormData(prev => ({
+      ...prev,
+      modules: [...prev.modules, {
+        title: '',
+        description: '', // Keep as empty string (not undefined)
+        thumbnailUrl: undefined,
+        chapters: [],
+        order: prev.modules.length
+      }]
+    }))
+  }, [])
 
   const removeModule = useCallback((moduleIndex: number) => {
     setFormData(prev => ({
@@ -2006,21 +2006,21 @@ export default function EditCoursePage() {
 
   // Chapter management
   const addChapter = useCallback((moduleIndex: number) => {
-  const updatedModules = [...formData.modules]
-  updatedModules[moduleIndex] = {
-    ...updatedModules[moduleIndex],
-    chapters: [
-      ...updatedModules[moduleIndex].chapters,
-      {
-        title: '',
-        description: '',
-        order: updatedModules[moduleIndex].chapters.length, // Make sure order is set
-        lessons: []
-      }
-    ]
-  }
-  setFormData(prev => ({ ...prev, modules: updatedModules }))
-}, [formData.modules])
+    const updatedModules = [...formData.modules]
+    updatedModules[moduleIndex] = {
+      ...updatedModules[moduleIndex],
+      chapters: [
+        ...updatedModules[moduleIndex].chapters,
+        {
+          title: '',
+          description: '', // Keep as empty string
+          order: updatedModules[moduleIndex].chapters.length,
+          lessons: []
+        }
+      ]
+    }
+    setFormData(prev => ({ ...prev, modules: updatedModules }))
+  }, [formData.modules])
 
   const removeChapter = useCallback((moduleIndex: number, chapterIndex: number) => {
     const updatedModules = [...formData.modules]
@@ -2035,29 +2035,29 @@ export default function EditCoursePage() {
 
   // Lesson management
   const addLesson = useCallback((moduleIndex: number, chapterIndex: number) => {
-  const updatedModules = [...formData.modules]
-  updatedModules[moduleIndex] = {
-    ...updatedModules[moduleIndex],
-    chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) =>
-      chapIdx === chapterIndex ? {
-        ...chapter,
-        lessons: [
-          ...chapter.lessons,
-          {
-            title: '',
-            description: '',
-            content: '',
-            duration: 0,
-            isPreview: false,
-            resources: [],
-            order: chapter.lessons.length // Make sure order is set
-          }
-        ]
-      } : chapter
-    )
-  }
-  setFormData(prev => ({ ...prev, modules: updatedModules }))
-}, [formData.modules])
+    const updatedModules = [...formData.modules]
+    updatedModules[moduleIndex] = {
+      ...updatedModules[moduleIndex],
+      chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) =>
+        chapIdx === chapterIndex ? {
+          ...chapter,
+          lessons: [
+            ...chapter.lessons,
+            {
+              title: '',
+              description: '', // Keep as empty string
+              content: '', // Keep as empty string
+              duration: 0,
+              isPreview: false,
+              resources: [],
+              order: chapter.lessons.length
+            }
+          ]
+        } : chapter
+      )
+    }
+    setFormData(prev => ({ ...prev, modules: updatedModules }))
+  }, [formData.modules])
 
   const removeLesson = useCallback((moduleIndex: number, chapterIndex: number, lessonIndex: number) => {
     const updatedModules = [...formData.modules]
@@ -2118,168 +2118,168 @@ export default function EditCoursePage() {
   }, [formData.modules])
 
   // Form submission
-const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HTMLButtonElement>) => {
-  e.preventDefault()
-  e.stopPropagation()
-  
-  // Check if there are any uploads in progress
-  const uploadingFiles = Object.values(uploadProgress).filter(
-    u => u.status === 'initiating' || u.status === 'generating-urls' || u.status === 'uploading' || u.status === 'processing'
-  )
-  
-  if (uploadingFiles.length > 0) {
-    toast({
-      title: 'Error',
-      description: 'Please wait for all uploads to complete before saving',
-      variant: 'destructive'
-    })
-    return
-  }
-
-  if (networkStatus === 'offline') {
-    toast({
-      title: 'Error',
-      description: 'You are offline. Please check your internet connection and try again.',
-      variant: 'destructive'
-    })
-    return
-  }
-
-  if (!formData.thumbnail) {
-    toast({
-      title: 'Error',
-      description: 'Please upload a course thumbnail',
-      variant: 'destructive'
-    })
-    return
-  }
-
-  if (!formData.title.trim()) {
-    toast({
-      title: 'Error',
-      description: 'Please enter a course title',
-      variant: 'destructive'
-    })
-    return
-  }
-
-  if (!formData.description.trim()) {
-    toast({
-      title: 'Error',
-      description: 'Please enter a course description',
-      variant: 'destructive'
-    })
-    return
-  }
-
-  const missingVideos = formData.modules.some(module => 
-    module.chapters.some(chapter => 
-      chapter.lessons.some(lesson => !lesson.video)
+  const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    // Check if there are any uploads in progress
+    const uploadingFiles = Object.values(uploadProgress).filter(
+      u => u.status === 'initiating' || u.status === 'generating-urls' || u.status === 'uploading' || u.status === 'processing'
     )
-  )
-
-  if (missingVideos) {
-    toast({
-      title: 'Error',
-      description: 'All lessons must have a video uploaded',
-      variant: 'destructive'
-    })
-    return
-  }
-
-  setSaving(true)
-
-  try {
-    // Prepare data with proper structure and preserve _id fields
-    const submitData = {
-      ...formData,
-      thumbnail: formData.thumbnail ? {
-        key: formData.thumbnail.key,
-        url: formData.thumbnail.url,
-        size: formData.thumbnail.size,
-        type: formData.thumbnail.type
-      } : null,
-      previewVideo: formData.previewVideo ? {
-        key: formData.previewVideo.key,
-        url: formData.previewVideo.url,
-        size: formData.previewVideo.size,
-        type: formData.previewVideo.type
-      } : null,
-      modules: formData.modules.map(module => ({
-        _id: module._id || undefined,
-        title: module.title,
-        description: module.description,
-        thumbnailUrl: module.thumbnailUrl,
-        order: module.order,
-        chapters: module.chapters.map(chapter => ({
-          _id: chapter._id || undefined,
-          title: chapter.title,
-          description: chapter.description,
-          order: chapter.order,
-          lessons: chapter.lessons.map(lesson => ({
-            _id: lesson._id || undefined,
-            title: lesson.title,
-            description: lesson.description,
-            content: lesson.content,
-            video: lesson.video ? {
-              key: lesson.video.key,
-              url: lesson.video.url,
-              size: lesson.video.size,
-              type: lesson.video.type
-            } : undefined,
-            duration: lesson.duration,
-            isPreview: lesson.isPreview,
-            resources: lesson.resources.map(resource => ({
-              _id: resource._id || undefined,
-              title: resource.title,
-              url: resource.url,
-              type: resource.type
-            })),
-            order: lesson.order
-          }))
-        }))
-      }))
-    }
-
-    console.log('📤 Updating course with data:', submitData)
-
-    const response = await fetch(`/api/admin/courses/${params.id}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(submitData),
-    })
-
-    if (response.ok) {
-      const updatedCourse = await response.json()
-      toast({
-        title: 'Success',
-        description: 'Course updated successfully!',
-        variant: 'default'
-      })
-      router.push('/admin/courses')
-      router.refresh()
-    } else {
-      const error = await response.json()
-      console.error('API Error:', error)
+    
+    if (uploadingFiles.length > 0) {
       toast({
         title: 'Error',
-        description: error.error || error.details || 'Failed to update course',
+        description: 'Please wait for all uploads to complete before saving',
         variant: 'destructive'
       })
+      return
     }
-  } catch (error) {
-    console.error('Error updating course:', error)
-    toast({
-      title: 'Error',
-      description: 'Failed to update course. Please try again.',
-      variant: 'destructive'
-    })
-  } finally {
-    setSaving(false)
-  }
-}, [uploadProgress, networkStatus, formData, params.id, router, toast])
+
+    if (networkStatus === 'offline') {
+      toast({
+        title: 'Error',
+        description: 'You are offline. Please check your internet connection and try again.',
+        variant: 'destructive'
+      })
+      return
+    }
+
+    if (!formData.thumbnail) {
+      toast({
+        title: 'Error',
+        description: 'Please upload a course thumbnail',
+        variant: 'destructive'
+      })
+      return
+    }
+
+    if (!formData.title.trim()) {
+      toast({
+        title: 'Error',
+        description: 'Please enter a course title',
+        variant: 'destructive'
+      })
+      return
+    }
+
+    if (!formData.description.trim()) {
+      toast({
+        title: 'Error',
+        description: 'Please enter a course description',
+        variant: 'destructive'
+      })
+      return
+    }
+
+    const missingVideos = formData.modules.some(module => 
+      module.chapters.some(chapter => 
+        chapter.lessons.some(lesson => !lesson.video)
+      )
+    )
+
+    if (missingVideos) {
+      toast({
+        title: 'Error',
+        description: 'All lessons must have a video uploaded',
+        variant: 'destructive'
+      })
+      return
+    }
+
+    setSaving(true)
+
+    try {
+      // Prepare data with proper structure and preserve _id fields
+      const submitData = {
+        ...formData,
+        thumbnail: formData.thumbnail ? {
+          key: formData.thumbnail.key,
+          url: formData.thumbnail.url,
+          size: formData.thumbnail.size,
+          type: formData.thumbnail.type
+        } : null,
+        previewVideo: formData.previewVideo ? {
+          key: formData.previewVideo.key,
+          url: formData.previewVideo.url,
+          size: formData.previewVideo.size,
+          type: formData.previewVideo.type
+        } : null,
+        modules: formData.modules.map(module => ({
+          _id: module._id || undefined,
+          title: module.title,
+          description: module.description || undefined, // Send undefined if empty
+          thumbnailUrl: module.thumbnailUrl,
+          order: module.order,
+          chapters: module.chapters.map(chapter => ({
+            _id: chapter._id || undefined,
+            title: chapter.title,
+            description: chapter.description || undefined, // Send undefined if empty
+            order: chapter.order,
+            lessons: chapter.lessons.map(lesson => ({
+              _id: lesson._id || undefined,
+              title: lesson.title,
+              description: lesson.description || undefined, // Send undefined if empty
+              content: lesson.content || undefined, // Send undefined if empty
+              video: lesson.video ? {
+                key: lesson.video.key,
+                url: lesson.video.url,
+                size: lesson.video.size,
+                type: lesson.video.type
+              } : undefined,
+              duration: lesson.duration,
+              isPreview: lesson.isPreview,
+              resources: lesson.resources.map(resource => ({
+                _id: resource._id || undefined,
+                title: resource.title,
+                url: resource.url,
+                type: resource.type
+              })),
+              order: lesson.order
+            }))
+          }))
+        }))
+      }
+
+      console.log('📤 Updating course with data:', submitData)
+
+      const response = await fetch(`/api/admin/courses/${params.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(submitData),
+      })
+
+      if (response.ok) {
+        const updatedCourse = await response.json()
+        toast({
+          title: 'Success',
+          description: 'Course updated successfully!',
+          variant: 'default'
+        })
+        router.push('/admin/courses')
+        router.refresh()
+      } else {
+        const error = await response.json()
+        console.error('API Error:', error)
+        toast({
+          title: 'Error',
+          description: error.error || error.details || 'Failed to update course',
+          variant: 'destructive'
+        })
+      }
+    } catch (error) {
+      console.error('Error updating course:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to update course. Please try again.',
+        variant: 'destructive'
+      })
+    } finally {
+      setSaving(false)
+    }
+  }, [uploadProgress, networkStatus, formData, params.id, router, toast])
 
   const togglePublish = async () => {
     try {
@@ -2534,13 +2534,12 @@ const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HT
                         </select>
                       </FormGroup>
 
-                      <FormGroup label="Category" required icon={Tag}>
+                      <FormGroup label="Category" icon={Tag}>
                         <Input
-                          placeholder="e.g., Fashion Design, Pattern Making"
-                          value={formData.category}
+                          placeholder="e.g., Fashion Design, Pattern Making (Optional)"
+                          value={formData.category || ''}
                           onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
                           className="h-12 rounded-xl border-slate-300 dark:border-slate-700 text-base"
-                          required
                         />
                       </FormGroup>
                     </div>
@@ -2747,10 +2746,10 @@ const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HT
                                 />
                               </FormGroup>
 
-                              <FormGroup label="Module Description" required icon={FileText}>
+                              <FormGroup label="Module Description" icon={FileText}>
                                 <Textarea
-                                  placeholder="Module Description *"
-                                  value={module.description}
+                                  placeholder="Module Description (Optional)"
+                                  value={module.description || ''}
                                   onChange={(e) => {
                                     const updatedModules = [...formData.modules]
                                     updatedModules[moduleIndex] = {
@@ -2760,7 +2759,6 @@ const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HT
                                     setFormData(prev => ({ ...prev, modules: updatedModules }))
                                   }}
                                   className="min-h-[100px] rounded-xl"
-                                  required
                                 />
                               </FormGroup>
 
@@ -2839,10 +2837,10 @@ const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HT
                                             />
                                           </FormGroup>
 
-                                          <FormGroup label="Chapter Description" required icon={FileText}>
+                                          <FormGroup label="Chapter Description" icon={FileText}>
                                             <Textarea
-                                              placeholder="Chapter Description *"
-                                              value={chapter.description}
+                                              placeholder="Chapter Description (Optional)"
+                                              value={chapter.description || ''}
                                               onChange={(e) => {
                                                 const updatedModules = [...formData.modules]
                                                 updatedModules[moduleIndex] = {
@@ -2857,7 +2855,6 @@ const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HT
                                                 setFormData(prev => ({ ...prev, modules: updatedModules }))
                                               }}
                                               className="min-h-[80px] rounded-lg"
-                                              required
                                             />
                                           </FormGroup>
 
@@ -2923,10 +2920,10 @@ const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HT
                                                   />
                                                 </FormGroup>
 
-                                                <FormGroup label="Lesson Description" required icon={FileText}>
+                                                <FormGroup label="Lesson Description" icon={FileText}>
                                                   <Textarea
-                                                    placeholder="Lesson Description *"
-                                                    value={lesson.description}
+                                                    placeholder="Lesson Description (Optional)"
+                                                    value={lesson.description || ''}
                                                     onChange={(e) => {
                                                       const updatedModules = [...formData.modules]
                                                       updatedModules[moduleIndex] = {
@@ -2946,7 +2943,6 @@ const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HT
                                                       setFormData(prev => ({ ...prev, modules: updatedModules }))
                                                     }}
                                                     className="min-h-[80px] rounded-lg"
-                                                    required
                                                   />
                                                 </FormGroup>
 
@@ -2994,10 +2990,10 @@ const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HT
                                                   />
                                                 </FormGroup>
 
-                                                <FormGroup label="Lesson Content" required icon={BookOpen}>
+                                                <FormGroup label="Lesson Content" icon={BookOpen}>
                                                   <Textarea
-                                                    placeholder="Detailed content for this lesson..."
-                                                    value={lesson.content}
+                                                    placeholder="Detailed content for this lesson... (Optional)"
+                                                    value={lesson.content || ''}
                                                     onChange={(e) => {
                                                       const updatedModules = [...formData.modules]
                                                       updatedModules[moduleIndex] = {
@@ -3017,7 +3013,6 @@ const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HT
                                                       setFormData(prev => ({ ...prev, modules: updatedModules }))
                                                     }}
                                                     className="min-h-[100px] rounded-lg"
-                                                    required
                                                   />
                                                 </FormGroup>
 
@@ -3465,13 +3460,12 @@ const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HT
                   </FormGroup>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <FormGroup label="Category" required icon={Tag}>
+                    <FormGroup label="Category" icon={Tag}>
                       <Input
-                        placeholder="e.g., Fashion Design, Pattern Making"
-                        value={formData.category}
+                        placeholder="e.g., Fashion Design, Pattern Making (Optional)"
+                        value={formData.category || ''}
                         onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
                         className="h-12 rounded-xl border-slate-300 dark:border-slate-700 text-base"
-                        required
                       />
                     </FormGroup>
 
@@ -3677,10 +3671,10 @@ const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HT
                               />
                             </FormGroup>
 
-                            <FormGroup label="Module Description" required icon={FileText}>
+                            <FormGroup label="Module Description" icon={FileText}>
                               <Textarea
-                                placeholder="Module Description *"
-                                value={module.description}
+                                placeholder="Module Description (Optional)"
+                                value={module.description || ''}
                                 onChange={(e) => {
                                   const updatedModules = [...formData.modules]
                                   updatedModules[moduleIndex] = {
@@ -3690,7 +3684,6 @@ const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HT
                                   setFormData(prev => ({ ...prev, modules: updatedModules }))
                                 }}
                                 className="min-h-[100px] rounded-xl"
-                                required
                               />
                             </FormGroup>
 
@@ -3769,10 +3762,10 @@ const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HT
                                           />
                                         </FormGroup>
 
-                                        <FormGroup label="Chapter Description" required icon={FileText}>
+                                        <FormGroup label="Chapter Description" icon={FileText}>
                                           <Textarea
-                                            placeholder="Chapter Description *"
-                                            value={chapter.description}
+                                            placeholder="Chapter Description (Optional)"
+                                            value={chapter.description || ''}
                                             onChange={(e) => {
                                               const updatedModules = [...formData.modules]
                                               updatedModules[moduleIndex] = {
@@ -3787,7 +3780,6 @@ const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HT
                                               setFormData(prev => ({ ...prev, modules: updatedModules }))
                                             }}
                                             className="min-h-[80px] rounded-lg"
-                                            required
                                           />
                                         </FormGroup>
 
@@ -3853,10 +3845,10 @@ const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HT
                                                 />
                                               </FormGroup>
 
-                                              <FormGroup label="Lesson Description" required icon={FileText}>
+                                              <FormGroup label="Lesson Description" icon={FileText}>
                                                 <Textarea
-                                                  placeholder="Lesson Description *"
-                                                  value={lesson.description}
+                                                  placeholder="Lesson Description (Optional)"
+                                                  value={lesson.description || ''}
                                                   onChange={(e) => {
                                                     const updatedModules = [...formData.modules]
                                                     updatedModules[moduleIndex] = {
@@ -3876,7 +3868,6 @@ const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HT
                                                     setFormData(prev => ({ ...prev, modules: updatedModules }))
                                                   }}
                                                   className="min-h-[80px] rounded-lg"
-                                                  required
                                                 />
                                               </FormGroup>
 
@@ -3924,10 +3915,10 @@ const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HT
                                                 />
                                               </FormGroup>
 
-                                              <FormGroup label="Lesson Content" required icon={BookOpen}>
+                                              <FormGroup label="Lesson Content" icon={BookOpen}>
                                                 <Textarea
-                                                  placeholder="Detailed content for this lesson..."
-                                                  value={lesson.content}
+                                                  placeholder="Detailed content for this lesson... (Optional)"
+                                                  value={lesson.content || ''}
                                                   onChange={(e) => {
                                                     const updatedModules = [...formData.modules]
                                                     updatedModules[moduleIndex] = {
@@ -3947,7 +3938,6 @@ const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HT
                                                     setFormData(prev => ({ ...prev, modules: updatedModules }))
                                                   }}
                                                   className="min-h-[100px] rounded-lg"
-                                                  required
                                                 />
                                               </FormGroup>
 
