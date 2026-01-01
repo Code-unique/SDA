@@ -21,8 +21,9 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { Upload, DollarSign, Calendar, FileText, CheckCircle, X, Loader2 } from 'lucide-react';
+import { Upload, DollarSign, Calendar, FileText, CheckCircle, X, Loader2, Building, CreditCard, User, Phone, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
+import Image from 'next/image';
 
 interface PaymentRequestFormProps {
   courseId: string;
@@ -199,6 +200,81 @@ export default function PaymentRequestForm({
       
       <form onSubmit={handleSubmit}>
         <CardContent className="space-y-4">
+          {/* Payment Details Card */}
+          <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+            <h3 className="font-bold text-lg mb-4 text-blue-800 flex items-center gap-2">
+              <CreditCard className="h-5 w-5" />
+              Payment Details (NPR)
+            </h3>
+            
+            {/* QR Code */}
+            <div className="flex flex-col items-center mb-4">
+              <div className="bg-white p-2 rounded-lg shadow-sm mb-3">
+                <div className="relative w-48 h-48">
+                  <Image
+                    src="/images/paymentqr.jpeg"
+                    alt="Payment QR Code"
+                    fill
+                    className="object-contain"
+                    priority
+                  />
+                </div>
+              </div>
+              <p className="text-sm text-gray-600 mb-1">Scan QR code to pay</p>
+              <p className="text-xs text-gray-500">(Use NPR currency only)</p>
+            </div>
+
+            {/* Bank Details */}
+            <div className="space-y-3">
+              <div className="flex items-start gap-3">
+                <Building className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-gray-700">Bank Name</p>
+                  <p className="font-semibold text-gray-900">NMB Bank Limited</p>
+                </div>
+              </div>
+              
+              <div className="flex items-start gap-3">
+                <CreditCard className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-gray-700">Account Number</p>
+                  <p className="font-semibold text-gray-900">0260148342500016</p>
+                </div>
+              </div>
+              
+              <div className="flex items-start gap-3">
+                <User className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-gray-700">Account Name</p>
+                  <p className="font-semibold text-gray-900">SUTRA Designing and Dwarka Clothing</p>
+                </div>
+              </div>
+              
+              <div className="flex items-start gap-3">
+                <MapPin className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-gray-700">Branch</p>
+                  <p className="font-semibold text-gray-900">Suryabinayak, Bhaktapur</p>
+                </div>
+              </div>
+              
+              <div className="flex items-start gap-3">
+                <Phone className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-gray-700">Contact Number</p>
+                  <p className="font-semibold text-gray-900">9804304000</p>
+                </div>
+              </div>
+              
+              <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                <p className="text-sm font-medium text-yellow-800 mb-1">Important Note:</p>
+                <p className="text-sm text-yellow-700">
+                  Please make payment in NPR (Nepalese Rupees) only. Do not send in USD ($) or other currencies.
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* Course Info */}
           <div className="p-4 bg-blue-50 rounded-lg">
             <div className="flex justify-between items-center">
@@ -207,7 +283,7 @@ export default function PaymentRequestForm({
                 <p className="text-sm text-muted-foreground">Course Access Request</p>
               </div>
               <div className="text-2xl font-bold text-blue-600">
-                ${price.toFixed(2)}
+                NPR {price.toLocaleString('ne-NP')}
               </div>
             </div>
           </div>
@@ -224,8 +300,10 @@ export default function PaymentRequestForm({
                 <SelectValue placeholder="Select payment method" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-                <SelectItem value="digital_wallet">Digital Wallet (PayPal, Venmo, etc.)</SelectItem>
+                <SelectItem value="bank_transfer">Bank Transfer (NMB)</SelectItem>
+                <SelectItem value="esewa">eSewa</SelectItem>
+                <SelectItem value="khalti">Khalti</SelectItem>
+                <SelectItem value="ime_pay">IME Pay</SelectItem>
                 <SelectItem value="cash">Cash</SelectItem>
                 <SelectItem value="other">Other</SelectItem>
               </SelectContent>
@@ -234,18 +312,21 @@ export default function PaymentRequestForm({
 
           {/* Transaction ID */}
           <div className="space-y-2">
-            <Label htmlFor="transaction-id">Transaction ID (Optional)</Label>
+            <Label htmlFor="transaction-id">Transaction ID (Required for digital payments)</Label>
             <Input
               id="transaction-id"
               placeholder="Enter transaction/reference ID"
               value={formData.transactionId}
               onChange={(e) => setFormData(prev => ({ ...prev, transactionId: e.target.value }))}
             />
+            <p className="text-xs text-gray-500">
+              Required for eSewa, Khalti, IME Pay. For bank transfer, use your full name as reference.
+            </p>
           </div>
 
           {/* Payment Proof */}
           <div className="space-y-2">
-            <Label>Payment Proof (Optional)</Label>
+            <Label>Payment Proof *</Label>
             <div className="border-2 border-dashed rounded-lg p-6 text-center">
               {formData.paymentProof ? (
                 <div className="space-y-2">
@@ -308,10 +389,12 @@ export default function PaymentRequestForm({
           <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
             <h4 className="font-semibold text-yellow-800 mb-2">Important Information</h4>
             <ul className="text-sm text-yellow-700 space-y-1">
-              <li>• Your request will be reviewed by an admin within 24-48 hours</li>
+              <li>• Payment must be made in NPR (Nepalese Rupees) only</li>
+              <li>• Include your full name in payment reference/remarks</li>
+              <li>• Your request will be reviewed within 24-48 hours</li>
               <li>• You will receive an email notification once approved</li>
-              <li>• Keep your payment proof ready for verification if needed</li>
-              <li>• Contact support for any questions</li>
+              <li>• Keep your payment proof ready for verification</li>
+              <li>• Contact support (9804304000) for any questions</li>
             </ul>
           </div>
         </CardContent>

@@ -86,7 +86,11 @@ import {
   DollarSign,
   CreditCard,
   AlertTriangle,
-  FileCheck
+  FileCheck,
+  Building,
+  MapPin,
+  Phone,
+  User
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -127,6 +131,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import Image from 'next/image'
 
 // ==================== TYPES ====================
 interface S3Asset {
@@ -272,137 +277,6 @@ const SectionHeader = memo(({
 ))
 SectionHeader.displayName = 'SectionHeader'
 
-const StatCard = memo(({ 
-  icon: Icon, 
-  value, 
-  label, 
-  color = 'blue',
-  gradient = false
-}: {
-  icon: React.ElementType
-  value: string | number
-  label: string
-  color?: 'blue' | 'green' | 'purple' | 'orange' | 'pink' | 'emerald' | 'amber'
-  gradient?: boolean
-}) => {
-  const colorConfig = {
-    blue: 'from-blue-500 to-cyan-500',
-    green: 'from-emerald-500 to-green-500',
-    purple: 'from-purple-500 to-pink-500',
-    orange: 'from-amber-500 to-orange-500',
-    pink: 'from-rose-500 to-pink-500',
-    emerald: 'from-emerald-500 to-teal-500',
-    amber: 'from-amber-500 to-yellow-500'
-  }
-
-  const bgColor = {
-    blue: 'bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20',
-    green: 'bg-gradient-to-r from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/20',
-    purple: 'bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20',
-    orange: 'bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20',
-    pink: 'bg-gradient-to-r from-rose-50 to-pink-50 dark:from-rose-900/20 dark:to-pink-900/20',
-    emerald: 'bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20',
-    amber: 'bg-gradient-to-r from-amber-50 to-yellow-50 dark:from-amber-900/20 dark:to-yellow-900/20'
-  }
-
-  const iconBg = {
-    blue: 'bg-gradient-to-r from-blue-100 to-cyan-100 dark:from-blue-800 dark:to-cyan-800',
-    green: 'bg-gradient-to-r from-emerald-100 to-green-100 dark:from-emerald-800 dark:to-green-800',
-    purple: 'bg-gradient-to-r from-purple-100 to-pink-100 dark:from-purple-800 dark:to-pink-800',
-    orange: 'bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-800 dark:to-orange-800',
-    pink: 'bg-gradient-to-r from-rose-100 to-pink-100 dark:from-rose-800 dark:to-pink-800',
-    emerald: 'bg-gradient-to-r from-emerald-100 to-teal-100 dark:from-emerald-800 dark:to-teal-800',
-    amber: 'bg-gradient-to-r from-amber-100 to-yellow-100 dark:from-amber-800 dark:to-yellow-800'
-  }
-
-  const iconColor = {
-    blue: 'text-blue-600 dark:text-blue-400',
-    green: 'text-emerald-600 dark:text-emerald-400',
-    purple: 'text-purple-600 dark:text-purple-400',
-    orange: 'text-amber-600 dark:text-amber-400',
-    pink: 'text-rose-600 dark:text-rose-400',
-    emerald: 'text-emerald-600 dark:text-emerald-400',
-    amber: 'text-amber-600 dark:text-amber-400'
-  }
-
-  return (
-    <div className={`p-3 rounded-xl ${bgColor[color]} border border-slate-200/50 dark:border-slate-700/50`}>
-      <div className="flex items-center gap-3">
-        <div className={`p-2 rounded-lg ${iconBg[color]}`}>
-          <Icon className={`w-4 h-4 ${iconColor[color]}`} />
-        </div>
-        <div>
-          <p className="text-lg font-bold bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
-            {value}
-          </p>
-          <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">{label}</p>
-        </div>
-      </div>
-    </div>
-  )
-})
-StatCard.displayName = 'StatCard'
-
-const FeatureCard = memo(({ 
-  icon: Icon, 
-  title, 
-  description, 
-  color = 'blue' 
-}: {
-  icon: React.ElementType
-  title: string
-  description: string
-  color?: 'blue' | 'green' | 'purple' | 'amber' | 'emerald'
-}) => {
-  const colorConfig = {
-    blue: {
-      bg: 'from-blue-50/80 to-cyan-50/80 dark:from-blue-900/20 dark:to-cyan-900/20',
-      border: 'border-blue-200/50 dark:border-blue-800/50',
-      iconBg: 'bg-gradient-to-r from-blue-100 to-cyan-100 dark:from-blue-800 dark:to-cyan-800',
-      iconColor: 'text-blue-600 dark:text-blue-400'
-    },
-    green: {
-      bg: 'from-green-50/80 to-emerald-50/80 dark:from-green-900/20 dark:to-emerald-900/20',
-      border: 'border-green-200/50 dark:border-green-800/50',
-      iconBg: 'bg-gradient-to-r from-green-100 to-emerald-100 dark:from-green-800 dark:to-emerald-800',
-      iconColor: 'text-green-600 dark:text-green-400'
-    },
-    purple: {
-      bg: 'from-purple-50/80 to-pink-50/80 dark:from-purple-900/20 dark:to-pink-900/20',
-      border: 'border-purple-200/50 dark:border-purple-800/50',
-      iconBg: 'bg-gradient-to-r from-purple-100 to-pink-100 dark:from-purple-800 dark:to-pink-800',
-      iconColor: 'text-purple-600 dark:text-purple-400'
-    },
-    amber: {
-      bg: 'from-amber-50/80 to-orange-50/80 dark:from-amber-900/20 dark:to-orange-900/20',
-      border: 'border-amber-200/50 dark:border-amber-800/50',
-      iconBg: 'bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-800 dark:to-orange-800',
-      iconColor: 'text-amber-600 dark:text-amber-400'
-    },
-    emerald: {
-      bg: 'from-emerald-50/80 to-teal-50/80 dark:from-emerald-900/20 dark:to-teal-900/20',
-      border: 'border-emerald-200/50 dark:border-emerald-800/50',
-      iconBg: 'bg-gradient-to-r from-emerald-100 to-teal-100 dark:from-emerald-800 dark:to-teal-800',
-      iconColor: 'text-emerald-600 dark:text-emerald-400'
-    }
-  }
-
-  const config = colorConfig[color]
-
-  return (
-    <div className={`p-4 rounded-xl bg-gradient-to-br ${config.bg} border ${config.border} backdrop-blur-sm hover:scale-[1.02] transition-all duration-300`}>
-      <div className="flex items-center gap-3 mb-3">
-        <div className={`p-2 rounded-lg ${config.iconBg}`}>
-          <Icon className={`w-4 h-4 ${config.iconColor}`} />
-        </div>
-        <h4 className="font-bold text-slate-900 dark:text-white text-sm">{title}</h4>
-      </div>
-      <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">{description}</p>
-    </div>
-  )
-})
-FeatureCard.displayName = 'FeatureCard'
-
 const LoadingSkeleton = memo(() => (
   <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 dark:from-slate-900 dark:via-slate-950 dark:to-emerald-900/10">
     <div className="container mx-auto px-4 py-8">
@@ -458,7 +332,7 @@ const ErrorState = memo(({ error, onRetry }: { error: string, onRetry: () => voi
 ))
 ErrorState.displayName = 'ErrorState'
 
-// ==================== NEW COMPONENTS FOR MANUAL PAYMENT ====================
+// ==================== UPDATED PAYMENT REQUEST MODAL WITH BANK DETAILS ====================
 
 const PaymentRequestModal = memo(({
   course,
@@ -486,21 +360,20 @@ const PaymentRequestModal = memo(({
       // Validate file size (max 10MB)
       if (file.size > 10 * 1024 * 1024) {
         toast({
-  title: "Error",
-  description: "File size must be less than 10MB",
-  variant: "destructive"
-})
-
+          title: "Error",
+          description: "File size must be less than 10MB",
+          variant: "destructive"
+        })
         return
       }
       // Validate file type
       const validTypes = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf']
       if (!validTypes.includes(file.type)) {
         toast({
-  title: "Error",
-  description: "Please upload a JPEG, PNG, or PDF file",
-  variant: "destructive"
-})
+          title: "Error",
+          description: "Please upload a JPEG, PNG, or PDF file",
+          variant: "destructive"
+        })
         return
       }
       setFormData(prev => ({ ...prev, paymentProof: file }))
@@ -511,90 +384,51 @@ const PaymentRequestModal = memo(({
     e.preventDefault()
     
     if (!formData.paymentMethod) {
-      // ✅ Correct:
-toast({
-  title: "Error",
-  description: "Please select a payment method",
-  variant: "destructive"
-})
-
-// ✅ Correct:
-toast({
-  title: "Error",
-  description: "Please select a payment method",
-  variant: "destructive"
-})
+      toast({
+        title: "Error",
+        description: "Please select a payment method",
+        variant: "destructive"
+      })
       return
     }
 
     setLoading(true)
 
     try {
-      // Upload payment proof if provided
       let proofUrl = ''
       let proofFileName = ''
-
+      
       if (formData.paymentProof) {
         const formDataObj = new FormData()
         formDataObj.append('file', formData.paymentProof)
         formDataObj.append('courseId', course._id)
         
         console.log('📤 Uploading payment proof with FormData:')
-        console.log('File:', {
-          name: formData.paymentProof.name,
-          size: formData.paymentProof.size,
-          type: formData.paymentProof.type
-        })
-        console.log('Course ID:', course._id)
-        
-        console.log('📋 FormData contents:')
+        console.log('FormData entries:')
         for (let [key, value] of formDataObj.entries()) {
-          console.log(key, value instanceof File ? `${value.name} (${value.type})` : value)
+          console.log(key, value instanceof File ? `${value.name} (${value.size} bytes)` : value)
         }
         
-        try {
-          const uploadResponse = await fetch('/api/upload/payment-proof', {
-            method: 'POST',
-            body: formDataObj
-          })
-          
-          console.log('📥 Upload response status:', uploadResponse.status)
-          
-          const responseText = await uploadResponse.text()
-          console.log('📥 Upload response text:', responseText)
-          
-          let uploadData
-          try {
-            uploadData = JSON.parse(responseText)
-          } catch (parseError) {
-            console.error('Failed to parse JSON:', parseError)
-            throw new Error(`Invalid response: ${responseText.slice(0, 100)}`)
-          }
-          
-          if (!uploadResponse.ok) {
-            console.error('Upload failed:', uploadData)
-            throw new Error(uploadData.error || `Upload failed with status ${uploadResponse.status}`)
-          }
-          
-          console.log('✅ Upload success:', uploadData)
-          
-          if (!uploadData.success) {
-            throw new Error(uploadData.error || 'Upload failed')
-          }
-          
-          proofUrl = uploadData.fileUrl
-          proofFileName = uploadData.fileName || formData.paymentProof.name
-          
-          if (!proofUrl) {
-            throw new Error('No file URL returned from upload')
-          }
-        } catch (uploadError) {
-          console.error('Upload error:', uploadError)
-          throw uploadError
+        const uploadResponse = await fetch('/api/upload/payment-proof', {
+          method: 'POST',
+          body: formDataObj
+        })
+        
+        console.log('📥 Upload response status:', uploadResponse.status)
+        
+        if (!uploadResponse.ok) {
+          const errorText = await uploadResponse.text()
+          console.error('❌ Upload error:', errorText)
+          throw new Error('Failed to upload payment proof')
         }
+        
+        const uploadData = await uploadResponse.json()
+        console.log('✅ Upload success:', uploadData)
+        
+        proofUrl = uploadData.fileUrl
+        proofFileName = uploadData.fileName || formData.paymentProof.name
       }
 
-      // Submit payment request
       const response = await fetch(`/api/courses/${course._id}/payment/initiate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -633,7 +467,7 @@ toast({
       console.error('❌ Error submitting payment request:', error)
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : 'An error occurred. Please try again.',
+        description: "An error occurred. Please try again.",
         variant: "destructive"
       })
     } finally {
@@ -656,6 +490,81 @@ toast({
         
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-4">
+            {/* UPDATED: Payment Details Card with NPR */}
+            <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+              <h3 className="font-bold text-lg mb-4 text-blue-800 flex items-center gap-2">
+                <CreditCard className="h-5 w-5" />
+                Payment Details (NPR)
+              </h3>
+              
+              {/* QR Code */}
+              <div className="flex flex-col items-center mb-4">
+                <div className="bg-white p-2 rounded-lg shadow-sm mb-3">
+                  <div className="relative w-48 h-48">
+                    <Image
+                      src="/images/paymentqr.jpeg"
+                      alt="Payment QR Code"
+                      fill
+                      className="object-contain"
+                      priority
+                    />
+                  </div>
+                </div>
+                <p className="text-sm text-gray-600 mb-1">Scan QR code to pay</p>
+                <p className="text-xs text-gray-500">(Use NPR currency only)</p>
+              </div>
+
+              {/* Bank Details */}
+              <div className="space-y-3">
+                <div className="flex items-start gap-3">
+                  <Building className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-700">Bank Name</p>
+                    <p className="font-semibold text-gray-900">NMB Bank Limited</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-start gap-3">
+                  <CreditCard className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-700">Account Number</p>
+                    <p className="font-semibold text-gray-900">0260148342500016</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-start gap-3">
+                  <User className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-700">Account Name</p>
+                    <p className="font-semibold text-gray-900">SUTRA Designing and Dwarka Clothing</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-start gap-3">
+                  <MapPin className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-700">Branch</p>
+                    <p className="font-semibold text-gray-900">Suryabinayak, Bhaktapur</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-start gap-3">
+                  <Phone className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-700">Contact Number</p>
+                    <p className="font-semibold text-gray-900">9804304000</p>
+                  </div>
+                </div>
+                
+                <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                  <p className="text-sm font-medium text-yellow-800 mb-1">Important Note:</p>
+                  <p className="text-sm text-yellow-700">
+                    Please make payment in NPR (Nepalese Rupees) only. Do not send in USD ($) or other currencies.
+                  </p>
+                </div>
+              </div>
+            </div>
+
             {/* Course Info */}
             <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
               <div className="flex justify-between items-center">
@@ -664,12 +573,12 @@ toast({
                   <p className="text-sm text-muted-foreground">Course Access Request</p>
                 </div>
                 <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                  ${course.price.toFixed(2)}
+                  NPR {course.price.toLocaleString('ne-NP')}
                 </div>
               </div>
             </div>
 
-            {/* Payment Method */}
+            {/* UPDATED: Payment Method with Nepali options */}
             <div className="space-y-2">
               <Label htmlFor="payment-method">Payment Method *</Label>
               <Select
@@ -681,28 +590,33 @@ toast({
                   <SelectValue placeholder="Select payment method" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-                  <SelectItem value="digital_wallet">Digital Wallet</SelectItem>
+                  <SelectItem value="bank_transfer">Bank Transfer (NMB)</SelectItem>
+                  <SelectItem value="esewa">eSewa</SelectItem>
+                  <SelectItem value="khalti">Khalti</SelectItem>
+                  <SelectItem value="ime_pay">IME Pay</SelectItem>
                   <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="other">Other</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            {/* Transaction ID */}
+            {/* UPDATED: Transaction ID with better description */}
             <div className="space-y-2">
-              <Label htmlFor="transaction-id">Transaction ID (Optional)</Label>
+              <Label htmlFor="transaction-id">Transaction ID (Required for digital payments)</Label>
               <Input
                 id="transaction-id"
                 placeholder="Enter transaction/reference ID"
                 value={formData.transactionId}
                 onChange={(e) => setFormData(prev => ({ ...prev, transactionId: e.target.value }))}
               />
+              <p className="text-xs text-gray-500">
+                Required for eSewa, Khalti, IME Pay. For bank transfer, use your full name as reference.
+              </p>
             </div>
 
             {/* Payment Proof */}
             <div className="space-y-2">
-              <Label>Payment Proof (Optional)</Label>
+              <Label>Payment Proof *</Label>
               <div className="border-2 border-dashed rounded-lg p-6 text-center">
                 {formData.paymentProof ? (
                   <div className="space-y-2">
@@ -758,14 +672,16 @@ toast({
               />
             </div>
 
-            {/* Important Notice */}
+            {/* UPDATED: Important Notice */}
             <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
               <h4 className="font-semibold text-yellow-800 dark:text-yellow-300 mb-2">Important Information</h4>
               <ul className="text-sm text-yellow-700 dark:text-yellow-400 space-y-1">
-                <li>• Your request will be reviewed by an admin within 24-48 hours</li>
+                <li>• Payment must be made in NPR (Nepalese Rupees) only</li>
+                <li>• Include your full name in payment reference/remarks</li>
+                <li>• Your request will be reviewed within 24-48 hours</li>
                 <li>• You will receive an email notification once approved</li>
-                <li>• Keep your payment proof ready for verification if needed</li>
-                <li>• Contact support for any questions</li>
+                <li>• Keep your payment proof ready for verification</li>
+                <li>• Contact support (9804304000) for any questions</li>
               </ul>
             </div>
           </div>
@@ -782,7 +698,7 @@ toast({
             <Button
               type="submit"
               disabled={loading || !formData.paymentMethod}
-              className="bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-700 hover:to-teal-600"
+              className="bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600"
             >
               {loading ? (
                 <>
@@ -799,6 +715,7 @@ toast({
     </Dialog>
   )
 })
+PaymentRequestModal.displayName = 'PaymentRequestModal'
 
 const PaymentStatusBadge = memo(({ status }: { status: string }) => {
   const getStatusConfig = (status: string) => {
@@ -911,7 +828,7 @@ const PaymentRequestStatus = memo(({ courseId }: { courseId: string }) => {
 })
 PaymentRequestStatus.displayName = 'PaymentRequestStatus'
 
-// ==================== UPDATED HELPER FUNCTIONS ====================
+// ==================== HELPER FUNCTIONS ====================
 const formatDuration = (minutes: number): string => {
   const hours = Math.floor(minutes / 60)
   const mins = minutes % 60
@@ -1086,7 +1003,7 @@ export default function CourseDetailPage() {
     }
   }, [slug, fetchCourseData])
 
-  // UPDATED: Enrollment handler with manual payment flow
+  // Enrollment handler with manual payment flow
   const enrollInCourse = useCallback(async () => {
     if (!course || isEnrolling) return
     
@@ -1444,7 +1361,7 @@ export default function CourseDetailPage() {
     }
   }, [course, toast])
 
-  // UPDATED: Payment success handler for manual requests
+  // Payment success handler for manual requests
   const handlePaymentRequestSuccess = useCallback((requestId: string) => {
     setShowPaymentRequestModal(false)
     
@@ -1457,14 +1374,14 @@ export default function CourseDetailPage() {
     fetchCourseData()
   }, [fetchCourseData, toast])
 
-  // Memoized components
+  // Memoized Enrollment Button
   const EnrollmentButton = useMemo(() => {
     if (!userProgress || userProgress.enrolled === false) {
       return (
         <Button
           onClick={enrollInCourse}
           disabled={!!isEnrolling}
-          className="group w-full h-12 text-sm font-semibold relative overflow-hidden bg-gradient-to-r from-emerald-600 via-teal-500 to-cyan-600 hover:from-emerald-700 hover:via-teal-600 hover:to-cyan-700 text-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-[1.02]"
+          className="group w-full h-12 text-sm font-semibold relative overflow-hidden bg-gradient-to-r from-red-600 via-orange-500 to-amber-600 hover:from-red-700 hover:via-orange-600 hover:to-amber-700 text-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-[1.02]"
         >
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
           
@@ -1477,7 +1394,7 @@ export default function CourseDetailPage() {
             ) : (
               <>
                 <Rocket className="w-4 h-4" />
-                <span>{course?.isFree ? 'Start Learning Free' : `Request Access - $${course?.price}`}</span>
+                <span>{course?.isFree ? 'Start Learning Free' : `Request Access - NPR ${course?.price.toLocaleString('ne-NP')}`}</span>
                 {!course?.isFree && <span className="text-xs opacity-80">(Manual Approval)</span>}
               </>
             )}
@@ -1490,7 +1407,7 @@ export default function CourseDetailPage() {
       return (
         <Button
           onClick={() => router.push(`/certificates/${course?._id}`)}
-          className="w-full h-12 text-sm font-semibold bg-gradient-to-r from-emerald-500 via-green-500 to-teal-600 hover:from-emerald-600 hover:via-green-600 hover:to-teal-700 text-white rounded-xl shadow-sm hover:shadow-md transition-all duration-300"
+          className="w-full h-12 text-sm font-semibold bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white rounded-xl shadow-sm hover:shadow-md transition-all duration-300"
         >
           <Award className="w-4 h-4 mr-2" />
           View Certificate
@@ -1503,7 +1420,7 @@ export default function CourseDetailPage() {
     return (
       <Button
         onClick={() => setIsLearningMode(true)}
-        className="w-full h-12 text-sm font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-cyan-600 hover:from-emerald-700 hover:via-teal-600 hover:to-cyan-700 text-white rounded-xl shadow-sm hover:shadow-md transition-all duration-300"
+        className="w-full h-12 text-sm font-semibold bg-gradient-to-r from-red-600 via-orange-500 to-amber-600 hover:from-red-700 hover:via-orange-600 hover:to-amber-700 text-white rounded-xl shadow-sm hover:shadow-md transition-all duration-300"
       >
         <Play className="w-4 h-4 mr-2" />
         {hasProgress ? 'Continue Learning' : 'Start Learning'}
@@ -1535,11 +1452,11 @@ export default function CourseDetailPage() {
               <div className="flex items-center gap-2 mt-1">
                 <div className="flex-1 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
                   <div 
-                    className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-500"
+                    className="h-full bg-gradient-to-r from-red-600 to-orange-500 transition-all duration-500"
                     style={{ width: `${Math.round((userProgress?.progress || 0) * 100)}%` }}
                   />
                 </div>
-                <span className="text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-500 bg-clip-text text-transparent">
+                <span className="text-xs font-bold bg-gradient-to-r from-red-600 to-orange-500 bg-clip-text text-transparent">
                   {Math.round((userProgress?.progress || 0) * 100)}%
                 </span>
               </div>
@@ -1585,7 +1502,7 @@ export default function CourseDetailPage() {
               <div className="p-6">
                 <div className="mb-6">
                   <div className="flex items-center gap-2 mb-4">
-                    <Badge className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white border-0 px-3 py-1 rounded-full">
+                    <Badge className="bg-gradient-to-r from-red-600 to-orange-500 text-white border-0 px-3 py-1 rounded-full">
                       Lesson {(() => {
                         let lessonCount = 0
                         for (const module of course!.modules) {
@@ -1623,7 +1540,7 @@ export default function CourseDetailPage() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4 text-slate-600 dark:text-slate-400">
                     <div className="flex items-center gap-2">
-                      <Clock className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                      <Clock className="w-5 h-5 text-red-600 dark:text-red-400" />
                       <span className="font-medium">{formatDuration(activeLesson.duration)}</span>
                     </div>
                   </div>
@@ -1633,8 +1550,8 @@ export default function CourseDetailPage() {
                     disabled={updatingProgress === activeLesson._id || completedLessons.has(activeLesson._id)}
                     className={`rounded-xl px-6 py-2.5 h-auto font-medium shadow-lg hover:shadow-xl transition-all ${
                       completedLessons.has(activeLesson._id) 
-                        ? 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white' 
-                        : 'bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-700 hover:to-teal-600 text-white'
+                        ? 'bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white' 
+                        : 'bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white'
                     }`}
                   >
                     {updatingProgress === activeLesson._id ? (
@@ -1660,8 +1577,8 @@ export default function CourseDetailPage() {
               <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-200/50 dark:border-slate-700/50 shadow-lg overflow-hidden">
                 <div className="p-6">
                   <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-                    <div className="p-2 bg-gradient-to-br from-emerald-100 to-teal-100 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-xl">
-                      <FileText className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                    <div className="p-2 bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20 rounded-xl">
+                      <FileText className="w-5 h-5 text-red-600 dark:text-red-400" />
                     </div>
                     Lesson Resources
                   </h3>
@@ -1670,13 +1587,13 @@ export default function CourseDetailPage() {
                     {activeLesson.resources.map((resource, index) => (
                       <div
                         key={index}
-                        className="p-4 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800/50 dark:to-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-emerald-300 dark:hover:border-emerald-600 transition-all duration-300 cursor-pointer group hover:shadow-md"
+                        className="p-4 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800/50 dark:to-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-red-300 dark:hover:border-red-600 transition-all duration-300 cursor-pointer group hover:shadow-md"
                         onClick={() => window.open(resource.url, '_blank')}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
-                            <div className="p-2 bg-gradient-to-br from-emerald-100 to-teal-100 dark:from-emerald-800 dark:to-teal-800 rounded-lg group-hover:scale-110 transition-transform">
-                              <Download className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                            <div className="p-2 bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-800 dark:to-orange-800 rounded-lg group-hover:scale-110 transition-transform">
+                              <Download className="w-4 h-4 text-red-600 dark:text-red-400" />
                             </div>
                             <div>
                               <p className="font-semibold text-slate-900 dark:text-white">
@@ -1687,7 +1604,7 @@ export default function CourseDetailPage() {
                               </p>
                             </div>
                           </div>
-                          <ExternalLink className="w-4 h-4 text-slate-400 dark:text-slate-500 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors" />
+                          <ExternalLink className="w-4 h-4 text-slate-400 dark:text-slate-500 group-hover:text-red-600 dark:group-hover:text-red-400 transition-colors" />
                         </div>
                       </div>
                     ))}
@@ -1711,7 +1628,7 @@ export default function CourseDetailPage() {
               <Button
                 onClick={() => navigateToLesson('next')}
                 disabled={!nextLesson}
-                className="flex-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-700 hover:to-teal-600 text-white text-sm py-3 h-auto shadow-lg hover:shadow-xl transition-all"
+                className="flex-1 rounded-xl bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white text-sm py-3 h-auto shadow-lg hover:shadow-xl transition-all"
               >
                 Next Lesson
                 <ArrowRight className="w-4 h-4 ml-2" />
@@ -1726,8 +1643,8 @@ export default function CourseDetailPage() {
             <div className="sticky top-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 p-6 shadow-sm">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-gradient-to-br from-emerald-100 to-teal-100 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-xl">
-                    <BookOpen className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                  <div className="p-2 bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20 rounded-xl">
+                    <BookOpen className="w-5 h-5 text-red-600 dark:text-red-400" />
                   </div>
                   <h2 className="text-xl font-bold text-slate-900 dark:text-white">Course Content</h2>
                 </div>
@@ -1745,19 +1662,16 @@ export default function CourseDetailPage() {
               {course?.modules.map((module, moduleIndex) => (
                 <div key={module._id} className="mb-4">
                   <div 
-                    className="p-4 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800/50 dark:to-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer hover:border-emerald-300 dark:hover:border-emerald-600 transition-all duration-300"
+                    className="p-4 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800/50 dark:to-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer hover:border-red-300 dark:hover:border-red-600 transition-all duration-300"
                     onClick={() => toggleModule(moduleIndex)}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-lg flex items-center justify-center">
+                        <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-orange-500 rounded-lg flex items-center justify-center">
                           <span className="font-bold text-white text-sm">{moduleIndex + 1}</span>
                         </div>
                         <div>
                           <h3 className="font-bold text-slate-900 dark:text-white">{module.title}</h3>
-                          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                            {module.chapters.length} chapters • {module.chapters.reduce((acc, ch) => acc + ch.lessons.length, 0)} lessons
-                          </p>
                         </div>
                       </div>
                       <ChevronDown className={`w-5 h-5 text-slate-500 dark:text-slate-400 transition-transform ${expandedModules.has(moduleIndex) ? 'rotate-180' : ''}`} />
@@ -1769,19 +1683,16 @@ export default function CourseDetailPage() {
                       {module.chapters.map((chapter, chapterIndex) => (
                         <div key={chapter._id} className="ml-4">
                           <div 
-                            className="p-4 bg-gradient-to-br from-slate-50/50 to-white/50 dark:from-slate-800/30 dark:to-slate-900/30 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer hover:border-emerald-300 dark:hover:border-emerald-600 transition-all duration-300"
+                            className="p-4 bg-gradient-to-br from-slate-50/50 to-white/50 dark:from-slate-800/30 dark:to-slate-900/30 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer hover:border-red-300 dark:hover:border-red-600 transition-all duration-300"
                             onClick={() => toggleChapter(chapter._id)}
                           >
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 bg-gradient-to-br from-emerald-400 to-teal-400 rounded-lg flex items-center justify-center">
+                                <div className="w-8 h-8 bg-gradient-to-br from-red-500 to-orange-400 rounded-lg flex items-center justify-center">
                                   <span className="font-bold text-white text-xs">{chapterIndex + 1}</span>
                                 </div>
                                 <div>
                                   <h4 className="font-semibold text-slate-900 dark:text-white">{chapter.title}</h4>
-                                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                                    {chapter.lessons.length} lessons
-                                  </p>
                                 </div>
                               </div>
                               <ChevronDown className={`w-5 h-5 text-slate-500 dark:text-slate-400 transition-transform ${expandedChapters.has(chapter._id) ? 'rotate-180' : ''}`} />
@@ -1799,10 +1710,10 @@ export default function CourseDetailPage() {
                                     key={lesson._id}
                                     className={`p-4 rounded-xl border cursor-pointer transition-all duration-300 ${
                                       isActive 
-                                        ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white border-transparent shadow-lg' 
+                                        ? 'bg-gradient-to-r from-red-600 to-orange-500 text-white border-transparent shadow-lg' 
                                         : isCompleted
-                                        ? 'bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border-emerald-200 dark:border-emerald-800'
-                                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-emerald-300 dark:hover:border-emerald-600 hover:shadow-md'
+                                        ? 'bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-green-200 dark:border-green-800'
+                                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-red-300 dark:hover:border-red-600 hover:shadow-md'
                                     }`}
                                     onClick={() => {
                                       handleLessonSelect(lesson)
@@ -1812,12 +1723,12 @@ export default function CourseDetailPage() {
                                     <div className="flex items-center justify-between">
                                       <div className="flex items-center gap-3">
                                         <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                                          isActive ? 'bg-white/20' : isCompleted ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-gradient-to-br from-emerald-100 to-teal-100 dark:from-emerald-900/20 dark:to-teal-900/20'
+                                          isActive ? 'bg-white/20' : isCompleted ? 'bg-green-100 dark:bg-green-900/30' : 'bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20'
                                         }`}>
                                           {isCompleted ? (
-                                            <Check className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                                            <Check className="w-5 h-5 text-green-600 dark:text-green-400" />
                                           ) : (
-                                            <PlayCircle className={`w-5 h-5 ${isActive ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'}`} />
+                                            <PlayCircle className={`w-5 h-5 ${isActive ? 'text-white' : 'text-red-600 dark:text-red-400'}`} />
                                           )}
                                         </div>
                                         <div className="flex-1">
@@ -1862,7 +1773,7 @@ export default function CourseDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 dark:from-slate-900 dark:via-slate-950 dark:to-emerald-900/10 pb-20">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-red-50/30 dark:from-slate-900 dark:via-slate-950 dark:to-red-900/10 pb-20">
       {/* Mobile Header */}
       <div className="sticky top-0 z-50 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border-b border-slate-200 dark:border-slate-800 shadow-sm">
         <div className="px-4 py-3 flex items-center justify-between">
@@ -1892,7 +1803,7 @@ export default function CourseDetailPage() {
               className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
               onClick={() => setIsBookmarked(!isBookmarked)}
             >
-              <Bookmark className={`w-4 h-4 ${isBookmarked ? 'fill-emerald-500 text-emerald-500' : 'text-slate-500 dark:text-slate-400'}`} />
+              <Bookmark className={`w-4 h-4 ${isBookmarked ? 'fill-red-500 text-red-500' : 'text-slate-500 dark:text-slate-400'}`} />
             </Button>
           </div>
         </div>
@@ -1908,14 +1819,14 @@ export default function CourseDetailPage() {
       {/* Hero Section */}
       <div className="relative overflow-hidden">
         {/* Background Gradient */}
-        <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-cyan-500/10" />
+        <div className="absolute inset-0 bg-gradient-to-r from-red-500/10 via-orange-500/10 to-amber-500/10" />
         
         <div className="relative px-4 pt-6 pb-8">
           {/* Preview Video */}
           {course.previewVideo && (
             <div className="mb-6">
               <div className="flex items-center gap-2 mb-3">
-                <div className="p-1.5 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-lg">
+                <div className="p-1.5 bg-gradient-to-br from-red-600 to-orange-500 rounded-lg">
                   <Play className="w-3.5 h-3.5 text-white" />
                 </div>
                 <h2 className="text-lg font-bold text-slate-900 dark:text-white">Course Preview</h2>
@@ -1936,23 +1847,23 @@ export default function CourseDetailPage() {
           <div className="space-y-4">
             {/* Badges */}
             <div className="flex flex-wrap gap-2">
-              <Badge className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white border-0 px-3 py-1 rounded-full">
+              <Badge className="bg-gradient-to-r from-red-600 to-orange-500 text-white border-0 px-3 py-1 rounded-full">
                 {course.category}
               </Badge>
               <Badge className={`px-3 py-1 rounded-full border-0 ${
-                course.level === 'beginner' ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white' :
+                course.level === 'beginner' ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white' :
                 course.level === 'intermediate' ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white' :
                 'bg-gradient-to-r from-rose-500 to-pink-500 text-white'
               }`}>
-                {course.level.charAt(0).toUpperCase() + course.level.slice(1)} Level
+                {course.level.charAt(0).toUpperCase() + course.level.slice(1)}
               </Badge>
               {course.isFree ? (
                 <Badge className="bg-gradient-to-r from-green-500 to-emerald-500 text-white border-0 px-3 py-1 rounded-full">
                   Free
                 </Badge>
               ) : (
-                <Badge className="bg-gradient-to-r from-blue-500 to-cyan-500 text-white border-0 px-3 py-1 rounded-full">
-                  ${course.price}
+                <Badge className="bg-gradient-to-r from-red-600 to-orange-500 text-white border-0 px-3 py-1 rounded-full">
+                  NPR {course.price.toLocaleString('ne-NP')}
                 </Badge>
               )}
               {course.isFeatured && (
@@ -1973,6 +1884,42 @@ export default function CourseDetailPage() {
               {course.shortDescription}
             </p>
 
+            {/* Payment Details Card */}
+            {!course.isFree && course.price > 0 && (
+              <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-200">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-lg">
+                    <CreditCard className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="font-bold text-blue-800 mb-2">Payment Information</h4>
+                    <div className="space-y-1 text-sm">
+                      <p className="text-gray-700">
+                        <span className="font-medium">Bank:</span> NMB Bank Limited
+                      </p>
+                      <p className="text-gray-700">
+                        <span className="font-medium">Account No:</span> 0260148342500016
+                      </p>
+                      <p className="text-gray-700">
+                        <span className="font-medium">Account Name:</span> SUTRA Designing and Dwarka Clothing
+                      </p>
+                      <p className="text-gray-700">
+                        <span className="font-medium">Branch:</span> Suryabinayak, Bhaktapur
+                      </p>
+                      <p className="text-gray-700">
+                        <span className="font-medium">Phone:</span> 9804304000
+                      </p>
+                    </div>
+                    <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded-md">
+                      <p className="text-xs text-yellow-700">
+                        💡 <span className="font-medium">Important:</span> Make payment in NPR only. Use your full name as reference.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Manual Enrollment Notice for Paid Courses */}
             {!course.isFree && course.price > 0 && (
               <div className="p-4 bg-gradient-to-r from-blue-50/80 to-cyan-50/80 dark:from-blue-900/20 dark:to-cyan-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
@@ -1990,10 +1937,10 @@ export default function CourseDetailPage() {
               </div>
             )}
 
-            {/* Instructor Info */}
-            <div className="flex items-center gap-3 p-3 bg-gradient-to-r from-emerald-50/50 to-teal-50/50 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-xl border border-slate-200 dark:border-slate-700">
+            {/* Instructor Info - REMOVED RATING AND STUDENT COUNT */}
+            <div className="flex items-center gap-3 p-3 bg-gradient-to-r from-red-50/50 to-orange-50/50 dark:from-red-900/20 dark:to-orange-900/20 rounded-xl border border-slate-200 dark:border-slate-700">
               <div className="relative">
-                <div className="w-12 h-12 rounded-xl overflow-hidden bg-gradient-to-br from-emerald-500 to-teal-500 p-0.5">
+                <div className="w-12 h-12 rounded-xl overflow-hidden bg-gradient-to-br from-red-600 to-orange-500 p-0.5">
                   <div className="w-full h-full rounded-lg overflow-hidden bg-white dark:bg-slate-800">
                     <img
                       src={course.instructor.avatar || '/placeholder-avatar.jpg'}
@@ -2010,57 +1957,7 @@ export default function CourseDetailPage() {
                 <p className="font-bold text-slate-900 dark:text-white">
                   {course.instructor.firstName} {course.instructor.lastName}
                 </p>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <div className="flex items-center">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <Star
-                        key={star}
-                        className={`w-3 h-3 ${
-                          star <= Math.floor(course.instructor.rating || 5)
-                            ? 'fill-amber-400 text-amber-400'
-                            : 'text-slate-300 dark:text-slate-600'
-                        }`}
-                      />
-                    ))}
-                  </div>
-                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{course.instructor.rating?.toFixed(1) || '5.0'}</span>
-                  <span className="text-xs text-slate-500 dark:text-slate-400">• Expert Instructor</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Stats Grid */}
-            <div className="grid grid-cols-4 gap-2">
-              <div className="text-center p-2 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-xl border border-slate-200 dark:border-slate-700">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-                  <span className="font-bold text-slate-900 dark:text-white">{course.averageRating.toFixed(1)}</span>
-                </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Rating</p>
-              </div>
-              
-              <div className="text-center p-2 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-xl border border-slate-200 dark:border-slate-700">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  <Users className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                  <span className="font-bold text-slate-900 dark:text-white">{course.totalStudents}</span>
-                </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Students</p>
-              </div>
-              
-              <div className="text-center p-2 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-xl border border-slate-200 dark:border-slate-700">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  <BookOpen className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-                  <span className="font-bold text-slate-900 dark:text-white">{course.totalLessons}</span>
-                </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Lessons</p>
-              </div>
-              
-              <div className="text-center p-2 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-xl border border-slate-200 dark:border-slate-700">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  <Clock className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-                  <span className="font-bold text-slate-900 dark:text-white">{formatDuration(course.totalDuration)}</span>
-                </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Duration</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">Expert Instructor</p>
               </div>
             </div>
           </div>
@@ -2083,7 +1980,7 @@ export default function CourseDetailPage() {
                 onClick={() => setActiveTab(tab.id as any)}
                 className={`flex items-center gap-2 px-4 py-3 font-medium border-b-2 whitespace-nowrap text-sm transition-all ${
                   activeTab === tab.id
-                    ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400 bg-gradient-to-r from-emerald-50 to-emerald-50/50 dark:from-emerald-900/20 dark:to-emerald-900/10'
+                    ? 'border-red-600 text-red-600 dark:text-red-400 bg-gradient-to-r from-red-50 to-red-50/50 dark:from-red-900/20 dark:to-red-900/10'
                     : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
                 }`}
               >
@@ -2106,6 +2003,7 @@ export default function CourseDetailPage() {
                   title="Course Description" 
                   description="What you'll learn in this course"
                   icon={BookOpen}
+                  color="from-red-600 to-orange-500"
                 />
                 <div className="prose prose-sm dark:prose-invert max-w-none">
                   <p className="text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-line">
@@ -2120,13 +2018,13 @@ export default function CourseDetailPage() {
                   title="What You'll Learn" 
                   description="Key skills and knowledge you'll gain"
                   icon={Target}
-                  color="from-emerald-500 to-green-500"
+                  color="from-red-600 to-orange-500"
                 />
                 <div className="grid grid-cols-1 gap-3">
                   {course.learningOutcomes.map((outcome, index) => (
                     <div key={index} className="flex items-start gap-3 p-3 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800/50 dark:to-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700">
-                      <div className="w-6 h-6 bg-gradient-to-br from-emerald-100 to-green-100 dark:from-emerald-900/30 dark:to-green-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                      <div className="w-6 h-6 bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/30 dark:to-orange-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <Check className="w-3 h-3 text-red-600 dark:text-red-400" />
                       </div>
                       <span className="font-medium text-slate-900 dark:text-white">{outcome}</span>
                     </div>
@@ -2145,8 +2043,8 @@ export default function CourseDetailPage() {
                 <div className="grid grid-cols-1 gap-3">
                   {course.requirements.map((requirement, index) => (
                     <div key={index} className="flex items-center gap-3 p-3 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800/50 dark:to-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700">
-                      <div className="w-8 h-8 bg-gradient-to-br from-emerald-100 to-teal-100 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-lg flex items-center justify-center">
-                        <span className="font-bold text-emerald-700 dark:text-emerald-400 text-sm">{index + 1}</span>
+                      <div className="w-8 h-8 bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20 rounded-lg flex items-center justify-center">
+                        <span className="font-bold text-red-700 dark:text-red-400 text-sm">{index + 1}</span>
                       </div>
                       <span className="font-medium text-slate-900 dark:text-white">{requirement}</span>
                     </div>
@@ -2161,20 +2059,20 @@ export default function CourseDetailPage() {
               <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-200/50 dark:border-slate-700/50 shadow-lg p-6">
                 <div className="flex items-center justify-between mb-6">
                   <div className="flex items-center gap-3">
-                    <div className="p-2 bg-gradient-to-br from-purple-100 to-pink-100 dark:from-purple-900/20 dark:to-pink-900/20 rounded-xl">
-                      <GraduationCap className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                    <div className="p-2 bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20 rounded-xl">
+                      <GraduationCap className="w-5 h-5 text-red-600 dark:text-red-400" />
                     </div>
                     <div>
                       <h3 className="text-xl font-bold text-slate-900 dark:text-white">Course Curriculum</h3>
                       <p className="text-slate-600 dark:text-slate-400 mt-1">
-                        {course.totalLessons} lessons • {course.modules.length} modules • {formatDuration(course.totalDuration)} total
+                        {course.totalLessons} lessons • {course.modules.length} modules
                       </p>
                     </div>
                   </div>
                   {userProgress?.enrolled && (
                     <div className="text-right">
                       <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Your Progress</p>
-                      <p className="text-2xl font-bold bg-gradient-to-r from-emerald-600 to-teal-500 bg-clip-text text-transparent">
+                      <p className="text-2xl font-bold bg-gradient-to-r from-red-600 to-orange-500 bg-clip-text text-transparent">
                         {Math.round(userProgress.progress * 100)}%
                       </p>
                     </div>
@@ -2193,23 +2091,18 @@ export default function CourseDetailPage() {
                         >
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-xl flex items-center justify-center">
+                              <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-orange-500 rounded-xl flex items-center justify-center">
                                 <span className="font-bold text-white text-base">{moduleIndex + 1}</span>
                               </div>
                               <div className="flex-1">
                                 <h4 className="font-bold text-slate-900 dark:text-white">{module.title}</h4>
-                                <div className="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400 mt-1">
-                                  <span>{module.chapters.length} chapters</span>
-                                  <span>•</span>
-                                  <span>{module.chapters.reduce((acc, ch) => acc + ch.lessons.length, 0)} lessons</span>
-                                </div>
                               </div>
                             </div>
                             <div className="flex items-center gap-3">
                               {userProgress?.enrolled && (
                                 <div className="text-right hidden sm:block">
                                   <div className="text-xs font-medium text-slate-500 dark:text-slate-400">Progress</div>
-                                  <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{Math.round(moduleProgress)}%</div>
+                                  <div className="text-sm font-bold text-red-600 dark:text-red-400">{Math.round(moduleProgress)}%</div>
                                 </div>
                               )}
                               <ChevronDown className={`w-5 h-5 text-slate-500 dark:text-slate-400 transition-transform duration-300 ${expandedModules.has(moduleIndex) ? 'rotate-180' : ''}`} />
@@ -2226,26 +2119,23 @@ export default function CourseDetailPage() {
                                 return (
                                   <div key={chapter._id} className="ml-4">
                                     <div 
-                                      className="p-4 bg-gradient-to-br from-white/50 to-slate-50/30 dark:from-slate-800/20 dark:to-slate-900/10 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer hover:border-emerald-300 dark:hover:border-emerald-600 transition-all duration-300"
+                                      className="p-4 bg-gradient-to-br from-white/50 to-slate-50/30 dark:from-slate-800/20 dark:to-slate-900/10 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer hover:border-red-300 dark:hover:border-red-600 transition-all duration-300"
                                       onClick={() => toggleChapter(chapter._id)}
                                     >
                                       <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-3">
-                                          <div className="w-8 h-8 bg-gradient-to-br from-emerald-400 to-teal-400 rounded-lg flex items-center justify-center">
+                                          <div className="w-8 h-8 bg-gradient-to-br from-red-500 to-orange-400 rounded-lg flex items-center justify-center">
                                             <span className="font-bold text-white text-sm">{chapterIndex + 1}</span>
                                           </div>
                                           <div className="flex-1">
                                             <h5 className="font-bold text-slate-900 dark:text-white">{chapter.title}</h5>
-                                            <div className="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400 mt-1">
-                                              <span>{chapter.lessons.length} lessons</span>
-                                            </div>
                                           </div>
                                         </div>
                                         <div className="flex items-center gap-3">
                                           {userProgress?.enrolled && (
                                             <div className="text-right hidden sm:block">
                                               <div className="text-xs font-medium text-slate-500 dark:text-slate-400">Progress</div>
-                                              <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{Math.round(chapterProgress)}%</div>
+                                              <div className="text-sm font-bold text-red-600 dark:text-red-400">{Math.round(chapterProgress)}%</div>
                                             </div>
                                           )}
                                           <ChevronDown className={`w-5 h-5 text-slate-500 dark:text-slate-400 transition-transform duration-300 ${expandedChapters.has(chapter._id) ? 'rotate-180' : ''}`} />
@@ -2267,13 +2157,13 @@ export default function CourseDetailPage() {
                                                 <div className="flex items-center gap-3">
                                                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
                                                     isCompleted 
-                                                      ? 'bg-gradient-to-br from-emerald-100 to-teal-100 dark:from-emerald-900/30 dark:to-teal-900/30' 
-                                                      : 'bg-gradient-to-br from-emerald-100 to-teal-100 dark:from-emerald-900/20 dark:to-teal-900/20'
+                                                      ? 'bg-gradient-to-br from-green-100 to-emerald-100 dark:from-green-900/30 dark:to-emerald-900/30' 
+                                                      : 'bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20'
                                                   }`}>
                                                     {isCompleted ? (
-                                                      <Check className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                                                      <Check className="w-5 h-5 text-green-600 dark:text-green-400" />
                                                     ) : (
-                                                      <PlayCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                                                      <PlayCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
                                                     )}
                                                   </div>
                                                   <div className="flex-1 min-w-0">
@@ -2302,8 +2192,8 @@ export default function CourseDetailPage() {
                                                     }}
                                                     className={`rounded-lg px-4 py-2 h-auto ${
                                                       isCompleted 
-                                                        ? 'bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-gradient-to-r hover:from-emerald-100 hover:to-teal-100 dark:hover:from-emerald-900/30 dark:hover:to-teal-900/30' 
-                                                        : 'bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-700 hover:to-teal-600 text-white'
+                                                        ? 'bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800 hover:bg-gradient-to-r hover:from-green-100 hover:to-emerald-100 dark:hover:from-green-900/30 dark:hover:to-emerald-900/30' 
+                                                        : 'bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white'
                                                     }`}
                                                   >
                                                     {isCompleted ? 'Review' : 'Start'}
@@ -2418,13 +2308,13 @@ export default function CourseDetailPage() {
                       value={newRating.review}
                       onChange={(e) => setNewRating(prev => ({ ...prev, review: e.target.value }))}
                       placeholder="Share your learning experience..."
-                      className="min-h-[100px] rounded-xl text-sm border-slate-300 dark:border-slate-700 focus:border-emerald-500 focus:ring-emerald-500"
+                      className="min-h-[100px] rounded-xl text-sm border-slate-300 dark:border-slate-700 focus:border-red-500 focus:ring-red-500"
                     />
                   </div>
                   <Button
                     onClick={submitRating}
                     disabled={isSubmittingRating || !newRating.rating}
-                    className="w-full bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-700 hover:to-teal-600 text-white rounded-xl py-3 font-medium shadow-lg hover:shadow-xl transition-all"
+                    className="w-full bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white rounded-xl py-3 font-medium shadow-lg hover:shadow-xl transition-all"
                   >
                     {isSubmittingRating ? (
                       <>
@@ -2443,8 +2333,8 @@ export default function CourseDetailPage() {
                 {course.ratings.map((rating) => (
                   <div key={rating._id} className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-200/50 dark:border-slate-700/50 shadow-lg p-6">
                     <div className="flex items-start gap-4">
-                      <div className="w-12 h-12 bg-gradient-to-br from-emerald-100 to-teal-100 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-xl flex items-center justify-center flex-shrink-0">
-                        <span className="font-bold text-emerald-700 dark:text-emerald-400 text-lg">
+                      <div className="w-12 h-12 bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <span className="font-bold text-red-700 dark:text-red-400 text-lg">
                           {rating.user.firstName.charAt(0)}
                         </span>
                       </div>
@@ -2488,7 +2378,7 @@ export default function CourseDetailPage() {
               <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-200/50 dark:border-slate-700/50 shadow-lg p-6">
                 <div className="flex items-start gap-4 mb-6">
                   <div className="relative">
-                    <div className="w-16 h-16 rounded-xl overflow-hidden bg-gradient-to-br from-emerald-500 to-teal-500 p-0.5">
+                    <div className="w-16 h-16 rounded-xl overflow-hidden bg-gradient-to-br from-red-600 to-orange-500 p-0.5">
                       <div className="w-full h-full rounded-lg overflow-hidden bg-white dark:bg-slate-800">
                         <img
                           src={course.instructor.avatar || '/placeholder-avatar.jpg'}
@@ -2508,18 +2398,6 @@ export default function CourseDetailPage() {
                     <p className="text-slate-600 dark:text-slate-400 mb-3">
                       Expert Instructor • {course.instructor.expertise?.[0] || 'Industry Leader'}
                     </p>
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center gap-1.5">
-                        <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-                        <span className="font-bold text-slate-900 dark:text-white">{course.instructor.rating?.toFixed(1) || '5.0'}</span>
-                        <span className="text-sm text-slate-500 dark:text-slate-400">Rating</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <Users className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                        <span className="font-bold text-slate-900 dark:text-white">{course.instructor.totalStudents?.toLocaleString() || '10K+'}</span>
-                        <span className="text-sm text-slate-500 dark:text-slate-400">Students</span>
-                      </div>
-                    </div>
                   </div>
                 </div>
 
@@ -2529,37 +2407,6 @@ export default function CourseDetailPage() {
                     <p className="text-slate-700 dark:text-slate-300 leading-relaxed">
                       {course.instructor.bio || `${course.instructor.firstName} is an experienced instructor with years of hands-on experience in the field. They are passionate about sharing knowledge and helping students achieve their goals through practical, real-world learning.`}
                     </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Stats Cards */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-4 bg-gradient-to-br from-emerald-50/50 to-teal-50/50 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-xl border border-slate-200 dark:border-slate-700">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-gradient-to-br from-emerald-100 to-teal-100 dark:from-emerald-800 dark:to-teal-800 rounded-lg">
-                      <TrendingUpIcon className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-slate-900 dark:text-white text-lg">
-                        {course.instructor.totalStudents?.toLocaleString() || '10K+'}
-                      </p>
-                      <p className="text-sm text-slate-600 dark:text-slate-400">Total Students</p>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="p-4 bg-gradient-to-br from-purple-50/50 to-pink-50/50 dark:from-purple-900/20 dark:to-pink-900/20 rounded-xl border border-slate-200 dark:border-slate-700">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-gradient-to-br from-purple-100 to-pink-100 dark:from-purple-800 dark:to-pink-800 rounded-lg">
-                      <Award className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-slate-900 dark:text-white text-lg">
-                        {course.instructor.rating?.toFixed(1) || '5.0'}
-                      </p>
-                      <p className="text-sm text-slate-600 dark:text-slate-400">Average Rating</p>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -2577,7 +2424,7 @@ export default function CourseDetailPage() {
                   ]).map((expertise, index) => (
                     <Badge 
                       key={index}
-                      className="bg-gradient-to-r from-emerald-100 to-teal-100 dark:from-emerald-900/30 dark:to-teal-900/30 text-emerald-700 dark:text-emerald-400 border-0 px-3 py-1.5 rounded-lg text-sm font-medium"
+                      className="bg-gradient-to-r from-red-100 to-orange-100 dark:from-red-900/30 dark:to-orange-900/30 text-red-700 dark:text-red-400 border-0 px-3 py-1.5 rounded-lg text-sm font-medium"
                     >
                       {expertise}
                     </Badge>
@@ -2586,53 +2433,6 @@ export default function CourseDetailPage() {
               </div>
             </div>
           )}
-        </div>
-      </div>
-
-      {/* Features Section */}
-      <div className="px-4 py-8 bg-gradient-to-br from-emerald-50/50 to-teal-50/50 dark:from-emerald-900/10 dark:to-teal-900/10 border-y border-slate-200 dark:border-slate-800">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center gap-2 mb-3">
-              <div className="p-2 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-lg">
-                <Sparkles className="w-5 h-5 text-white" />
-              </div>
-              <h3 className="text-2xl font-bold text-slate-900 dark:text-white">Why Choose This Course?</h3>
-            </div>
-            <p className="text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
-              Experience learning like never before with our comprehensive features designed for your success
-            </p>
-          </div>
-          
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <FeatureCard
-              icon={ShieldCheck}
-              title="Lifetime Access"
-              description="Learn at your own pace with lifetime access to course materials"
-              color="emerald"
-            />
-            
-            <FeatureCard
-              icon={Award}
-              title="Certificate"
-              description="Earn a verifiable certificate upon completion"
-              color="green"
-            />
-            
-            <FeatureCard
-              icon={DownloadCloud}
-              title="Downloadable Resources"
-              description="Access and download all course resources"
-              color="purple"
-            />
-            
-            <FeatureCard
-              icon={Users2}
-              title="Community Access"
-              description="Join our exclusive learning community"
-              color="amber"
-            />
-          </div>
         </div>
       </div>
 
@@ -2646,7 +2446,7 @@ export default function CourseDetailPage() {
               </div>
               {!userProgress?.enrolled && !course.isFree && (
                 <div className="flex items-center gap-2 mt-1">
-                  <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">${course.price}</p>
+                  <p className="text-lg font-bold text-red-600 dark:text-red-400">NPR {course.price.toLocaleString('ne-NP')}</p>
                   {course.manualEnrollments > 0 && (
                     <Badge className="bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs px-2 py-0.5">
                       {course.manualEnrollments}+ enrolled
@@ -2671,7 +2471,7 @@ export default function CourseDetailPage() {
             exit={{ opacity: 0, y: 50 }}
             className="fixed bottom-20 left-1/2 transform -translate-x-1/2 z-50"
           >
-            <div className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white px-6 py-3 rounded-xl shadow-2xl flex items-center gap-2">
+            <div className="bg-gradient-to-r from-red-600 to-orange-500 text-white px-6 py-3 rounded-xl shadow-2xl flex items-center gap-2">
               <CheckCircle className="w-5 h-5" />
               <span className="font-medium">Successfully Enrolled!</span>
             </div>
