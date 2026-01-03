@@ -158,7 +158,7 @@ export default function PaymentRequestForm({
 
       console.log('📝 Submitting payment request:', paymentRequestData);
       
-      const response = await fetch(`/api/courses/${courseId}/payment/initiate`, {
+      const response = await fetch(`/api/courses/${courseId}/payment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(paymentRequestData)

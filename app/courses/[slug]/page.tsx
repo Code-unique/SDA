@@ -332,8 +332,7 @@ const ErrorState = memo(({ error, onRetry }: { error: string, onRetry: () => voi
 ))
 ErrorState.displayName = 'ErrorState'
 
-// ==================== UPDATED PAYMENT REQUEST MODAL WITH BANK DETAILS ====================
-
+// ==================== UPDATED PAYMENT REQUEST MODAL ====================
 const PaymentRequestModal = memo(({
   course,
   isOpen,
@@ -357,7 +356,6 @@ const PaymentRequestModal = memo(({
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
-      // Validate file size (max 10MB)
       if (file.size > 10 * 1024 * 1024) {
         toast({
           title: "Error",
@@ -366,7 +364,6 @@ const PaymentRequestModal = memo(({
         })
         return
       }
-      // Validate file type
       const validTypes = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf']
       if (!validTypes.includes(file.type)) {
         toast({
@@ -403,28 +400,17 @@ const PaymentRequestModal = memo(({
         formDataObj.append('file', formData.paymentProof)
         formDataObj.append('courseId', course._id)
         
-        console.log('📤 Uploading payment proof with FormData:')
-        console.log('FormData entries:')
-        for (let [key, value] of formDataObj.entries()) {
-          console.log(key, value instanceof File ? `${value.name} (${value.size} bytes)` : value)
-        }
-        
         const uploadResponse = await fetch('/api/upload/payment-proof', {
           method: 'POST',
           body: formDataObj
         })
         
-        console.log('📥 Upload response status:', uploadResponse.status)
-        
         if (!uploadResponse.ok) {
           const errorText = await uploadResponse.text()
-          console.error('❌ Upload error:', errorText)
           throw new Error('Failed to upload payment proof')
         }
         
         const uploadData = await uploadResponse.json()
-        console.log('✅ Upload success:', uploadData)
-        
         proofUrl = uploadData.fileUrl
         proofFileName = uploadData.fileName || formData.paymentProof.name
       }
@@ -464,7 +450,7 @@ const PaymentRequestModal = memo(({
         })
       }
     } catch (error) {
-      console.error('❌ Error submitting payment request:', error)
+      console.error('Error submitting payment request:', error)
       toast({
         title: "Error",
         description: "An error occurred. Please try again.",
@@ -490,7 +476,7 @@ const PaymentRequestModal = memo(({
         
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-4">
-            {/* UPDATED: Payment Details Card with NPR */}
+            {/* Payment Details Card */}
             <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
               <h3 className="font-bold text-lg mb-4 text-blue-800 flex items-center gap-2">
                 <CreditCard className="h-5 w-5" />
@@ -578,7 +564,7 @@ const PaymentRequestModal = memo(({
               </div>
             </div>
 
-            {/* UPDATED: Payment Method with Nepali options */}
+            {/* Payment Method */}
             <div className="space-y-2">
               <Label htmlFor="payment-method">Payment Method *</Label>
               <Select
@@ -600,7 +586,7 @@ const PaymentRequestModal = memo(({
               </Select>
             </div>
 
-            {/* UPDATED: Transaction ID with better description */}
+            {/* Transaction ID */}
             <div className="space-y-2">
               <Label htmlFor="transaction-id">Transaction ID (Required for digital payments)</Label>
               <Input
@@ -672,7 +658,7 @@ const PaymentRequestModal = memo(({
               />
             </div>
 
-            {/* UPDATED: Important Notice */}
+            {/* Important Notice */}
             <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
               <h4 className="font-semibold text-yellow-800 dark:text-yellow-300 mb-2">Important Information</h4>
               <ul className="text-sm text-yellow-700 dark:text-yellow-400 space-y-1">
@@ -716,117 +702,6 @@ const PaymentRequestModal = memo(({
   )
 })
 PaymentRequestModal.displayName = 'PaymentRequestModal'
-
-const PaymentStatusBadge = memo(({ status }: { status: string }) => {
-  const getStatusConfig = (status: string) => {
-    switch (status) {
-      case 'pending':
-        return {
-          text: 'Pending Review',
-          color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
-          icon: Clock
-        }
-      case 'approved':
-        return {
-          text: 'Approved',
-          color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
-          icon: CheckCircle
-        }
-      case 'rejected':
-        return {
-          text: 'Rejected',
-          color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
-          icon: AlertCircle
-        }
-      case 'cancelled':
-        return {
-          text: 'Cancelled',
-          color: 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300',
-          icon: X
-        }
-      default:
-        return {
-          text: status,
-          color: 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300',
-          icon: HelpCircle
-        }
-    }
-  }
-
-  const config = getStatusConfig(status)
-  const Icon = config.icon
-
-  return (
-    <Badge className={`${config.color} flex items-center gap-1 px-2 py-1 rounded-full`}>
-      <Icon className="w-3 h-3" />
-      {config.text}
-    </Badge>
-  )
-})
-PaymentStatusBadge.displayName = 'PaymentStatusBadge'
-
-const PaymentRequestStatus = memo(({ courseId }: { courseId: string }) => {
-  const [requests, setRequests] = useState<PaymentRequest[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetchPaymentRequests()
-  }, [courseId])
-
-  const fetchPaymentRequests = async () => {
-    try {
-      const response = await fetch(`/api/courses/${courseId}/payment/initiate`)
-      const data = await response.json()
-      if (response.ok) {
-        setRequests(data.requests || [])
-      }
-    } catch (error) {
-      console.error('Error fetching payment requests:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center p-4">
-        <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-      </div>
-    )
-  }
-
-  if (requests.length === 0) {
-    return null
-  }
-
-  const latestRequest = requests[0]
-
-  return (
-    <div className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-      <div className="flex items-center gap-3">
-        <div className="p-2 bg-gradient-to-r from-blue-100 to-cyan-100 dark:from-blue-800 dark:to-cyan-800 rounded-lg">
-          <FileCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-        </div>
-        <div className="flex-1">
-          <div className="flex items-center justify-between">
-            <p className="font-medium text-slate-900 dark:text-white">Payment Request Status</p>
-            <PaymentStatusBadge status={latestRequest.status} />
-          </div>
-          <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-            Submitted on {new Date(latestRequest.createdAt).toLocaleDateString()}
-            {latestRequest.transactionId && ` • Transaction ID: ${latestRequest.transactionId}`}
-          </p>
-          {latestRequest.status === 'pending' && (
-            <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
-              ⏳ Your request is under review. You'll be notified once approved.
-            </p>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-})
-PaymentRequestStatus.displayName = 'PaymentRequestStatus'
 
 // ==================== HELPER FUNCTIONS ====================
 const formatDuration = (minutes: number): string => {
@@ -1011,7 +886,6 @@ export default function CourseDetailPage() {
     setError(null)
     
     try {
-      console.log('📤 Attempting to enroll in course:', course._id);
       const response = await fetch(`/api/courses/${course._id}/enroll`, {
         method: 'POST',
         headers: {
@@ -1020,29 +894,19 @@ export default function CourseDetailPage() {
         credentials: 'include'
       })
 
-      console.log('📥 Enrollment response status:', response.status);
       const result = await response.json();
-      console.log('📥 Enrollment response data:', result);
 
       if (response.status === 402 && result.requiresPayment) {
-        console.log('💳 Payment required, showing payment request modal');
         setShowPaymentRequestModal(true);
         setIsEnrolling(null);
         return;
       }
 
       if (!response.ok) {
-        console.error('❌ Server error response:', {
-          status: response.status,
-          statusText: response.statusText,
-          result
-        });
         throw new Error(result.error || `Failed to enroll (${response.status})`);
       }
 
       if (result.enrolled || result.alreadyEnrolled) {
-        console.log('✅ Enrollment successful or already enrolled');
-        
         const newProgress: UserProgress = {
           _id: result.progress?._id || `temp-${course._id}`,
           courseId: course._id,
@@ -1072,12 +936,11 @@ export default function CourseDetailPage() {
           setTimeout(() => setShowEnrollmentSuccess(false), 3000);
         }
       } else {
-        console.error('❌ Unexpected response structure:', result);
         throw new Error('Unexpected response from server');
       }
 
     } catch (err: any) {
-      console.error('❌ Error enrolling:', err);
+      console.error('Error enrolling:', err);
       
       if (err.message.includes('Unauthorized') || err.message.includes('401')) {
         toast({
@@ -1809,13 +1672,6 @@ export default function CourseDetailPage() {
         </div>
       </div>
 
-      {/* Payment Request Status Banner */}
-      {!userProgress?.enrolled && !course.isFree && course.price > 0 && (
-        <div className="px-4 pt-4">
-          <PaymentRequestStatus courseId={course._id} />
-        </div>
-      )}
-
       {/* Hero Section */}
       <div className="relative overflow-hidden">
         {/* Background Gradient */}
@@ -1884,60 +1740,7 @@ export default function CourseDetailPage() {
               {course.shortDescription}
             </p>
 
-            {/* Payment Details Card */}
-            {!course.isFree && course.price > 0 && (
-              <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-200">
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-lg">
-                    <CreditCard className="w-5 h-5 text-blue-600" />
-                  </div>
-                  <div className="flex-1">
-                    <h4 className="font-bold text-blue-800 mb-2">Payment Information</h4>
-                    <div className="space-y-1 text-sm">
-                      <p className="text-gray-700">
-                        <span className="font-medium">Bank:</span> NMB Bank Limited
-                      </p>
-                      <p className="text-gray-700">
-                        <span className="font-medium">Account No:</span> 0260148342500016
-                      </p>
-                      <p className="text-gray-700">
-                        <span className="font-medium">Account Name:</span> SUTRA Designing and Dwarka Clothing
-                      </p>
-                      <p className="text-gray-700">
-                        <span className="font-medium">Branch:</span> Suryabinayak, Bhaktapur
-                      </p>
-                      <p className="text-gray-700">
-                        <span className="font-medium">Phone:</span> 9804304000
-                      </p>
-                    </div>
-                    <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded-md">
-                      <p className="text-xs text-yellow-700">
-                        💡 <span className="font-medium">Important:</span> Make payment in NPR only. Use your full name as reference.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Manual Enrollment Notice for Paid Courses */}
-            {!course.isFree && course.price > 0 && (
-              <div className="p-4 bg-gradient-to-r from-blue-50/80 to-cyan-50/80 dark:from-blue-900/20 dark:to-cyan-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-gradient-to-r from-blue-100 to-cyan-100 dark:from-blue-800 dark:to-cyan-800 rounded-lg flex-shrink-0">
-                    <AlertTriangle className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                  </div>
-                  <div className="flex-1">
-                    <h4 className="font-bold text-slate-900 dark:text-white mb-1">Manual Enrollment Process</h4>
-                    <p className="text-sm text-slate-600 dark:text-slate-400">
-                      This course requires manual payment approval. After submitting your payment request, an admin will review it within 24-48 hours. You'll receive an email notification once approved.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Instructor Info - REMOVED RATING AND STUDENT COUNT */}
+            {/* Instructor Info */}
             <div className="flex items-center gap-3 p-3 bg-gradient-to-r from-red-50/50 to-orange-50/50 dark:from-red-900/20 dark:to-orange-900/20 rounded-xl border border-slate-200 dark:border-slate-700">
               <div className="relative">
                 <div className="w-12 h-12 rounded-xl overflow-hidden bg-gradient-to-br from-red-600 to-orange-500 p-0.5">

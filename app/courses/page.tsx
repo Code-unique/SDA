@@ -8,7 +8,6 @@ import { Badge } from '@/components/ui/badge'
 import { useToast } from "@/components/ui/use-toast"
 import { 
   Star, 
-  Play, 
   Search,
   Filter,
   Upload,
@@ -43,7 +42,10 @@ import {
   Building,
   MapPin,
   Phone,
-  User
+  User,
+  BookOpen,
+  BarChart3,
+  Target as TargetIcon
 } from 'lucide-react'
 import {
   Dialog,
@@ -62,6 +64,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
 import Image from 'next/image'
 
 interface S3Asset {
@@ -116,7 +125,7 @@ interface FilterState {
   sort: 'popular' | 'newest' | 'rating' | 'price-low' | 'price-high'
 }
 
-// Payment Request Modal Component - UPDATED VERSION
+// Payment Request Modal Component
 const PaymentRequestModal = ({
   course,
   isOpen,
@@ -184,14 +193,10 @@ const PaymentRequestModal = ({
         formDataObj.append('file', formData.paymentProof)
         formDataObj.append('courseId', course._id)
         
-        console.log('📤 Uploading payment proof...')
-        
         const uploadResponse = await fetch('/api/upload/payment-proof', {
           method: 'POST',
           body: formDataObj
         })
-        
-        console.log('📥 Upload response status:', uploadResponse.status)
         
         if (!uploadResponse.ok) {
           let errorMessage = 'Failed to upload payment proof'
@@ -206,7 +211,6 @@ const PaymentRequestModal = ({
         }
         
         const uploadData = await uploadResponse.json()
-        console.log('✅ Upload success:', uploadData)
         
         if (!uploadData.success) {
           throw new Error(uploadData.error || 'Upload failed')
@@ -214,10 +218,6 @@ const PaymentRequestModal = ({
         
         proofUrl = uploadData.fileUrl
         proofFileName = uploadData.fileName || formData.paymentProof.name
-        
-        if (!proofUrl) {
-          throw new Error('No file URL returned from upload')
-        }
       }
 
       // Prepare payment request data
@@ -226,20 +226,16 @@ const PaymentRequestModal = ({
         notes: formData.notes
       }
 
-      // Add transaction ID if provided
       if (formData.transactionId.trim()) {
         paymentRequestData.transactionId = formData.transactionId
       }
 
-      // Add payment proof if uploaded
       if (proofUrl) {
         paymentRequestData.paymentProof = {
           url: proofUrl,
           fileName: proofFileName || formData.paymentProof?.name || 'payment_proof'
         }
       }
-
-      console.log('📝 Submitting payment request:', paymentRequestData)
       
       const response = await fetch(`/api/courses/${course._id}/payment/initiate`, {
         method: 'POST',
@@ -251,14 +247,10 @@ const PaymentRequestModal = ({
         body: JSON.stringify(paymentRequestData)
       })
 
-      console.log('📥 Payment initiation response status:', response.status)
-
-      // Try to parse response as JSON first
       let data
       try {
         data = await response.json()
       } catch (error) {
-        console.error('Failed to parse response as JSON:', error)
         throw new Error('Invalid response from server')
       }
 
@@ -272,20 +264,15 @@ const PaymentRequestModal = ({
           description: "Admin will review your request within 24-48 hours. You'll be notified via email.",
         })
         
-        // Call onSuccess with the request ID
         const requestId = data.requestId || data._id || data.id
         if (requestId) {
           onSuccess(requestId)
         } else {
-          console.warn('No request ID returned from server:', data)
           onSuccess('temp-id-' + Date.now())
         }
         
         onClose()
       } else {
-        // Handle server error response
-        console.error('❌ Payment request failed:', data)
-        
         let errorMessage = 'Failed to submit payment request'
         if (data.error) {
           errorMessage = data.error
@@ -308,8 +295,6 @@ const PaymentRequestModal = ({
         })
       }
     } catch (error) {
-      console.error('❌ Error submitting payment request:', error)
-      
       let errorMessage = 'An error occurred. Please try again.'
       if (error instanceof Error) {
         errorMessage = error.message
@@ -327,9 +312,9 @@ const PaymentRequestModal = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto sm:max-w-lg md:max-w-xl lg:max-w-2xl">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+          <DialogTitle className="flex items-center gap-2 text-xl">
             <CreditCard className="h-5 w-5" />
             Request Course Access
           </DialogTitle>
@@ -341,7 +326,7 @@ const PaymentRequestModal = ({
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-4">
             {/* Payment Details Card */}
-            <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+            <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-200">
               <h3 className="font-bold text-lg mb-4 text-blue-800 flex items-center gap-2">
                 <CreditCard className="h-5 w-5" />
                 Payment Details (NPR)
@@ -405,24 +390,17 @@ const PaymentRequestModal = ({
                     <p className="font-semibold text-gray-900">9804304000</p>
                   </div>
                 </div>
-                
-                <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-                  <p className="text-sm font-medium text-yellow-800 mb-1">Important Note:</p>
-                  <p className="text-sm text-yellow-700">
-                    Please make payment in NPR (Nepalese Rupees) only. Do not send in USD ($) or other currencies.
-                  </p>
-                </div>
               </div>
             </div>
 
             {/* Course Info */}
-            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+            <div className="p-4 bg-gradient-to-r from-blue-50 to-blue-100 rounded-xl border border-blue-200">
               <div className="flex justify-between items-center">
-                <div>
-                  <h3 className="font-semibold">{course.title}</h3>
+                <div className="flex-1">
+                  <h3 className="font-semibold line-clamp-2">{course.title}</h3>
                   <p className="text-sm text-muted-foreground">Course Access Request</p>
                 </div>
-                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                <div className="text-2xl font-bold text-blue-600">
                   NPR {course.price.toLocaleString('ne-NP')}
                 </div>
               </div>
@@ -436,7 +414,7 @@ const PaymentRequestModal = ({
                 onValueChange={(value) => setFormData(prev => ({ ...prev, paymentMethod: value }))}
                 required
               >
-                <SelectTrigger>
+                <SelectTrigger className="h-12">
                   <SelectValue placeholder="Select payment method" />
                 </SelectTrigger>
                 <SelectContent>
@@ -458,6 +436,7 @@ const PaymentRequestModal = ({
                 placeholder="Enter transaction/reference ID"
                 value={formData.transactionId}
                 onChange={(e) => setFormData(prev => ({ ...prev, transactionId: e.target.value }))}
+                className="h-12"
               />
               <p className="text-xs text-gray-500">
                 Required for eSewa, Khalti, IME Pay. For bank transfer, use your full name as reference.
@@ -467,11 +446,11 @@ const PaymentRequestModal = ({
             {/* Payment Proof */}
             <div className="space-y-2">
               <Label>Payment Proof *</Label>
-              <div className="border-2 border-dashed rounded-lg p-6 text-center">
+              <div className="border-2 border-dashed rounded-xl p-4 sm:p-6 text-center">
                 {formData.paymentProof ? (
                   <div className="space-y-2">
                     <CheckCircle className="h-8 w-8 text-green-500 mx-auto" />
-                    <p className="font-medium">{formData.paymentProof.name}</p>
+                    <p className="font-medium truncate">{formData.paymentProof.name}</p>
                     <p className="text-sm text-muted-foreground">
                       {(formData.paymentProof.size / 1024 / 1024).toFixed(2)} MB
                     </p>
@@ -480,6 +459,7 @@ const PaymentRequestModal = ({
                       variant="outline"
                       size="sm"
                       onClick={() => setFormData(prev => ({ ...prev, paymentProof: null }))}
+                      className="mt-2"
                     >
                       Remove
                     </Button>
@@ -487,14 +467,14 @@ const PaymentRequestModal = ({
                 ) : (
                   <>
                     <Upload className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                    <p className="text-sm text-gray-600 mb-2">
                       Upload payment receipt/screenshot
                     </p>
                     <p className="text-xs text-gray-500 mb-4">
                       JPG, PNG, or PDF (max 10MB)
                     </p>
                     <Label htmlFor="payment-proof" className="cursor-pointer">
-                      <Button type="button" variant="outline" asChild>
+                      <Button type="button" variant="outline" asChild className="h-10">
                         <span>Choose File</span>
                       </Button>
                     </Label>
@@ -510,45 +490,32 @@ const PaymentRequestModal = ({
               </div>
             </div>
 
-            {/* Additional Notes */}
-            <div className="space-y-2">
-              <Label htmlFor="notes">Additional Notes (Optional)</Label>
-              <ShadcnTextarea
-                id="notes"
-                placeholder="Any additional information about your payment..."
-                value={formData.notes}
-                onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-                rows={3}
-              />
-            </div>
-
             {/* Important Notice */}
-            <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-              <h4 className="font-semibold text-yellow-800 dark:text-yellow-300 mb-2">Important Information</h4>
-              <ul className="text-sm text-yellow-700 dark:text-yellow-400 space-y-1">
+            <div className="p-4 bg-gradient-to-r from-yellow-50 to-amber-50 border border-yellow-200 rounded-xl">
+              <h4 className="font-semibold text-yellow-800 mb-2">Important Information</h4>
+              <ul className="text-sm text-yellow-700 space-y-1">
                 <li>• Payment must be made in NPR (Nepalese Rupees) only</li>
-                <li>• Include your full name in payment reference/remarks</li>
-                <li>• Your request will be reviewed within 24-48 hours</li>
-                <li>• You will receive an email notification once approved</li>
-                <li>• Keep your payment proof ready for verification</li>
-                <li>• Contact support (9804304000) for any questions</li>
+                <li>• Include your full name in payment reference</li>
+                <li>• Request reviewed within 24-48 hours</li>
+                <li>• You'll receive email notification once approved</li>
               </ul>
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
             <Button
               type="button"
               variant="outline"
               onClick={onClose}
               disabled={loading}
+              className="w-full sm:w-auto"
             >
               Cancel
             </Button>
             <Button
               type="submit"
               disabled={loading || !formData.paymentMethod}
-              className="bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600"
+              className="w-full sm:w-auto bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white"
             >
               {loading ? (
                 <>
@@ -556,7 +523,7 @@ const PaymentRequestModal = ({
                   Submitting...
                 </>
               ) : (
-                'Submit Payment Request'
+                'Submit Request'
               )}
             </Button>
           </DialogFooter>
@@ -574,17 +541,13 @@ export default function CoursesPage() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [isEnrolling, setIsEnrolling] = useState<string | null>(null)
-  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [enrollingCourse, setEnrollingCourse] = useState<Course | null>(null)
   const [favoriteCourses, setFavoriteCourses] = useState<Set<string>>(new Set())
-  const [hoveredCourse, setHoveredCourse] = useState<string | null>(null)
   const [activeCategory, setActiveCategory] = useState<string>('all')
   
   const observerTarget = useRef<HTMLDivElement>(null)
-  const filtersRef = useRef<HTMLDivElement>(null)
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
@@ -608,29 +571,19 @@ export default function CoursesPage() {
   })
 
   const categories = [
-    { id: 'all', name: 'All Courses', icon: Grid, color: 'from-gray-600 to-gray-800' },
+    { id: 'all', name: 'All', icon: Grid, color: 'from-gray-600 to-gray-800' },
     { id: 'fashion-design', name: 'Design', icon: Palette, color: 'from-purple-600 to-pink-600' },
-    { id: 'pattern-making', name: 'Patterns', icon: Target, color: 'from-blue-600 to-cyan-600' },
+    { id: 'pattern-making', name: 'Patterns', icon: TargetIcon, color: 'from-blue-600 to-cyan-600' },
     { id: 'sewing', name: 'Sewing', icon: Medal, color: 'from-amber-600 to-orange-600' },
     { id: 'textiles', name: 'Textiles', icon: Gauge, color: 'from-emerald-600 to-green-600' },
     { id: 'business', name: 'Business', icon: TrendingUp, color: 'from-indigo-600 to-purple-600' },
     { id: 'digital', name: 'Digital', icon: Code, color: 'from-cyan-600 to-blue-600' },
-    { id: '3d-design', name: '3D Design', icon: Camera, color: 'from-pink-600 to-rose-600' },
   ]
 
-  const filterOptions = {
-    categories: [
-      { name: 'Fashion Design', icon: Palette, color: 'bg-gradient-to-r from-purple-600 to-pink-600' },
-      { name: 'Pattern Making', icon: Target, color: 'bg-gradient-to-r from-blue-600 to-cyan-600' },
-      { name: 'Sewing', icon: Medal, color: 'bg-gradient-to-r from-amber-600 to-orange-600' },
-      { name: 'Textiles', icon: Gauge, color: 'bg-gradient-to-r from-emerald-600 to-green-600' },
-      { name: 'Fashion Business', icon: TrendingUp, color: 'bg-gradient-to-r from-indigo-600 to-purple-600' },
-    ],
-    levels: [
-      { name: 'beginner', icon: Rocket, color: 'bg-gradient-to-r from-green-600 to-emerald-600' },
-      { name: 'intermediate', icon: Target, color: 'bg-gradient-to-r from-yellow-600 to-amber-600' },
-      { name: 'advanced', icon: CloudLightning, color: 'bg-gradient-to-r from-red-600 to-rose-600' }
-    ]
+  const levelColors = {
+    beginner: 'bg-gradient-to-r from-green-500 to-emerald-600',
+    intermediate: 'bg-gradient-to-r from-yellow-500 to-amber-600',
+    advanced: 'bg-gradient-to-r from-red-500 to-rose-600'
   }
 
   const getCourseUrl = useCallback((course: Course): string => {
@@ -660,17 +613,6 @@ export default function CoursesPage() {
       }
     }
   }, [searchQuery])
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (filtersRef.current && !filtersRef.current.contains(event.target as Node)) {
-        setMobileFiltersOpen(false)
-      }
-    }
-
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
 
   const filteredCourses = useMemo(() => {
     return courses.filter(course => {
@@ -794,9 +736,6 @@ export default function CoursesPage() {
         throw new Error(syncError.error || 'Failed to sync user');
       }
 
-      const syncData = await syncResponse.json();
-      console.log('User sync result:', syncData);
-
       // Now proceed with enrollment
       const response = await fetch(`/api/courses/${course._id}/enroll`, {
         method: 'POST',
@@ -894,7 +833,6 @@ export default function CoursesPage() {
         variant: 'default',
       })
       
-      // Update course stats to show pending request
       setCourses(prev => prev.map(c => 
         c._id === enrollingCourse._id 
           ? { 
@@ -913,7 +851,6 @@ export default function CoursesPage() {
     return userProgress[courseId]?.enrolled === true
   }
 
-  // UPDATED: CourseCard with NPR currency
   const CourseCard = ({ course }: { course: Course }) => {
     const progress = userProgress[course._id]
     const isEnrolled = isUserEnrolled(course._id)
@@ -921,45 +858,26 @@ export default function CoursesPage() {
     
     return (
       <div 
-        className="group relative overflow-hidden rounded-3xl bg-white shadow-xl hover:shadow-2xl transition-all duration-500 cursor-pointer border border-white hover:border-red-100"
-        onMouseEnter={() => setHoveredCourse(course._id)}
-        onMouseLeave={() => setHoveredCourse(null)}
+        className="group relative overflow-hidden rounded-3xl bg-white shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer border border-gray-100 hover:border-red-100"
         onClick={() => navigateToCourse(course)}
       >
-        {/* Background Glow Effect */}
-        <div className="absolute inset-0 bg-gradient-to-br from-white via-red-50/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-        
         {/* Course Thumbnail */}
-        <div className="relative h-64 overflow-hidden rounded-t-3xl">
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent z-10" />
+        <div className="relative h-56 sm:h-64 overflow-hidden rounded-t-3xl">
+          {/* Background Gradient */}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent z-10" />
+          
           <img
             src={course.thumbnail?.url || '/api/placeholder/400/256'}
             alt={course.title}
-            className="w-full h-full object-cover transform group-hover:scale-110 transition-transform duration-700"
+            className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-700"
             loading="lazy"
           />
           
-          {/* Play Button */}
-          <div className="absolute inset-0 flex items-center justify-center z-20 opacity-0 group-hover:opacity-100 transition-all duration-500">
-            <div className="w-20 h-20 bg-gradient-to-r from-red-600 to-orange-500 rounded-full flex items-center justify-center shadow-2xl transform group-hover:scale-110 transition-transform duration-300">
-              <Play className="w-8 h-8 text-white ml-1" />
+          {/* Level Badge */}
+          <div className="absolute top-4 left-4 z-20">
+            <div className={`px-3 py-1.5 rounded-full ${levelColors[course.level]} text-white text-xs font-semibold shadow-lg backdrop-blur-sm bg-white/10`}>
+              {course.level.charAt(0).toUpperCase() + course.level.slice(1)}
             </div>
-          </div>
-          
-          {/* Badges */}
-          <div className="absolute top-4 left-4 z-30 space-y-2">
-            <div className={`px-4 py-2 rounded-full backdrop-blur-sm bg-white/90 text-sm font-semibold shadow-lg ${
-              course.level === 'beginner' ? 'text-green-700' :
-              course.level === 'intermediate' ? 'text-amber-700' : 'text-red-700'
-            }`}>
-              {course.level}
-            </div>
-            {course.isFeatured && (
-              <div className="px-4 py-2 rounded-full backdrop-blur-sm bg-gradient-to-r from-amber-500/90 to-orange-500/90 text-white text-sm font-semibold shadow-lg flex items-center gap-1">
-                <Flame className="w-4 h-4" />
-                Featured
-              </div>
-            )}
           </div>
           
           {/* Favorite Button */}
@@ -984,28 +902,38 @@ export default function CoursesPage() {
                 return newSet
               })
             }}
-            className="absolute top-4 right-4 z-30 p-3 backdrop-blur-sm bg-white/90 rounded-full hover:bg-white transition-all duration-300 shadow-lg"
+            className="absolute top-4 right-4 z-20 p-2.5 rounded-full bg-white/90 backdrop-blur-sm hover:bg-white transition-all duration-300 shadow-lg"
           >
             {isFavorite ? (
-              <Heart className="w-5 h-5 fill-red-500 text-red-500" />
+              <Heart className="w-4 h-4 fill-red-500 text-red-500" />
             ) : (
-              <Heart className="w-5 h-5 text-gray-600 group-hover:text-red-500 transition-colors" />
+              <Heart className="w-4 h-4 text-gray-600 group-hover:text-red-500 transition-colors" />
             )}
           </button>
+
+          {/* Featured Badge */}
+          {course.isFeatured && (
+            <div className="absolute bottom-4 left-4 z-20">
+              <div className="px-3 py-1.5 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-semibold shadow-lg flex items-center gap-1.5 backdrop-blur-sm bg-white/10">
+                <Flame className="w-3.5 h-3.5" />
+                Featured
+              </div>
+            </div>
+          )}
         </div>
         
         {/* Course Content */}
-        <div className="p-6 relative z-20">
+        <div className="p-5 sm:p-6">
           {/* Category and Price */}
-          <div className="flex items-center justify-between mb-4">
-            <div className="px-3 py-1.5 rounded-full bg-gradient-to-r from-gray-100 to-gray-50 text-sm font-medium text-gray-700">
+          <div className="flex items-center justify-between mb-3">
+            <div className="px-3 py-1 rounded-full bg-gradient-to-r from-gray-50 to-gray-100 text-sm font-medium text-gray-700">
               {course.category}
             </div>
             <div className="flex items-center space-x-1">
               {course.isFree ? (
-                <span className="text-2xl font-bold bg-gradient-to-r from-emerald-600 to-green-500 bg-clip-text text-transparent">FREE</span>
+                <span className="text-xl font-bold bg-gradient-to-r from-emerald-600 to-green-500 bg-clip-text text-transparent">FREE</span>
               ) : (
-                <span className="text-2xl font-bold text-gray-900">
+                <span className="text-xl font-bold text-gray-900">
                   NPR {course.price.toLocaleString('ne-NP')}
                 </span>
               )}
@@ -1013,32 +941,37 @@ export default function CoursesPage() {
           </div>
           
           {/* Title */}
-          <h3 className="text-xl font-bold mb-3 line-clamp-2 bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent group-hover:from-red-600 group-hover:to-orange-500 transition-all duration-300">
+          <h3 className="text-lg font-bold mb-2 line-clamp-2 text-gray-900 group-hover:text-red-600 transition-colors duration-300">
             {course.title}
           </h3>
           
+          {/* Description */}
+          <p className="text-sm text-gray-600 mb-4 line-clamp-2">
+            {course.shortDescription}
+          </p>
+          
           {/* Instructor */}
-          <div className="flex items-center space-x-3 mb-5">
-            <div className="w-10 h-10 rounded-full ring-2 ring-white ring-offset-2 bg-gradient-to-br from-red-100 to-pink-100 overflow-hidden">
+          <div className="flex items-center space-x-2 mb-4">
+            <div className="w-8 h-8 rounded-full ring-1 ring-white overflow-hidden bg-gradient-to-br from-red-100 to-pink-100">
               <img
                 src={course.instructor.avatar || '/default-avatar.png'}
                 alt={course.instructor.username}
                 className="w-full h-full object-cover"
               />
             </div>
-            <span className="text-sm font-semibold text-gray-700">
+            <span className="text-sm font-medium text-gray-700">
               {course.instructor.firstName} {course.instructor.lastName}
             </span>
           </div>
           
           {/* Stats */}
-          <div className="flex items-center justify-between text-sm text-gray-600 mb-6">
-            <div className="flex items-center space-x-1">
+          <div className="flex items-center justify-between text-sm text-gray-600 mb-5">
+            <div className="flex items-center space-x-1.5">
               <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-              <span className="font-bold">{course.averageRating.toFixed(1)}</span>
+              <span className="font-semibold">{course.averageRating.toFixed(1)}</span>
               <span className="text-gray-500">({course.totalReviews})</span>
             </div>
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-3">
               <div className="flex items-center space-x-1">
                 <Users className="w-4 h-4" />
                 <span>{course.totalStudents.toLocaleString()}</span>
@@ -1052,33 +985,32 @@ export default function CoursesPage() {
           
           {/* Enrollment Button */}
           <div className="relative">
-            <div className="absolute inset-0 bg-gradient-to-r from-red-600 to-orange-500 rounded-2xl blur opacity-0 group-hover:opacity-30 transition-opacity duration-300" />
             {progressLoading.has(course._id) || isEnrolling === course._id ? (
-              <Button className="w-full rounded-2xl bg-gray-100 text-gray-700 relative z-10 h-12" disabled>
+              <Button className="w-full rounded-xl bg-gray-100 text-gray-700 h-11" disabled>
                 <Loader2 className="w-4 h-4 animate-spin mr-2" />
                 Loading...
               </Button>
             ) : isEnrolled ? (
               progress?.completed ? (
-                <Button className="w-full rounded-2xl bg-gradient-to-r from-emerald-600 to-green-500 text-white relative z-10 h-12">
+                <Button className="w-full rounded-xl bg-gradient-to-r from-emerald-600 to-green-500 text-white h-11">
                   <CheckCircle className="w-4 h-4 mr-2" />
                   Completed
                 </Button>
               ) : (
                 <Button 
-                  className="w-full rounded-2xl bg-gradient-to-r from-red-600 to-orange-500 text-white relative z-10 h-12 hover:shadow-xl transition-all duration-300"
+                  className="w-full rounded-xl bg-gradient-to-r from-red-600 to-orange-500 text-white h-11 hover:shadow-lg transition-all duration-300"
                   onClick={(e) => {
                     e.stopPropagation()
                     navigateToCourse(course)
                   }}
                 >
-                  <Play className="w-4 h-4 mr-2" />
+                  <BookOpen className="w-4 h-4 mr-2" />
                   Continue ({Math.round((progress?.progress || 0) * 100)}%)
                 </Button>
               )
             ) : (
               <Button 
-                className="w-full rounded-2xl bg-gradient-to-r from-red-600 to-orange-500 text-white relative z-10 h-12 hover:shadow-xl hover:scale-[1.02] transition-all duration-300"
+                className="w-full rounded-xl bg-gradient-to-r from-red-600 to-orange-500 text-white h-11 hover:shadow-lg transition-all duration-300"
                 onClick={(e) => enrollInCourse(course, e)}
               >
                 <Sparkles className="w-4 h-4 mr-2" />
@@ -1087,12 +1019,12 @@ export default function CoursesPage() {
             )}
           </div>
 
-          {/* Manual Enrollment Info for Paid Courses */}
+          {/* Manual Enrollment Info */}
           {!course.isFree && course.manualEnrollments > 0 && (
             <div className="mt-3 flex items-center justify-center">
-              <Badge className="bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs px-3 py-1.5">
+              <Badge className="bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs px-3 py-1">
                 <FileCheck className="w-3 h-3 mr-1.5" />
-                {course.manualEnrollments}+ students enrolled via bank transfer
+                {course.manualEnrollments}+ bank enrollments
               </Badge>
             </div>
           )}
@@ -1103,102 +1035,140 @@ export default function CoursesPage() {
 
   const CourseSkeleton = () => (
     <div className="overflow-hidden rounded-3xl bg-white shadow-lg border border-gray-200 animate-pulse">
-      <div className="h-64 bg-gradient-to-br from-gray-200 to-gray-300"></div>
-      <div className="p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="h-6 bg-gray-200 rounded-full w-24"></div>
-          <div className="h-8 bg-gray-200 rounded-full w-16"></div>
+      <div className="h-56 sm:h-64 bg-gradient-to-br from-gray-200 to-gray-300"></div>
+      <div className="p-5 sm:p-6">
+        <div className="flex items-center justify-between mb-3">
+          <div className="h-6 bg-gray-200 rounded-full w-20"></div>
+          <div className="h-6 bg-gray-200 rounded-full w-16"></div>
         </div>
-        <div className="h-6 bg-gray-200 rounded mb-3 w-4/5"></div>
-        <div className="flex items-center space-x-3 mb-5">
-          <div className="w-10 h-10 bg-gray-200 rounded-full"></div>
-          <div className="h-4 bg-gray-200 rounded w-32"></div>
+        <div className="h-5 bg-gray-200 rounded mb-2 w-4/5"></div>
+        <div className="h-4 bg-gray-200 rounded mb-4 w-full"></div>
+        <div className="flex items-center space-x-2 mb-4">
+          <div className="w-8 h-8 bg-gray-200 rounded-full"></div>
+          <div className="h-3 bg-gray-200 rounded w-24"></div>
         </div>
-        <div className="h-12 bg-gray-200 rounded-2xl"></div>
+        <div className="h-10 bg-gray-200 rounded-xl"></div>
       </div>
     </div>
   )
 
-  const FiltersSidebar = () => (
-    <div className="space-y-6">
-      {/* Sort Filter */}
-      <div className="bg-white/50 backdrop-blur-sm rounded-2xl border border-white/20 p-6">
-        <h3 className="font-bold mb-4 text-gray-900 flex items-center text-lg">
-          <Target className="w-5 h-5 mr-3 text-red-600" />
-          Sort by
-        </h3>
-        <select
-          value={filters.sort}
-          onChange={(e) => setFilters(prev => ({ ...prev, sort: e.target.value as any }))}
-          className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent"
+  const FiltersSheet = () => (
+    <Sheet>
+      <SheetTrigger asChild>
+        <Button
+          variant="outline"
+          size="lg"
+          className="rounded-xl border-gray-200 bg-white shadow-sm lg:hidden"
         >
-          <option value="popular">Most Popular</option>
-          <option value="newest">Newest First</option>
-          <option value="rating">Highest Rated</option>
-          <option value="price-low">Price: Low to High</option>
-          <option value="price-high">Price: High to Low</option>
-        </select>
-      </div>
+          <Filter className="w-5 h-5 mr-2" />
+          Filters
+        </Button>
+      </SheetTrigger>
+      <SheetContent side="left" className="w-[85vw] sm:w-[400px] p-0">
+        <SheetHeader className="p-6 border-b">
+          <SheetTitle className="text-2xl font-bold text-gray-900">Filters</SheetTitle>
+        </SheetHeader>
+        <div className="p-6 overflow-y-auto h-[calc(100vh-73px)]">
+          <div className="space-y-6">
+            {/* Sort Filter */}
+            <div className="space-y-4">
+              <h3 className="font-bold text-gray-900 flex items-center text-lg">
+                <TargetIcon className="w-5 h-5 mr-3 text-red-600" />
+                Sort by
+              </h3>
+              <select
+                value={filters.sort}
+                onChange={(e) => setFilters(prev => ({ ...prev, sort: e.target.value as any }))}
+                className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent"
+              >
+                <option value="popular">Most Popular</option>
+                <option value="newest">Newest First</option>
+                <option value="rating">Highest Rated</option>
+                <option value="price-low">Price: Low to High</option>
+                <option value="price-high">Price: High to Low</option>
+              </select>
+            </div>
 
-      {/* Price Filter */}
-      <div className="bg-white/50 backdrop-blur-sm rounded-2xl border border-white/20 p-6">
-        <h3 className="font-bold mb-4 text-gray-900 flex items-center text-lg">
-          <Crown className="w-5 h-5 mr-3 text-amber-600" />
-          Price
-        </h3>
-        <div className="space-y-3">
-          {[
-            { value: 'all', label: 'All Courses' },
-            { value: 'free', label: 'Free Only' },
-            { value: 'paid', label: 'Paid Only' }
-          ].map((price) => (
-            <label key={price.value} className="flex items-center space-x-3 cursor-pointer p-3 rounded-xl hover:bg-white/50 transition-colors">
-              <div className="relative">
-                <input
-                  type="radio"
-                  name="price"
-                  value={price.value}
-                  checked={filters.price === price.value}
-                  onChange={() => setFilters(prev => ({ ...prev, price: price.value as any }))}
-                  className="w-5 h-5 text-red-600 border-gray-300 focus:ring-red-500"
-                />
+            {/* Price Filter */}
+            <div className="space-y-4">
+              <h3 className="font-bold text-gray-900 flex items-center text-lg">
+                <Crown className="w-5 h-5 mr-3 text-amber-600" />
+                Price
+              </h3>
+              <div className="space-y-2">
+                {[
+                  { value: 'all', label: 'All Courses' },
+                  { value: 'free', label: 'Free Only' },
+                  { value: 'paid', label: 'Paid Only' }
+                ].map((price) => (
+                  <label key={price.value} className="flex items-center space-x-3 cursor-pointer p-3 rounded-xl hover:bg-gray-50 transition-colors">
+                    <div className="relative">
+                      <input
+                        type="radio"
+                        name="price"
+                        value={price.value}
+                        checked={filters.price === price.value}
+                        onChange={() => setFilters(prev => ({ ...prev, price: price.value as any }))}
+                        className="w-5 h-5 text-red-600 border-gray-300 focus:ring-red-500"
+                      />
+                    </div>
+                    <span className="text-sm font-medium text-gray-700">{price.label}</span>
+                  </label>
+                ))}
               </div>
-              <span className="text-sm font-medium text-gray-700">{price.label}</span>
-            </label>
-          ))}
-        </div>
-      </div>
+            </div>
 
-      {/* Level Filter */}
-      <div className="bg-white/50 backdrop-blur-sm rounded-2xl border border-white/20 p-6">
-        <h3 className="font-bold mb-4 text-gray-900 flex items-center text-lg">
-          <Rocket className="w-5 h-5 mr-3 text-blue-600" />
-          Level
-        </h3>
-        <div className="space-y-3">
-          {filterOptions.levels.map((level) => (
-            <label key={level.name} className="flex items-center space-x-3 cursor-pointer p-3 rounded-xl hover:bg-white/50 transition-colors">
-              <input
-                type="checkbox"
-                checked={filters.level.includes(level.name)}
-                onChange={() => {
-                  setFilters(prev => ({
-                    ...prev,
-                    level: prev.level.includes(level.name)
-                      ? prev.level.filter(l => l !== level.name)
-                      : [...prev.level, level.name]
-                  }))
-                }}
-                className="w-5 h-5 text-red-600 border-gray-300 rounded focus:ring-red-500"
-              />
-              <span className={`px-4 py-2 rounded-xl text-sm font-medium text-white ${level.color}`}>
-                {level.name.charAt(0).toUpperCase() + level.name.slice(1)}
-              </span>
-            </label>
-          ))}
+            {/* Level Filter */}
+            <div className="space-y-4">
+              <h3 className="font-bold text-gray-900 flex items-center text-lg">
+                <Rocket className="w-5 h-5 mr-3 text-blue-600" />
+                Level
+              </h3>
+              <div className="space-y-2">
+                {[
+                  { name: 'beginner', label: 'Beginner', color: 'from-green-500 to-emerald-600' },
+                  { name: 'intermediate', label: 'Intermediate', color: 'from-yellow-500 to-amber-600' },
+                  { name: 'advanced', label: 'Advanced', color: 'from-red-500 to-rose-600' }
+                ].map((level) => (
+                  <label key={level.name} className="flex items-center space-x-3 cursor-pointer p-3 rounded-xl hover:bg-gray-50 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={filters.level.includes(level.name)}
+                      onChange={() => {
+                        setFilters(prev => ({
+                          ...prev,
+                          level: prev.level.includes(level.name)
+                            ? prev.level.filter(l => l !== level.name)
+                            : [...prev.level, level.name]
+                        }))
+                      }}
+                      className="w-5 h-5 text-red-600 border-gray-300 rounded focus:ring-red-500"
+                    />
+                    <span className={`px-4 py-2 rounded-xl text-sm font-medium text-white bg-gradient-to-r ${level.color}`}>
+                      {level.label}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <Button 
+              variant="outline" 
+              onClick={() => setFilters({
+                category: [],
+                level: [],
+                price: 'all',
+                rating: 0,
+                sort: 'popular'
+              })}
+              className="w-full text-red-600 hover:text-red-700 hover:bg-red-50"
+            >
+              Clear all filters
+            </Button>
+          </div>
         </div>
-      </div>
-    </div>
+      </SheetContent>
+    </Sheet>
   )
 
   const fetchCourses = useCallback(async (page = 1, isLoadMore = false) => {
@@ -1304,7 +1274,7 @@ export default function CoursesPage() {
       })
 
       if (coursesData.length > 0) {
-        const batchSize = 5
+        const batchSize = 3
         for (let i = 0; i < coursesData.length; i += batchSize) {
           const batch = coursesData.slice(i, i + batchSize).map(c => c._id)
           await Promise.all(batch.map(courseId => fetchCourseProgress(courseId)))
@@ -1373,39 +1343,38 @@ export default function CoursesPage() {
   }, [filters.category, filters.level])
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 via-white to-red-50/30">
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 via-white to-red-50/20">
       {/* Hero Section */}
       <div className="relative overflow-hidden bg-gradient-to-br from-white via-red-50/50 to-white">
-        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent animate-pulse"></div>
-        <div className="container mx-auto px-4 py-20">
+        <div className="container mx-auto px-4 sm:px-6 py-12 sm:py-20">
           <div className="text-center max-w-4xl mx-auto">
-            <div className="inline-flex items-center justify-center w-28 h-28 rounded-3xl bg-gradient-to-br from-red-500 to-orange-500 mb-8 shadow-2xl animate-float">
-              <Palette className="w-14 h-14 text-white" />
+            <div className="inline-flex items-center justify-center w-20 h-20 sm:w-28 sm:h-28 rounded-3xl bg-gradient-to-br from-red-500 to-orange-500 mb-6 sm:mb-8 shadow-2xl animate-float">
+              <Palette className="w-10 h-10 sm:w-14 sm:h-14 text-white" />
             </div>
-            <h1 className="text-5xl md:text-7xl font-bold mb-8 bg-gradient-to-r from-gray-900 via-red-600 to-gray-900 bg-clip-text text-transparent">
+            <h1 className="text-3xl sm:text-5xl md:text-6xl font-bold mb-4 sm:mb-8 bg-gradient-to-r from-gray-900 via-red-600 to-gray-900 bg-clip-text text-transparent">
               Master Fashion Design
             </h1>
-            <p className="text-xl text-gray-600 mb-12 max-w-2xl mx-auto">
+            <p className="text-base sm:text-xl text-gray-600 mb-8 sm:mb-12 max-w-2xl mx-auto px-4">
               Learn from industry experts with hands-on projects and personalized feedback
             </p>
             
             {/* Search Bar */}
-            <div className="max-w-2xl mx-auto mb-16">
-              <div className="relative group">
-                <div className="absolute -inset-1 bg-gradient-to-r from-red-600 to-orange-500 rounded-3xl blur opacity-20 group-hover:opacity-30 transition duration-500"></div>
+            <div className="max-w-2xl mx-auto mb-8 sm:mb-16 px-4">
+              <div className="relative">
+                <div className="absolute -inset-1 bg-gradient-to-r from-red-600 to-orange-500 rounded-2xl blur opacity-20 group-hover:opacity-30 transition duration-500"></div>
                 <div className="relative">
-                  <Search className="absolute left-6 top-1/2 transform -translate-y-1/2 text-gray-400 w-6 h-6" />
+                  <Search className="absolute left-4 sm:left-6 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5 sm:w-6 sm:h-6" />
                   <Input
                     type="text"
-                    placeholder="Search for courses, topics, or instructors..."
+                    placeholder="Search courses, topics, or instructors..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-16 pr-12 py-5 rounded-2xl border-2 border-white bg-white/80 backdrop-blur-sm text-lg shadow-2xl focus:border-red-300 focus:ring-2 focus:ring-red-200 transition-all"
+                    className="pl-12 sm:pl-16 pr-10 sm:pr-12 py-3 sm:py-4 rounded-2xl border-2 border-white bg-white/80 backdrop-blur-sm text-base sm:text-lg shadow-xl focus:border-red-300 focus:ring-2 focus:ring-red-200 transition-all"
                   />
                   {searchQuery && (
                     <button
                       onClick={() => setSearchQuery('')}
-                      className="absolute right-6 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      className="absolute right-4 sm:right-6 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
                     >
                       <X className="w-5 h-5" />
                     </button>
@@ -1415,18 +1384,18 @@ export default function CoursesPage() {
             </div>
             
             {/* Quick Categories */}
-            <div className="flex flex-wrap justify-center gap-3 mb-8">
+            <div className="flex flex-wrap justify-center gap-2 sm:gap-3 mb-6 sm:mb-8 px-2">
               {categories.map((category) => (
                 <button
                   key={category.id}
                   onClick={() => setActiveCategory(category.id)}
-                  className={`px-5 py-3 rounded-xl font-medium transition-all duration-300 flex items-center gap-2 backdrop-blur-sm ${
+                  className={`px-3 sm:px-5 py-2 sm:py-3 rounded-xl font-medium transition-all duration-300 flex items-center gap-2 backdrop-blur-sm text-sm sm:text-base ${
                     activeCategory === category.id
                       ? `bg-gradient-to-r ${category.color} text-white shadow-xl transform scale-105`
                       : 'bg-white/80 text-gray-700 hover:bg-white shadow-lg hover:shadow-xl'
                   }`}
                 >
-                  <category.icon className="w-5 h-5" />
+                  <category.icon className="w-4 h-4 sm:w-5 sm:h-5" />
                   {category.name}
                 </button>
               ))}
@@ -1436,13 +1405,13 @@ export default function CoursesPage() {
       </div>
 
       {/* Main Content */}
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex flex-col lg:flex-row gap-8">
+      <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <div className="flex flex-col lg:flex-row gap-6 sm:gap-8">
           {/* Filters Sidebar - Desktop */}
-          <div className="hidden lg:block lg:w-80 space-y-6">
+          <div className="hidden lg:block lg:w-72 xl:w-80 space-y-6">
             <div className="sticky top-8 space-y-6">
               <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold text-gray-900">Filters</h2>
+                <h2 className="text-xl font-bold text-gray-900">Filters</h2>
                 <Button 
                   variant="ghost" 
                   size="sm" 
@@ -1458,98 +1427,145 @@ export default function CoursesPage() {
                   Clear all
                 </Button>
               </div>
-              <FiltersSidebar />
-            </div>
-          </div>
+              <div className="space-y-6">
+                {/* Sort Filter */}
+                <div className="space-y-4">
+                  <h3 className="font-bold text-gray-900 flex items-center text-lg">
+                    <TargetIcon className="w-5 h-5 mr-3 text-red-600" />
+                    Sort by
+                  </h3>
+                  <select
+                    value={filters.sort}
+                    onChange={(e) => setFilters(prev => ({ ...prev, sort: e.target.value as any }))}
+                    className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                  >
+                    <option value="popular">Most Popular</option>
+                    <option value="newest">Newest First</option>
+                    <option value="rating">Highest Rated</option>
+                    <option value="price-low">Price: Low to High</option>
+                    <option value="price-high">Price: High to Low</option>
+                  </select>
+                </div>
 
-          {/* Mobile Filters Overlay */}
-          {mobileFiltersOpen && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 lg:hidden">
-              <div 
-                ref={filtersRef}
-                className="absolute left-0 top-0 h-full w-80 max-w-[90vw] bg-white/95 backdrop-blur-sm shadow-2xl overflow-y-auto"
-              >
-                <div className="sticky top-0 bg-white/95 backdrop-blur-sm border-b border-gray-200 p-6">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-2xl font-bold text-gray-900">Filters</h2>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setMobileFiltersOpen(false)}
-                      className="p-2 hover:bg-gray-100 rounded-xl"
-                    >
-                      <X className="w-5 h-5 text-gray-700" />
-                    </Button>
+                {/* Price Filter */}
+                <div className="space-y-4">
+                  <h3 className="font-bold text-gray-900 flex items-center text-lg">
+                    <Crown className="w-5 h-5 mr-3 text-amber-600" />
+                    Price
+                  </h3>
+                  <div className="space-y-2">
+                    {[
+                      { value: 'all', label: 'All Courses' },
+                      { value: 'free', label: 'Free Only' },
+                      { value: 'paid', label: 'Paid Only' }
+                    ].map((price) => (
+                      <label key={price.value} className="flex items-center space-x-3 cursor-pointer p-3 rounded-xl hover:bg-gray-50 transition-colors">
+                        <div className="relative">
+                          <input
+                            type="radio"
+                            name="price"
+                            value={price.value}
+                            checked={filters.price === price.value}
+                            onChange={() => setFilters(prev => ({ ...prev, price: price.value as any }))}
+                            className="w-5 h-5 text-red-600 border-gray-300 focus:ring-red-500"
+                          />
+                        </div>
+                        <span className="text-sm font-medium text-gray-700">{price.label}</span>
+                      </label>
+                    ))}
                   </div>
                 </div>
-                <div className="p-6">
-                  <FiltersSidebar />
+
+                {/* Level Filter */}
+                <div className="space-y-4">
+                  <h3 className="font-bold text-gray-900 flex items-center text-lg">
+                    <Rocket className="w-5 h-5 mr-3 text-blue-600" />
+                    Level
+                  </h3>
+                  <div className="space-y-2">
+                    {[
+                      { name: 'beginner', label: 'Beginner', color: 'from-green-500 to-emerald-600' },
+                      { name: 'intermediate', label: 'Intermediate', color: 'from-yellow-500 to-amber-600' },
+                      { name: 'advanced', label: 'Advanced', color: 'from-red-500 to-rose-600' }
+                    ].map((level) => (
+                      <label key={level.name} className="flex items-center space-x-3 cursor-pointer p-3 rounded-xl hover:bg-gray-50 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={filters.level.includes(level.name)}
+                          onChange={() => {
+                            setFilters(prev => ({
+                              ...prev,
+                              level: prev.level.includes(level.name)
+                                ? prev.level.filter(l => l !== level.name)
+                                : [...prev.level, level.name]
+                            }))
+                          }}
+                          className="w-5 h-5 text-red-600 border-gray-300 rounded focus:ring-red-500"
+                        />
+                        <span className={`px-4 py-2 rounded-xl text-sm font-medium text-white bg-gradient-to-r ${level.color}`}>
+                          {level.label}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
-          )}
+          </div>
 
-          {/* Courses Grid */}
+          {/* Courses Grid Section */}
           <div className="flex-1">
             {/* Controls */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-12">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 sm:mb-12">
               <div>
-                <h2 className="text-3xl font-bold mb-2 bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent">
+                <h2 className="text-2xl sm:text-3xl font-bold mb-1 sm:mb-2 text-gray-900">
                   {debouncedSearch ? `"${debouncedSearch}"` : 'All Courses'}
                 </h2>
-                <p className="text-gray-500 text-lg">
+                <p className="text-gray-500 text-sm sm:text-lg">
                   {sortedCourses.length} courses available
                 </p>
               </div>
               
-              <div className="flex items-center space-x-3">
+              <div className="flex items-center space-x-3 w-full sm:w-auto">
                 {/* Mobile Filters Button */}
-                <Button
-                  variant="outline"
-                  size="lg"
-                  onClick={() => setMobileFiltersOpen(true)}
-                  className="rounded-xl border-white/30 bg-white/50 backdrop-blur-sm lg:hidden hover:bg-white"
-                >
-                  <Filter className="w-5 h-5 mr-2" />
-                  Filters
-                </Button>
+                <FiltersSheet />
 
-                {/* View Toggle */}
-                <div className="flex bg-white/50 backdrop-blur-sm rounded-xl p-1 border border-white/30">
-                  <Button
-                    variant={viewMode === 'grid' ? 'default' : 'ghost'}
-                    size="sm"
-                    onClick={() => setViewMode('grid')}
-                    className="rounded-lg h-10 px-4"
-                  >
-                    <Grid className="w-5 h-5" />
-                  </Button>
-                  <Button
-                    variant={viewMode === 'list' ? 'default' : 'ghost'}
-                    size="sm"
-                    onClick={() => setViewMode('list')}
-                    className="rounded-lg h-10 px-4"
-                  >
-                    <List className="w-5 h-5" />
-                  </Button>
-                </div>
+                {/* Desktop Clear Filters Button */}
+                <Button
+                  variant="ghost"
+                  size="lg"
+                  onClick={() => {
+                    setSearchQuery('')
+                    setFilters({
+                      category: [],
+                      level: [],
+                      price: 'all',
+                      rating: 0,
+                      sort: 'popular'
+                    })
+                    setActiveCategory('all')
+                  }}
+                  className="hidden lg:flex text-red-600 hover:text-red-700 hover:bg-red-50"
+                >
+                  Clear filters
+                </Button>
               </div>
             </div>
 
             {/* Courses Grid */}
             {loading && courses.length === 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
                 {Array.from({ length: 6 }).map((_, index) => (
                   <CourseSkeleton key={index} />
                 ))}
               </div>
             ) : sortedCourses.length === 0 ? (
-              <div className="text-center py-20">
-                <div className="inline-flex items-center justify-center w-24 h-24 rounded-3xl bg-gradient-to-br from-red-50 to-pink-50 mb-8">
-                  <Search className="w-12 h-12 text-red-600" />
+              <div className="text-center py-12 sm:py-20">
+                <div className="inline-flex items-center justify-center w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-gradient-to-br from-red-50 to-pink-50 mb-6 sm:mb-8">
+                  <Search className="w-10 h-10 sm:w-12 sm:h-12 text-red-600" />
                 </div>
-                <h3 className="text-2xl font-bold mb-4">No courses found</h3>
-                <p className="text-gray-500 mb-8 max-w-sm mx-auto">
+                <h3 className="text-xl sm:text-2xl font-bold mb-3 sm:mb-4">No courses found</h3>
+                <p className="text-gray-500 mb-6 sm:mb-8 max-w-sm mx-auto px-4">
                   Try adjusting your search or filters
                 </p>
                 <Button 
@@ -1562,15 +1578,16 @@ export default function CoursesPage() {
                       rating: 0,
                       sort: 'popular'
                     })
+                    setActiveCategory('all')
                   }}
                   className="rounded-xl bg-gradient-to-r from-red-600 to-orange-500 text-white"
                 >
-                  Clear filters
+                  Clear all filters
                 </Button>
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
                   {sortedCourses.map((course) => (
                     <CourseCard key={course._id} course={course} />
                   ))}
@@ -1578,18 +1595,18 @@ export default function CoursesPage() {
 
                 {/* Load More */}
                 {pagination.hasMore && (
-                  <div ref={observerTarget} className="flex justify-center mt-20">
+                  <div ref={observerTarget} className="flex justify-center mt-12 sm:mt-20">
                     {loadingMore ? (
-                      <div className="flex items-center space-x-3 px-8 py-4 rounded-2xl bg-white/80 backdrop-blur-sm border border-white/30">
-                        <Loader2 className="w-6 h-6 animate-spin text-gray-500" />
-                        <span className="text-lg text-gray-500">Loading more...</span>
+                      <div className="flex items-center space-x-3 px-6 py-3 sm:px-8 sm:py-4 rounded-2xl bg-white/80 backdrop-blur-sm border border-gray-200">
+                        <Loader2 className="w-5 h-5 sm:w-6 sm:h-6 animate-spin text-gray-500" />
+                        <span className="text-base sm:text-lg text-gray-500">Loading more...</span>
                       </div>
                     ) : (
                       <Button 
                         onClick={loadMoreCourses}
-                        className="rounded-2xl bg-gradient-to-r from-red-600 to-orange-500 text-white px-10 py-6 text-lg shadow-xl hover:shadow-2xl transition-all"
+                        className="rounded-2xl bg-gradient-to-r from-red-600 to-orange-500 text-white px-8 py-4 sm:px-10 sm:py-6 text-base sm:text-lg shadow-xl hover:shadow-2xl transition-all"
                       >
-                        <Sparkles className="w-6 h-6 mr-3" />
+                        <Sparkles className="w-5 h-5 sm:w-6 sm:h-6 mr-3" />
                         Load More Courses
                       </Button>
                     )}
@@ -1601,7 +1618,7 @@ export default function CoursesPage() {
         </div>
       </div>
 
-      {/* UPDATED: Payment Request Modal with Bank Details */}
+      {/* Payment Request Modal */}
       {enrollingCourse && (
         <PaymentRequestModal
           course={enrollingCourse}
