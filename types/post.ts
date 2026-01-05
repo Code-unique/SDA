@@ -95,6 +95,7 @@ export interface Post {
   updatedAt?: string;
   likesCount?: number;
   savesCount?: number;
+  commentCount?: number;
   commentsCount?: number;
   
   // Media constraints

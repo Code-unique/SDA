@@ -339,47 +339,53 @@ export default function ExplorePage() {
   }
 
   // Convert API response to PostType for EnhancedPostCard
-  const convertToPostType = (post: PostApiResponse): PostType => {
-    const author: User = {
-      _id: post.author._id,
-      username: post.author.username,
-      firstName: post.author.firstName,
-      lastName: post.author.lastName,
-      avatar: post.author.avatar,
-      isVerified: post.author.isVerified || false,
-      isPro: post.author.isPro || false,
-      email: '', 
-      followers: [],
-      following: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    }
+ // In your explore/page.tsx, update the convertToPostType function:
 
-    return {
-      _id: post._id,
-      author,
-      media: post.media,
-      caption: post.caption,
-      hashtags: post.hashtags,
-      likes: Array(post.likesCount || 0).fill(''),
-      saves: Array(post.savesCount || 0).fill(''),
-      comments: [],
-      createdAt: post.createdAt,
-      views: post.views || 0,
-      category: post.category || '',
-      location: post.location || '',
-      isSponsored: post.isSponsored || false,
-      isFeatured: post.isFeatured || false,
-      availableForSale: post.availableForSale || false,
-      price: post.price || 0,
-      currency: post.currency || 'USD',
-      shares: post.shares || 0,
-      engagement: post.engagement || 0,
-      aiGenerated: post.aiGenerated || false,
-      isPublic: post.isPublic || true,
-      tags: post.tags || []
-    }
+// Convert API response to PostType for EnhancedPostCard
+const convertToPostType = (post: PostApiResponse): PostType & { commentsCount?: number } => {
+  const author: User = {
+    _id: post.author._id,
+    username: post.author.username,
+    firstName: post.author.firstName,
+    lastName: post.author.lastName,
+    avatar: post.author.avatar,
+    isVerified: post.author.isVerified || false,
+    isPro: post.author.isPro || false,
+    email: '', 
+    followers: [],
+    following: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   }
+
+  // Return both commentCount and commentsCount to ensure compatibility
+  return {
+    _id: post._id,
+    author,
+    media: post.media,
+    caption: post.caption,
+    hashtags: post.hashtags,
+    likes: Array(post.likesCount || 0).fill(''),
+    saves: Array(post.savesCount || 0).fill(''),
+    comments: [], // Empty array since we have count
+    commentCount: post.commentsCount || 0, // Pass as commentCount
+    commentsCount: post.commentsCount || 0, // Also pass as commentsCount for backward compatibility
+    createdAt: post.createdAt,
+    views: post.views || 0,
+    category: post.category || '',
+    location: post.location || '',
+    isSponsored: post.isSponsored || false,
+    isFeatured: post.isFeatured || false,
+    availableForSale: post.availableForSale || false,
+    price: post.price || 0,
+    currency: post.currency || 'USD',
+    shares: post.shares || 0,
+    engagement: post.engagement || 0,
+    aiGenerated: post.aiGenerated || false,
+    isPublic: post.isPublic || true,
+    tags: post.tags || []
+  }
+}
 
   // Render the component
   return (
