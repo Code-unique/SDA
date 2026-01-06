@@ -1,3 +1,4 @@
+// components/posts/enhanced-post-card.tsx
 'use client'
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'

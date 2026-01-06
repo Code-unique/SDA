@@ -1,3 +1,4 @@
+//app/api/posts/[id]/comments/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';

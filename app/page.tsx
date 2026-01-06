@@ -1,3 +1,4 @@
+//app/page.tsx
 import { Suspense } from 'react'
 import ExploreClient from '@/components/explore/ExploreClient'
 

@@ -1,3 +1,4 @@
+//lib/services/notificationService.ts
 import Notification from '@/lib/models/Notification';
 import User from '@/lib/models/User';
 import { Types } from 'mongoose';

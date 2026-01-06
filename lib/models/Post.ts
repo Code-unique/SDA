@@ -1,3 +1,4 @@
+//sutra/lib/models/Post.ts
 import mongoose, { Document, Schema, Types, Model } from 'mongoose';
 
 export interface IPost extends Document {

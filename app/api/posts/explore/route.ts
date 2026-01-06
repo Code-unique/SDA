@@ -1,3 +1,4 @@
+//app/api/posts/explore/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import Post from '@/lib/models/Post';

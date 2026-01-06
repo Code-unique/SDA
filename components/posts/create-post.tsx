@@ -422,63 +422,48 @@ export function CreatePost({ onPostCreated }: CreatePostProps) {
 
   // Upload to Cloudinary - FIXED: Improved error handling
   const uploadToCloudinary = async (file: File, type: 'image' | 'video') => {
-    return new Promise((resolve, reject) => {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('upload_preset', 'sutra_posts')
-      formData.append('folder', `posts/${type}s`)
-      
-      if (type === 'video') {
-        formData.append('resource_type', 'video')
-        formData.append('eager', 'w_400,h_300,c_fill')
-        formData.append('eager_async', 'true')
-      }
+  return new Promise((resolve, reject) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('upload_preset', 'sutra_posts')
+    formData.append('folder', `posts/${type}s`)
 
-      const xhr = new XMLHttpRequest()
+    // ✅ DO NOT ADD ANY TRANSFORMATIONS HERE
 
-      xhr.upload.addEventListener('progress', (event) => {
-        if (event.lengthComputable) {
-          const progress = Math.round((event.loaded / event.total) * 100)
-          // Update progress for this specific file
-          setMediaItems(prev => prev.map(item => 
+    const xhr = new XMLHttpRequest()
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        const progress = Math.round((event.loaded / event.total) * 100)
+        setMediaItems(prev =>
+          prev.map(item =>
             item.file === file ? { ...item, uploadProgress: progress } : item
-          ))
-        }
-      })
+          )
+        )
+      }
+    }
 
-      xhr.addEventListener('load', () => {
-        if (xhr.status === 200) {
-          try {
-            const response = JSON.parse(xhr.responseText)
-            resolve(response)
-          } catch (error) {
-            reject(new Error('Invalid response from Cloudinary'))
-          }
-        } else {
-          try {
-            const errorResponse = JSON.parse(xhr.responseText)
-            reject(new Error(errorResponse.error?.message || `Upload failed with status ${xhr.status}`))
-          } catch {
-            reject(new Error(`Upload failed with status ${xhr.status}`))
-          }
-        }
-      })
+    xhr.onload = () => {
+      if (xhr.status === 200) {
+        resolve(JSON.parse(xhr.responseText))
+      } else {
+        reject(new Error(xhr.responseText))
+      }
+    }
 
-      xhr.addEventListener('error', () => {
-        reject(new Error('Network error during upload'))
-      })
+    xhr.onerror = () => reject(new Error('Upload failed'))
 
-      xhr.addEventListener('abort', () => {
-        reject(new Error('Upload was cancelled'))
-      })
+    xhr.open(
+      'POST',
+      `https://api.cloudinary.com/v1_1/${
+        process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || 'doztmbvi6'
+      }/${type}/upload`
+    )
 
-      xhr.open(
-        'POST',
-        `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || 'doztmbvi6'}/${type === 'image' ? 'image' : 'video'}/upload`
-      )
-      xhr.send(formData)
-    })
-  }
+    xhr.send(formData)
+  })
+}
+
 
   const addHashtag = (tag: string) => {
     const currentTags = hashtags.trim().split(' ').filter(Boolean)
@@ -517,7 +502,12 @@ export function CreatePost({ onPostCreated }: CreatePostProps) {
             type: item.type,
             url: response.secure_url,
             publicId: response.public_id,
-            thumbnail: item.type === 'video' ? response.eager?.[0]?.secure_url : undefined,
+            thumbnail: item.type === 'video'
+  ? response.secure_url.replace(
+      '/upload/',
+      '/upload/w_400,h_300,c_fill,so_0/'
+    )
+  : undefined,
             duration: item.type === 'video' ? Math.floor(item.duration || 0) : undefined,
             size: item.size,
             mimetype: item.file.type,

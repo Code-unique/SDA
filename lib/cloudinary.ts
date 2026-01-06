@@ -25,64 +25,51 @@ export const uploadPostMedia = async (
   onProgress?: (progress: number) => void
 ): Promise<any> => {
   return new Promise((resolve, reject) => {
-    // Validate file size
     if (file.size > POSTS_CLOUDINARY_CONFIG.maxFileSize) {
-      reject(new Error(`File size exceeds ${POSTS_CLOUDINARY_CONFIG.maxFileSize / 1024 / 1024}MB limit`));
-      return;
+      reject(new Error('File too large'))
+      return
     }
 
-    // Validate file type
-    const fileExtension = file.name.split('.').pop()?.toLowerCase();
+    const fileExtension = file.name.split('.').pop()?.toLowerCase()
     if (!fileExtension || !POSTS_CLOUDINARY_CONFIG.allowedFormats.includes(fileExtension)) {
-      reject(new Error(`File type not supported. Allowed formats: ${POSTS_CLOUDINARY_CONFIG.allowedFormats.join(', ')}`));
-      return;
+      reject(new Error('Unsupported file type'))
+      return
     }
 
     const formData = new FormData()
     formData.append('file', file)
     formData.append('upload_preset', POSTS_CLOUDINARY_CONFIG.uploadPreset)
     formData.append('folder', `posts/${type}s`)
-    
-    if (type === 'video') {
-      formData.append('resource_type', 'video')
-      formData.append('eager', 'w_400,h_300,c_fill')
-      formData.append('eager_async', 'true')
-    } else {
-      formData.append('transformation', 'w_1080,h_1080,c_fill,q_auto,f_auto')
-    }
+
+    // ❌ REMOVE ALL TRANSFORMATIONS FROM CLIENT
+    // ❌ DO NOT ADD eager, eager_async, transformation
 
     const xhr = new XMLHttpRequest()
 
-    // Progress tracking
-    xhr.upload.addEventListener('progress', (event) => {
+    xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && onProgress) {
-        const progress = (event.loaded / event.total) * 100
-        onProgress(Math.round(progress))
+        onProgress(Math.round((event.loaded / event.total) * 100))
       }
-    })
+    }
 
-    // Load completion
-    xhr.addEventListener('load', () => {
+    xhr.onload = () => {
       if (xhr.status === 200) {
-        const response = JSON.parse(xhr.responseText)
-        resolve(response)
+        resolve(JSON.parse(xhr.responseText))
       } else {
-        reject(new Error('Upload failed'))
+        reject(new Error(xhr.responseText))
       }
-    })
+    }
 
-    // Error handling
-    xhr.addEventListener('error', () => {
-      reject(new Error('Upload failed'))
-    })
+    xhr.onerror = () => reject(new Error('Upload failed'))
 
     xhr.open(
       'POST',
-      `https://api.cloudinary.com/v1_1/${POSTS_CLOUDINARY_CONFIG.cloudName}/${type === 'image' ? 'image' : 'video'}/upload`
+      `https://api.cloudinary.com/v1_1/${POSTS_CLOUDINARY_CONFIG.cloudName}/${type}/upload`
     )
     xhr.send(formData)
   })
 }
+
 
 // Utility to extract video duration
 export const getVideoDuration = (file: File): Promise<number> => {

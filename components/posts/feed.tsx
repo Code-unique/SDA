@@ -1,3 +1,4 @@
+// components/posts/feed.tsx
 'use client'
 
 import { useState, useEffect } from 'react'
