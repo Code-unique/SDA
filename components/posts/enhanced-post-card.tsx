@@ -1,4 +1,3 @@
-// components/posts/enhanced-post-card.tsx
 'use client'
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
@@ -32,7 +31,11 @@ import {
   Edit,
   Trash2,
   Flag,
-  MoreHorizontal
+  MoreHorizontal,
+  Volume2,
+  VolumeX,
+  Maximize2,
+  Minimize2
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Post } from '@/types/post'
@@ -65,7 +68,6 @@ interface EnhancedPostCardProps {
   className?: string
 }
 
-// Utility functions
 const formatNumber = (num: number): string => {
   if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
   if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
@@ -83,7 +85,6 @@ const getTimeAgo = (date: string): string => {
   return postDate.toLocaleDateString()
 }
 
-// Helper functions to safely access data
 const getSafeArray = (data: any): any[] => {
   if (!data) return []
   if (Array.isArray(data)) return data
@@ -93,7 +94,6 @@ const getSafeArray = (data: any): any[] => {
 
 const isUserInArray = (array: any[], userId?: string): boolean => {
   if (!userId || !array || !Array.isArray(array)) return false
-  
   return array.some(item => {
     if (!item) return false
     if (typeof item === 'string') return item === userId
@@ -109,33 +109,24 @@ const getCount = (data: any): number => {
   return 0
 }
 
-// Enhanced comment count extraction function - FIXED: Remove metadata reference
 const getCommentCountFromPost = (post: Post): number => {
-  // 1. First check if there's a direct commentCount property
   if (post.commentCount && typeof post.commentCount === 'number') {
     return post.commentCount
   }
-  
-  // 2. Check for commentsCount (API format)
   if ((post as any).commentsCount && typeof (post as any).commentsCount === 'number') {
     return (post as any).commentsCount
   }
-  
-  // 3. Count from comments array if it exists
   const commentsArray = getSafeArray(post.comments)
   if (commentsArray.length > 0) {
     return commentsArray.length
   }
-  
-  // 4. Default to 0 (REMOVED metadata check as Post type doesn't have it)
   return 0
 }
 
-// Helper function to safely get comments array
 const getCommentsArray = (comments: any): any[] => {
   if (!comments) return []
   if (Array.isArray(comments)) return comments
-  if (typeof comments === 'number') return [] // If it's just a count number
+  if (typeof comments === 'number') return []
   return []
 }
 
@@ -164,7 +155,6 @@ export function EnhancedPostCard({
   const router = useRouter()
   const { toast } = useToast()
   
-  // Calculate comment count from the post using the new function
   const initialCommentCount = useMemo(() => {
     return getCommentCountFromPost(post)
   }, [post])
@@ -178,7 +168,7 @@ export function EnhancedPostCard({
     isFollowing: false,
     likeCount: getCount(post.likes),
     saveCount: getCount(post.saves),
-    commentCount: initialCommentCount, // Use the calculated comment count
+    commentCount: initialCommentCount,
     showShareMenu: false,
     showOptionsMenu: false,
     imageLoaded: false,
@@ -187,6 +177,10 @@ export function EnhancedPostCard({
     showFullCaption: false,
     copied: false,
     mediaLoading: true,
+    isFullscreen: false,
+    isVideoLoaded: false,
+    showVideoControls: false,
+    videoDuration: 0,
   })
 
   const [actionLoading, setActionLoading] = useState({
@@ -203,90 +197,47 @@ export function EnhancedPostCard({
   })
 
   const videoRef = useRef<HTMLVideoElement>(null)
+  const mediaContainerRef = useRef<HTMLDivElement>(null)
   const optionsRef = useRef<HTMLDivElement>(null)
   const shareRef = useRef<HTMLDivElement>(null)
   const autoPlayTimerRef = useRef<NodeJS.Timeout | null>(null)
   const imageRef = useRef<HTMLImageElement>(null)
-
+  const videoControlsTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  
+  // Current media item - declared before hooks that reference them
+  const mediaArray = useMemo(() => Array.isArray(post.media) ? post.media : [], [post.media])
+  const currentMedia = mediaArray[state.currentMediaIndex] || mediaArray[0]
+  const hasMedia = mediaArray.length > 0
+  const isCurrentMediaVideo = currentMedia?.type === 'video'
   const userId = currentUserId || currentUser?.id || ''
   const isSignedIn = !!clerkIsSignedIn
+
+  // 1. Prevent currentMediaIndex from going out of bounds
+  useEffect(() => {
+    if (mediaArray.length > 0 && state.currentMediaIndex >= mediaArray.length) {
+      setState(prev => ({
+        ...prev,
+        currentMediaIndex: 0,
+        isPlaying: false,
+        isVideoLoaded: false,
+        mediaLoading: true
+      }))
+    }
+  }, [mediaArray.length, state.currentMediaIndex])
 
   // Update comment count when post changes
   useEffect(() => {
     const newCommentCount = getCommentCountFromPost(post)
-    setState(prev => ({
-      ...prev,
-      commentCount: newCommentCount
-    }))
+    setState(prev => {
+      if (prev.commentCount === newCommentCount) return prev
+      return {
+        ...prev,
+        commentCount: newCommentCount
+      }
+    })
   }, [post])
 
-  // Fetch statuses for the post including comment count
-  const fetchStatuses = useCallback(async () => {
-    if (!post._id) return
-
-    try {
-      if (!isSignedIn) {
-        const likesArray = getSafeArray(post.likes)
-        const savesArray = getSafeArray(post.saves)
-        const followersArray = getSafeArray(post.author?.followers)
-        
-        const liked = isUserInArray(likesArray, userId)
-        const saved = isUserInArray(savesArray, userId)
-        const following = isUserInArray(followersArray, userId)
-        
-        setState(prev => ({
-          ...prev,
-          isLiked: liked,
-          isSaved: saved,
-          isFollowing: following,
-          commentCount: initialCommentCount // Set comment count here too
-        }))
-        
-        setStatuses({
-          likeStatuses: { [post._id]: liked },
-          saveStatuses: { [post._id]: { saved: saved } },
-          followStatuses: { [post.author?._id]: following }
-        })
-        return
-      }
-      
-      const response = await fetch('/api/batch-status', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          postIds: [post._id],
-          userIds: post.author?._id ? [post.author._id] : []
-        })
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        
-        if (data.success && data.data) {
-          const batchData = data.data
-          setStatuses(batchData)
-          
-          setState(prev => ({
-            ...prev,
-            isLiked: batchData.likeStatuses[post._id] || false,
-            isSaved: batchData.saveStatuses[post._id]?.saved || false,
-            isFollowing: batchData.followStatuses[post.author?._id] || false,
-            commentCount: initialCommentCount // Make sure comment count is set
-          }))
-        } else {
-          initializeFromPostData()
-        }
-      } else {
-        initializeFromPostData()
-      }
-    } catch (error) {
-      initializeFromPostData()
-    }
-  }, [post._id, post.author?._id, post.likes, post.saves, post.author?.followers, userId, isSignedIn, initialCommentCount])
-
-  // Helper function to initialize from post data
+  // Initialize states
   const initializeFromPostData = useCallback(() => {
     const likesArray = getSafeArray(post.likes)
     const savesArray = getSafeArray(post.saves)
@@ -301,7 +252,7 @@ export function EnhancedPostCard({
       isLiked: liked,
       isSaved: saved,
       isFollowing: following,
-      commentCount: initialCommentCount // Set comment count here too
+      commentCount: initialCommentCount
     }))
     
     setStatuses({
@@ -311,7 +262,49 @@ export function EnhancedPostCard({
     })
   }, [post._id, post.author?._id, post.likes, post.saves, post.author?.followers, userId, initialCommentCount])
 
-  // Initialize states
+  // Fetch statuses
+  const fetchStatuses = useCallback(async () => {
+    if (!post._id) return
+
+    try {
+      if (!isSignedIn) {
+        initializeFromPostData()
+        return
+      }
+      
+      const response = await fetch('/api/batch-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          postIds: [post._id],
+          userIds: post.author?._id ? [post.author._id] : []
+        })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        if (data.success && data.data) {
+          const batchData = data.data
+          setStatuses(batchData)
+          
+          setState(prev => ({
+            ...prev,
+            isLiked: batchData.likeStatuses[post._id] || false,
+            isSaved: batchData.saveStatuses[post._id]?.saved || false,
+            isFollowing: batchData.followStatuses[post.author?._id] || false,
+            commentCount: initialCommentCount
+          }))
+        } else {
+          initializeFromPostData()
+        }
+      } else {
+        initializeFromPostData()
+      }
+    } catch (error) {
+      initializeFromPostData()
+    }
+  }, [post._id, post.author?._id, isSignedIn, initialCommentCount, initializeFromPostData])
+
   useEffect(() => {
     if (batchStatusData) {
       setStatuses(batchStatusData)
@@ -320,7 +313,7 @@ export function EnhancedPostCard({
         isLiked: batchStatusData.likeStatuses[post._id] || false,
         isSaved: batchStatusData.saveStatuses[post._id]?.saved || false,
         isFollowing: batchStatusData.followStatuses[post.author?._id] || false,
-        commentCount: initialCommentCount // Set comment count
+        commentCount: initialCommentCount
       }))
     } else if (userLoaded) {
       fetchStatuses()
@@ -345,7 +338,6 @@ export function EnhancedPostCard({
 
     const wasLiked = statuses.likeStatuses[post._id] || state.isLiked
 
-    // Optimistic update
     setState(prev => ({
       ...prev,
       isLiked: !wasLiked,
@@ -354,10 +346,7 @@ export function EnhancedPostCard({
 
     setStatuses(prev => ({
       ...prev,
-      likeStatuses: {
-        ...prev.likeStatuses,
-        [post._id]: !wasLiked
-      }
+      likeStatuses: { ...prev.likeStatuses, [post._id]: !wasLiked }
     }))
 
     setActionLoading(prev => ({ ...prev, like: true }))
@@ -380,7 +369,6 @@ export function EnhancedPostCard({
         }
       }
     } catch (error: any) {
-      // Revert on error
       setState(prev => ({
         ...prev,
         isLiked: wasLiked,
@@ -389,10 +377,7 @@ export function EnhancedPostCard({
       
       setStatuses(prev => ({
         ...prev,
-        likeStatuses: {
-          ...prev.likeStatuses,
-          [post._id]: wasLiked
-        }
+        likeStatuses: { ...prev.likeStatuses, [post._id]: wasLiked }
       }))
       
       toast({
@@ -484,7 +469,7 @@ export function EnhancedPostCard({
     }
   }, [actionLoading.save, post._id, userId, isSignedIn, toast, onSave, statuses.saveStatuses, state.isSaved])
 
-  // Handle follow - FIXED: Type signature to match OptionsMenu's expectation
+  // Handle follow
   const handleFollow = useCallback(async () => {
     if (actionLoading.follow || !post.author?._id) return
 
@@ -498,16 +483,15 @@ export function EnhancedPostCard({
     }
 
     const authorId = post.author._id
-    
     const previousIsFollowing = statuses.followStatuses[authorId] || state.isFollowing
 
-    setState(prev => ({ ...prev, isFollowing: !previousIsFollowing }))
+    setState(prev => ({ 
+      ...prev, 
+      isFollowing: !previousIsFollowing 
+    }))
     setStatuses(prev => ({
       ...prev,
-      followStatuses: {
-        ...prev.followStatuses,
-        [authorId]: !previousIsFollowing
-      }
+      followStatuses: { ...prev.followStatuses, [authorId]: !previousIsFollowing }
     }))
 
     setActionLoading(prev => ({ ...prev, follow: true }))
@@ -530,10 +514,7 @@ export function EnhancedPostCard({
       setState(prev => ({ ...prev, isFollowing: previousIsFollowing }))
       setStatuses(prev => ({
         ...prev,
-        followStatuses: {
-          ...prev.followStatuses,
-          [authorId]: previousIsFollowing
-        }
+        followStatuses: { ...prev.followStatuses, [authorId]: previousIsFollowing }
       }))
 
       toast({
@@ -581,25 +562,6 @@ export function EnhancedPostCard({
     }
   }, [post._id, post.author?.firstName, post.caption, onShare, toast])
 
-  // Media navigation
-  const nextMedia = (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setState(prev => ({
-      ...prev,
-      currentMediaIndex: (prev.currentMediaIndex + 1) % mediaArray.length
-    }))
-  }
-
-  const prevMedia = (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setState(prev => ({
-      ...prev,
-      currentMediaIndex: (prev.currentMediaIndex - 1 + mediaArray.length) % mediaArray.length
-    }))
-  }
-
   // Video controls
   const togglePlay = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -610,20 +572,144 @@ export function EnhancedPostCard({
       } else {
         videoRef.current.play()
       }
-      setState(prev => ({ ...prev, isPlaying: !prev.isPlaying }))
+      setState(prev => ({ 
+        ...prev, 
+        isPlaying: !prev.isPlaying 
+      }))
+    }
+  }
+
+  const toggleMute = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (videoRef.current) {
+      videoRef.current.muted = !state.isMuted
+      setState(prev => ({ 
+        ...prev, 
+        isMuted: !prev.isMuted 
+      }))
+    }
+  }
+
+  const toggleFullscreen = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!mediaContainerRef.current) return
+    
+    if (!document.fullscreenElement) {
+      mediaContainerRef.current.requestFullscreen()
+      setState(prev => ({ 
+        ...prev, 
+        isFullscreen: true 
+      }))
+    } else {
+      document.exitFullscreen()
+      setState(prev => ({ 
+        ...prev, 
+        isFullscreen: false 
+      }))
     }
   }
 
   const handleVideoProgress = () => {
     if (videoRef.current) {
       const progress = (videoRef.current.currentTime / videoRef.current.duration) * 100
-      setState(prev => ({ ...prev, videoProgress: progress }))
+      setState(prev => ({ 
+        ...prev, 
+        videoProgress: progress,
+        videoDuration: videoRef.current?.duration || 0
+      }))
     }
+  }
+
+  const handleVideoLoaded = () => {
+    setState(prev => ({ 
+      ...prev, 
+      isVideoLoaded: true,
+      mediaLoading: false,
+      videoDuration: videoRef.current?.duration || 0
+    }))
+  }
+
+  const handleVideoPlay = () => {
+    setState(prev => ({ 
+      ...prev, 
+      isPlaying: true 
+    }))
+  }
+
+  const handleVideoPause = () => {
+    setState(prev => ({ 
+      ...prev, 
+      isPlaying: false 
+    }))
+  }
+
+  const handleVideoEnd = () => {
+    setState(prev => ({ 
+      ...prev, 
+      isPlaying: false 
+    }))
+  }
+
+  const handleVideoTimeUpdate = () => {
+    handleVideoProgress()
+  }
+
+  const showVideoControls = () => {
+    setState(prev => ({ 
+      ...prev, 
+      showVideoControls: true 
+    }))
+    if (videoControlsTimeoutRef.current) {
+      clearTimeout(videoControlsTimeoutRef.current)
+    }
+    videoControlsTimeoutRef.current = setTimeout(() => {
+      setState(prev => ({ 
+        ...prev, 
+        showVideoControls: false 
+      }))
+    }, 3000)
+  }
+
+  // Media navigation
+  const nextMedia = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (videoRef.current && state.isPlaying) {
+      videoRef.current.pause()
+    }
+    setState(prev => ({
+      ...prev,
+      currentMediaIndex: (prev.currentMediaIndex + 1) % mediaArray.length,
+      isPlaying: false,
+      isVideoLoaded: false,
+      mediaLoading: true
+    }))
+  }
+
+  const prevMedia = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (videoRef.current && state.isPlaying) {
+      videoRef.current.pause()
+    }
+    setState(prev => ({
+      ...prev,
+      currentMediaIndex: (prev.currentMediaIndex - 1 + mediaArray.length) % mediaArray.length,
+      isPlaying: false,
+      isVideoLoaded: false,
+      mediaLoading: true
+    }))
   }
 
   // Optimized image loading
   const handleImageLoad = useCallback(() => {
-    setState(prev => ({ ...prev, imageLoaded: true, mediaLoading: false }))
+    setState(prev => ({ 
+      ...prev, 
+      imageLoaded: true, 
+      mediaLoading: false 
+    }))
   }, [])
 
   // Navigate to post detail
@@ -632,40 +718,72 @@ export function EnhancedPostCard({
     router.push(`/posts/${post._id}`)
   }, [post._id, router])
 
-  // Auto-play video on hover
+  // 2. Fixed autoplay timer handling with centralized cleanup
   useEffect(() => {
-    if (state.isHovered && currentMedia?.type === 'video') {
-      autoPlayTimerRef.current = setTimeout(() => {
-        if (videoRef.current && !state.isPlaying) {
-          videoRef.current.play()
-          setState(prev => ({ ...prev, isPlaying: true }))
+    const startAutoPlay = () => {
+      if (viewMode === 'masonry' && state.isHovered && isCurrentMediaVideo) {
+        // Clear any existing timer
+        if (autoPlayTimerRef.current) {
+          clearTimeout(autoPlayTimerRef.current)
         }
-      }, 300)
-    } else {
-      if (autoPlayTimerRef.current) {
-        clearTimeout(autoPlayTimerRef.current)
-      }
-      if (videoRef.current && state.isPlaying) {
-        videoRef.current.pause()
-        setState(prev => ({ ...prev, isPlaying: false }))
+        
+        autoPlayTimerRef.current = setTimeout(() => {
+          if (videoRef.current && !state.isPlaying) {
+            videoRef.current.play()
+            setState(prev => ({ 
+              ...prev, 
+              isPlaying: true 
+            }))
+          }
+        }, 300)
       }
     }
 
-    return () => {
+    const stopAutoPlay = () => {
       if (autoPlayTimerRef.current) {
         clearTimeout(autoPlayTimerRef.current)
+        autoPlayTimerRef.current = null
+      }
+      if (videoRef.current && state.isPlaying) {
+        videoRef.current.pause()
+        setState(prev => ({ 
+          ...prev, 
+          isPlaying: false 
+        }))
       }
     }
-  }, [state.isHovered, state.currentMediaIndex, post.media, state.isPlaying])
+
+    if (viewMode === 'masonry' && state.isHovered && isCurrentMediaVideo) {
+      startAutoPlay()
+    } else {
+      stopAutoPlay()
+    }
+
+    // Cleanup function
+    return () => {
+      stopAutoPlay()
+    }
+  }, [
+    state.isHovered,
+    state.isPlaying,
+    isCurrentMediaVideo,
+    viewMode
+  ])
 
   // Close menus on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (optionsRef.current && !optionsRef.current.contains(event.target as Node)) {
-        setState(prev => ({ ...prev, showOptionsMenu: false }))
+        setState(prev => ({ 
+          ...prev, 
+          showOptionsMenu: false 
+        }))
       }
       if (shareRef.current && !shareRef.current.contains(event.target as Node)) {
-        setState(prev => ({ ...prev, showShareMenu: false }))
+        setState(prev => ({ 
+          ...prev, 
+          showShareMenu: false 
+        }))
       }
     }
 
@@ -673,12 +791,67 @@ export function EnhancedPostCard({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Current media item
-  const mediaArray = useMemo(() => Array.isArray(post.media) ? post.media : [], [post.media])
-  const currentMedia = mediaArray[state.currentMediaIndex] || mediaArray[0]
-  const hasMedia = mediaArray.length > 0
+  // Fullscreen change handler
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setState(prev => ({ 
+        ...prev, 
+        isFullscreen: !!document.fullscreenElement 
+      }))
+    }
 
-  // 1. Pinterest-inspired Masonry View with Overlay Content
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  }, [])
+
+  // 4. Stop video playback when browser tab becomes hidden
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        if (videoRef.current && state.isPlaying) {
+          videoRef.current.pause()
+          setState(prev => ({ 
+            ...prev, 
+            isPlaying: false 
+          }))
+        }
+        // Clear autoplay timer when tab is hidden
+        if (autoPlayTimerRef.current) {
+          clearTimeout(autoPlayTimerRef.current)
+          autoPlayTimerRef.current = null
+        }
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [state.isPlaying])
+
+  // 2. Centralized timeout cleanup logic
+  useEffect(() => {
+    const cleanupTimers = () => {
+      if (videoControlsTimeoutRef.current) {
+        clearTimeout(videoControlsTimeoutRef.current)
+        videoControlsTimeoutRef.current = null
+      }
+      if (autoPlayTimerRef.current) {
+        clearTimeout(autoPlayTimerRef.current)
+        autoPlayTimerRef.current = null
+      }
+    }
+
+    return cleanupTimers
+  }, [])
+
+  // Format time
+  const formatTime = (seconds: number): string => {
+    if (isNaN(seconds)) return '0:00'
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
+
+  // 1. Pinterest-inspired Masonry View with Enhanced Video Support
   if (viewMode === 'masonry') {
     return (
       <div className={cn("relative break-inside-avoid", className)}>
@@ -687,7 +860,10 @@ export function EnhancedPostCard({
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
           className="group relative cursor-pointer"
-          onMouseEnter={() => setState(prev => ({ ...prev, isHovered: true }))}
+          onMouseEnter={() => setState(prev => ({ 
+            ...prev, 
+            isHovered: true 
+          }))}
           onMouseLeave={() => setState(prev => ({ 
             ...prev, 
             isHovered: false,
@@ -703,39 +879,114 @@ export function EnhancedPostCard({
             {/* Media Container */}
             {hasMedia ? (
               <div 
+                ref={mediaContainerRef}
                 className="relative aspect-auto overflow-hidden rounded-xl"
                 onClick={navigateToPostDetail}
               >
-                {currentMedia?.type === 'video' ? (
-                  <div className="relative w-full h-full">
+                {isCurrentMediaVideo ? (
+                  <div 
+                    className="relative w-full h-full"
+                    onMouseMove={showVideoControls}
+                    onMouseEnter={showVideoControls}
+                  >
+                    {/* Loading skeleton */}
+                    {state.mediaLoading && !state.isVideoLoaded && (
+                      <div className="absolute inset-0 bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-700 animate-pulse rounded-xl" />
+                    )}
+                    
                     <video
                       ref={videoRef}
                       src={currentMedia.url}
                       className="w-full h-auto max-h-[600px] object-contain rounded-xl"
                       muted={state.isMuted}
                       loop
-                      onTimeUpdate={handleVideoProgress}
                       playsInline
+                      preload="metadata"
+                      onLoadedData={handleVideoLoaded}
+                      onTimeUpdate={handleVideoTimeUpdate}
+                      onPlay={handleVideoPlay}
+                      onPause={handleVideoPause}
+                      onEnded={handleVideoEnd}
                     />
+                    
                     {/* Video controls overlay */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                      <div className="absolute bottom-3 left-3 right-3">
-                        <div className="w-full bg-white/20 backdrop-blur-sm rounded-full h-1 mb-2">
-                          <div 
-                            className="bg-gradient-to-r from-rose-500 to-pink-500 h-1 rounded-full transition-all duration-300"
-                            style={{ width: `${state.videoProgress}%` }}
-                          />
+                    <div 
+                      className={cn(
+                        "absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent transition-all duration-300",
+                        state.showVideoControls || state.isHovered ? 'opacity-100' : 'opacity-0'
+                      )}
+                    >
+                      {/* Top controls */}
+                      <div className="absolute top-3 left-3 right-3 flex items-center justify-between">
+                        <div className="flex-1">
+                          {/* Video progress bar */}
+                          <div className="w-full bg-white/20 backdrop-blur-sm rounded-full h-1.5 mb-2">
+                            <div 
+                              className="bg-gradient-to-r from-rose-500 to-pink-500 h-1.5 rounded-full transition-all duration-100"
+                              style={{ width: `${state.videoProgress}%` }}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between text-white text-xs">
+                            <span>{formatTime(videoRef.current?.currentTime || 0)}</span>
+                            <span>{formatTime(state.videoDuration)}</span>
+                          </div>
                         </div>
-                        <div className="flex items-center justify-between">
+                      </div>
+
+                      {/* Center play button */}
+                      {!state.isPlaying && (
+                        <div className="absolute inset-0 flex items-center justify-center">
                           <Button
                             variant="ghost"
                             size="icon"
                             onClick={togglePlay}
-                            className="w-8 h-8 bg-white/20 backdrop-blur-lg text-white rounded-full hover:bg-white/30 hover:scale-110 transition-all"
+                            className="w-16 h-16 bg-black/60 backdrop-blur-lg text-white rounded-full hover:bg-black/80 hover:scale-110 transition-all"
                           >
-                            {state.isPlaying ? 
-                              <Pause className="w-3 h-3" /> : 
-                              <Play className="w-3 h-3 ml-0.5" />
+                            <Play className="w-6 h-6 ml-1" />
+                          </Button>
+                        </div>
+                      )}
+
+                      {/* Bottom controls */}
+                      <div className="absolute bottom-3 left-3 right-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={togglePlay}
+                              className="w-10 h-10 bg-white/20 backdrop-blur-lg text-white rounded-full hover:bg-white/30 hover:scale-110 transition-all"
+                            >
+                              {state.isPlaying ? 
+                                <Pause className="w-4 h-4" /> : 
+                                <Play className="w-4 h-4 ml-0.5" />
+                              }
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={toggleMute}
+                              className="w-10 h-10 bg-white/20 backdrop-blur-lg text-white rounded-full hover:bg-white/30 hover:scale-110 transition-all"
+                            >
+                              {state.isMuted ? 
+                                <VolumeX className="w-4 h-4" /> : 
+                                <Volume2 className="w-4 h-4" />
+                              }
+                            </Button>
+                            <div className="text-white text-sm font-medium">
+                              {formatTime(videoRef.current?.currentTime || 0)} / {formatTime(state.videoDuration)}
+                            </div>
+                          </div>
+                          
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={toggleFullscreen}
+                            className="w-10 h-10 bg-white/20 backdrop-blur-lg text-white rounded-full hover:bg-white/30 hover:scale-110 transition-all"
+                          >
+                            {state.isFullscreen ? 
+                              <Minimize2 className="w-4 h-4" /> : 
+                              <Maximize2 className="w-4 h-4" />
                             }
                           </Button>
                         </div>
@@ -745,7 +996,7 @@ export function EnhancedPostCard({
                 ) : (
                   <div className="relative w-full h-full">
                     {/* Loading skeleton */}
-                    {state.mediaLoading && (
+                    {state.mediaLoading && !state.imageLoaded && (
                       <div className="absolute inset-0 bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-700 animate-pulse rounded-xl" />
                     )}
                     <img
@@ -765,7 +1016,7 @@ export function EnhancedPostCard({
                 {/* Top gradient overlay */}
                 <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-transparent" />
 
-                {/* Top bar with user info and badges - ALWAYS VISIBLE */}
+                {/* Top bar with user info and badges */}
                 <div className="absolute top-0 left-0 right-0 p-3 flex items-center justify-between">
                   {/* User info */}
                   <Link 
@@ -821,7 +1072,10 @@ export function EnhancedPostCard({
                         onClick={(e) => {
                           e.preventDefault()
                           e.stopPropagation()
-                          setState(prev => ({ ...prev, showOptionsMenu: !prev.showOptionsMenu }))
+                          setState(prev => ({ 
+                            ...prev, 
+                            showOptionsMenu: !prev.showOptionsMenu 
+                          }))
                         }}
                         className="w-7 h-7 bg-black/60 backdrop-blur-sm text-white rounded-full hover:bg-black/80 transition-colors"
                       >
@@ -835,14 +1089,13 @@ export function EnhancedPostCard({
                             currentUserId={userId}
                             isFollowing={state.isFollowing}
                             onFollow={handleFollow}
-                            onEdit={() => {
-                              if (onEdit) onEdit(post._id)
-                            }}
-                            onDelete={() => {
-                              if (onDelete) onDelete(post._id)
-                            }}
+                            onEdit={() => onEdit?.(post._id)}
+                            onDelete={() => onDelete?.(post._id)}
                             onReport={onReport}
-                            onClose={() => setState(prev => ({ ...prev, showOptionsMenu: false }))}
+                            onClose={() => setState(prev => ({ 
+                              ...prev, 
+                              showOptionsMenu: false 
+                            }))}
                             actionLoading={actionLoading}
                             isSignedIn={isSignedIn}
                           />
@@ -878,16 +1131,14 @@ export function EnhancedPostCard({
                   </>
                 )}
 
-                {/* Main content overlay - Bottom section with proper spacing */}
+                {/* Main content overlay - Bottom section */}
                 <div className="absolute bottom-0 left-0 right-0">
-                  {/* Gradient overlay for better text readability */}
                   <div className="h-48 bg-gradient-to-t from-black/90 via-black/60 to-transparent" />
                   
-                  {/* Content container with proper spacing */}
                   <div className="absolute bottom-0 left-0 right-0 p-4 space-y-3">
-                    {/* Stats row - Left aligned */}
+                    {/* Stats row */}
                     <div className="flex items-center gap-4">
-                      {/* Like button with count */}
+                      {/* Like button */}
                       <button
                         onClick={handleLike}
                         disabled={!isSignedIn || actionLoading.like}
@@ -913,7 +1164,7 @@ export function EnhancedPostCard({
                         </span>
                       </button>
                       
-                      {/* Comment button with count - SHOWING ACTUAL COMMENT COUNT */}
+                      {/* Comment button */}
                       <button
                         onClick={(e) => {
                           e.preventDefault()
@@ -930,7 +1181,6 @@ export function EnhancedPostCard({
                         </span>
                       </button>
 
-                      {/* Action buttons - Right aligned */}
                       <div className="flex-1" />
                       
                       <div className="flex items-center gap-2">
@@ -963,7 +1213,10 @@ export function EnhancedPostCard({
                             onClick={(e) => {
                               e.preventDefault()
                               e.stopPropagation()
-                              setState(prev => ({ ...prev, showShareMenu: !prev.showShareMenu }))
+                              setState(prev => ({ 
+                                ...prev, 
+                                showShareMenu: !prev.showShareMenu 
+                              }))
                             }}
                             className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-500 to-green-500 backdrop-blur-lg text-white hover:scale-110 transition-all duration-300"
                           >
@@ -973,9 +1226,8 @@ export function EnhancedPostCard({
                       </div>
                     </div>
 
-                    {/* Caption and hashtags - Below stats with proper spacing */}
+                    {/* Caption and hashtags */}
                     <div className="space-y-2">
-                      {/* Caption with expand functionality */}
                       {post.caption && (
                         <div className="max-w-full">
                           <p className={cn(
@@ -989,7 +1241,10 @@ export function EnhancedPostCard({
                               onClick={(e) => {
                                 e.preventDefault()
                                 e.stopPropagation()
-                                setState(prev => ({ ...prev, showFullCaption: !prev.showFullCaption }))
+                                setState(prev => ({ 
+                                  ...prev, 
+                                  showFullCaption: !prev.showFullCaption 
+                                }))
                               }}
                               className="text-sm text-white/80 hover:text-white mt-1 font-medium drop-shadow-lg"
                             >
@@ -999,7 +1254,6 @@ export function EnhancedPostCard({
                         </div>
                       )}
 
-                      {/* Hashtags - Wrapped properly */}
                       {post.hashtags && Array.isArray(post.hashtags) && post.hashtags.length > 0 && (
                         <div className="flex flex-wrap gap-2">
                           {post.hashtags.slice(0, 4).map((tag, index) => (
@@ -1041,7 +1295,10 @@ export function EnhancedPostCard({
             {state.showShareMenu && (
               <ShareMenu
                 onShare={handleShare}
-                onClose={() => setState(prev => ({ ...prev, showShareMenu: false }))}
+                onClose={() => setState(prev => ({ 
+                  ...prev, 
+                  showShareMenu: false 
+                }))}
                 copied={state.copied}
                 currentMedia={currentMedia}
                 post={post}
@@ -1059,16 +1316,18 @@ export function EnhancedPostCard({
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        whileHover={{ 
-          scale: 1.02,
-          transition: { duration: 0.2 }
-        }}
+        whileHover={{ scale: 1.02, transition: { duration: 0.2 } }}
         transition={{ duration: 0.2 }}
         className={cn("group relative", className)}
-        onMouseEnter={() => setState(prev => ({ ...prev, isHovered: true }))}
-        onMouseLeave={() => setState(prev => ({ ...prev, isHovered: false }))}
+        onMouseEnter={() => setState(prev => ({ 
+          ...prev, 
+          isHovered: true 
+        }))}
+        onMouseLeave={() => setState(prev => ({ 
+          ...prev, 
+          isHovered: false 
+        }))}
       >
-        {/* Clickable container for navigation */}
         <div 
           onClick={navigateToPostDetail}
           className={cn(
@@ -1077,10 +1336,9 @@ export function EnhancedPostCard({
             "hover:shadow-lg transition-all duration-200"
           )}
         >
-          {/* Photo Only - No details shown */}
           {hasMedia ? (
             <div className="relative aspect-square overflow-hidden rounded-lg">
-              {currentMedia?.type === 'video' ? (
+              {isCurrentMediaVideo ? (
                 <div className="relative w-full h-full">
                   <video
                     src={currentMedia.url}
@@ -1088,6 +1346,7 @@ export function EnhancedPostCard({
                     muted
                     loop
                     playsInline
+                    preload="metadata"
                   />
                   <div className="absolute inset-0 flex items-center justify-center bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                     <Play className="w-8 h-8 text-white/80" />
@@ -1111,14 +1370,12 @@ export function EnhancedPostCard({
                 </div>
               )}
 
-              {/* Multiple Media Indicator */}
               {mediaArray.length > 1 && (
                 <div className="absolute top-2 right-2 bg-black/80 text-white text-xs px-2 py-1 rounded-full">
                   {mediaArray.length}
                 </div>
               )}
 
-              {/* Stats overlay on hover */}
               <AnimatePresence>
                 {state.isHovered && (
                   <motion.div
@@ -1151,7 +1408,6 @@ export function EnhancedPostCard({
                 )}
               </AnimatePresence>
 
-              {/* AI Badge */}
               {post.aiGenerated && (
                 <div className="absolute top-2 left-2">
                   <div className="bg-gradient-to-r from-purple-600 to-violet-600 rounded-full p-1">
@@ -1174,7 +1430,7 @@ export function EnhancedPostCard({
   return null
 }
 
-// Options Menu Component - FIXED: onFollow prop type signature
+// Options Menu Component
 function OptionsMenu({
   post,
   currentUserId,

@@ -1,4 +1,3 @@
-// app/posts/[id]/page.tsx
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
@@ -69,7 +68,6 @@ import { cn } from '@/lib/utils'
 import { useUser } from '@clerk/nextjs'
 import Link from 'next/link'
 
-// Define interfaces
 interface MediaItem {
   url: string;
   type: 'image' | 'video';
@@ -190,6 +188,10 @@ export default function PostDetailPage() {
     saveStatuses: {},
     followStatuses: {}
   });
+  const [isVideoLoaded, setIsVideoLoaded] = useState(false);
+  const [showVideoControls, setShowVideoControls] = useState(false);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [videoControlsTimeout, setVideoControlsTimeout] = useState<NodeJS.Timeout | null>(null);
 
   // Refs
   const headerRef = useRef<HTMLDivElement>(null);
@@ -205,8 +207,80 @@ export default function PostDetailPage() {
   const headerOpacity = useTransform(scrollY, [0, 100], [0, 1]);
   const headerScale = useTransform(scrollY, [0, 100], [0.95, 1]);
 
-  // Current user ID
   const currentUserId = currentUser?.id || '';
+
+  // Video control functions
+  const togglePlay = () => {
+    if (videoRef.current) {
+      if (isPlaying) {
+        videoRef.current.pause();
+      } else {
+        videoRef.current.play();
+      }
+      setIsPlaying(!isPlaying);
+    }
+  };
+
+  const toggleMute = () => {
+    if (videoRef.current) {
+      videoRef.current.muted = !isMuted;
+      setIsMuted(!isMuted);
+    }
+  };
+
+  const toggleFullscreen = () => {
+    if (!mediaContainerRef.current) return;
+    
+    if (!document.fullscreenElement) {
+      mediaContainerRef.current.requestFullscreen();
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen();
+      setIsFullscreen(false);
+    }
+  };
+
+  const handleVideoProgress = () => {
+    if (videoRef.current) {
+      const progress = (videoRef.current.currentTime / videoRef.current.duration) * 100;
+      setVideoProgress(progress);
+    }
+  };
+
+  const handleVideoLoaded = () => {
+    setIsVideoLoaded(true);
+    setVideoDuration(videoRef.current?.duration || 0);
+  };
+
+  const handleVideoPlay = () => {
+    setIsPlaying(true);
+  };
+
+  const handleVideoPause = () => {
+    setIsPlaying(false);
+  };
+
+  const handleVideoEnd = () => {
+    setIsPlaying(false);
+  };
+
+  const showVideoControlsTemporary = () => {
+    setShowVideoControls(true);
+    if (videoControlsTimeout) {
+      clearTimeout(videoControlsTimeout);
+    }
+    const timeout = setTimeout(() => {
+      setShowVideoControls(false);
+    }, 3000);
+    setVideoControlsTimeout(timeout);
+  };
+
+  const formatTime = (seconds: number): string => {
+    if (isNaN(seconds)) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   // Fetch post data
   const fetchPost = useCallback(async () => {
@@ -299,7 +373,7 @@ export default function PostDetailPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Close comment menu on outside click - FIXED
+  // Close comment menu on outside click
   useEffect(() => {
     const handleClickOutsideCommentMenu = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
@@ -311,44 +385,6 @@ export default function PostDetailPage() {
     document.addEventListener('mousedown', handleClickOutsideCommentMenu);
     return () => document.removeEventListener('mousedown', handleClickOutsideCommentMenu);
   }, [activeCommentMenu]);
-
-  // Video controls
-  const togglePlay = () => {
-    if (videoRef.current) {
-      if (isPlaying) {
-        videoRef.current.pause();
-      } else {
-        videoRef.current.play();
-      }
-      setIsPlaying(!isPlaying);
-    }
-  };
-
-  const toggleMute = () => {
-    if (videoRef.current) {
-      videoRef.current.muted = !isMuted;
-      setIsMuted(!isMuted);
-    }
-  };
-
-  const toggleFullscreen = () => {
-    if (!mediaContainerRef.current) return;
-    
-    if (!document.fullscreenElement) {
-      mediaContainerRef.current.requestFullscreen();
-      setIsFullscreen(true);
-    } else {
-      document.exitFullscreen();
-      setIsFullscreen(false);
-    }
-  };
-
-  const handleVideoProgress = () => {
-    if (videoRef.current) {
-      const progress = (videoRef.current.currentTime / videoRef.current.duration) * 100;
-      setVideoProgress(progress);
-    }
-  };
 
   // Handle like
   const handleLike = async () => {
@@ -943,6 +979,15 @@ export default function PostDetailPage() {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
+  // Cleanup timeouts
+  useEffect(() => {
+    return () => {
+      if (videoControlsTimeout) {
+        clearTimeout(videoControlsTimeout);
+      }
+    };
+  }, [videoControlsTimeout]);
+
   // Get trending color based on index
   const getTrendColor = (index: number) => {
     if (index === 0) return 'from-amber-500 to-orange-500';
@@ -1178,8 +1223,12 @@ export default function PostDetailPage() {
               <div 
                 ref={mediaContainerRef}
                 className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-slate-100/50 to-slate-200/50 dark:from-slate-800/50 dark:to-slate-900/50 backdrop-blur-xl border border-white/30 dark:border-slate-700/30 shadow-2xl mb-6"
-                onMouseEnter={() => setIsHovered(true)}
+                onMouseEnter={() => {
+                  setIsHovered(true);
+                  showVideoControlsTemporary();
+                }}
                 onMouseLeave={() => setIsHovered(false)}
+                onMouseMove={showVideoControlsTemporary}
               >
                 {currentMedia && (
                   <>
@@ -1190,32 +1239,57 @@ export default function PostDetailPage() {
                           src={currentMedia.url}
                           muted={isMuted}
                           onTimeUpdate={handleVideoProgress}
-                          onEnded={() => setIsPlaying(false)}
+                          onLoadedData={handleVideoLoaded}
+                          onPlay={handleVideoPlay}
+                          onPause={handleVideoPause}
+                          onEnded={handleVideoEnd}
                           className="w-full h-auto max-h-[75vh] object-contain"
                           playsInline
+                          preload="metadata"
                         />
                         
                         {/* Video Controls */}
                         <div className={cn(
                           "absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent transition-all duration-300",
-                          (isHovered || isPlaying) ? "opacity-100" : "opacity-0"
+                          (showVideoControls || isHovered || isPlaying) ? "opacity-100" : "opacity-0"
                         )}>
-                          <div className="absolute bottom-6 left-6 right-6">
-                            {/* Progress Bar */}
-                            <div className="w-full bg-white/20 backdrop-blur-lg rounded-full h-1.5 mb-4">
+                          {/* Top progress bar */}
+                          <div className="absolute top-4 left-4 right-4">
+                            <div className="w-full bg-white/20 backdrop-blur-lg rounded-full h-1.5 mb-1">
                               <div 
                                 className="bg-gradient-to-r from-rose-500 to-pink-500 h-1.5 rounded-full transition-all duration-100"
                                 style={{ width: `${videoProgress}%` }}
                               />
                             </div>
-                            
+                            <div className="flex items-center justify-between text-white text-xs">
+                              <span>{formatTime(videoRef.current?.currentTime || 0)}</span>
+                              <span>{formatTime(videoDuration)}</span>
+                            </div>
+                          </div>
+                          
+                          {/* Center play button when paused */}
+                          {!isPlaying && (
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={togglePlay}
+                                className="w-20 h-20 bg-black/60 backdrop-blur-lg text-white rounded-full hover:bg-black/80 hover:scale-110 transition-all"
+                              >
+                                <Play className="w-8 h-8 ml-1" />
+                              </Button>
+                            </div>
+                          )}
+
+                          {/* Bottom controls */}
+                          <div className="absolute bottom-6 left-6 right-6">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
                                 <Button
                                   variant="ghost"
                                   size="icon"
                                   onClick={togglePlay}
-                                  className="w-10 h-10 bg-white/20 backdrop-blur-lg text-white hover:bg-white/30 hover:scale-110 transition-all"
+                                  className="w-12 h-12 bg-white/20 backdrop-blur-lg text-white hover:bg-white/30 hover:scale-110 transition-all"
                                 >
                                   {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
                                 </Button>
@@ -1223,10 +1297,13 @@ export default function PostDetailPage() {
                                   variant="ghost"
                                   size="icon"
                                   onClick={toggleMute}
-                                  className="w-10 h-10 bg-white/20 backdrop-blur-lg text-white hover:bg-white/30 hover:scale-110 transition-all"
+                                  className="w-12 h-12 bg-white/20 backdrop-blur-lg text-white hover:bg-white/30 hover:scale-110 transition-all"
                                 >
                                   {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
                                 </Button>
+                                <div className="text-white text-sm font-medium ml-2">
+                                  {formatTime(videoRef.current?.currentTime || 0)} / {formatTime(videoDuration)}
+                                </div>
                               </div>
                               
                               <div className="flex items-center gap-2">
@@ -1234,7 +1311,7 @@ export default function PostDetailPage() {
                                   variant="ghost"
                                   size="icon"
                                   onClick={toggleFullscreen}
-                                  className="w-10 h-10 bg-white/20 backdrop-blur-lg text-white hover:bg-white/30 hover:scale-110 transition-all"
+                                  className="w-12 h-12 bg-white/20 backdrop-blur-lg text-white hover:bg-white/30 hover:scale-110 transition-all"
                                 >
                                   {isFullscreen ? (
                                     <Minimize2 className="w-5 h-5" />
@@ -1526,7 +1603,7 @@ export default function PostDetailPage() {
                         </button>
                       </div>
 
-                      {/* Compact Add Comment - Simplified without #/@ buttons */}
+                      {/* Compact Add Comment */}
                       <div className="flex items-center gap-3">
                         <Avatar className="w-10 h-10 border-2 border-white/80 dark:border-slate-700/80 flex-shrink-0">
                           <AvatarImage src={currentUser?.imageUrl} />
@@ -1643,7 +1720,6 @@ export default function PostDetailPage() {
                                                 setReplyToComment(comment._id);
                                                 setReplyText(`@${comment.user.username} `);
                                                 setActiveCommentMenu(null);
-                                                // FIXED: Use proper type assertion for focus
                                                 setTimeout(() => {
                                                   const replyInput = document.querySelector(`[data-reply-input="${comment._id}"]`) as HTMLInputElement;
                                                   replyInput?.focus();
@@ -1700,7 +1776,6 @@ export default function PostDetailPage() {
                                       onClick={() => {
                                         setReplyToComment(comment._id);
                                         setReplyText(`@${comment.user.username} `);
-                                        // FIXED: Use proper type assertion for focus
                                         const replyInput = document.querySelector(`[data-reply-input="${comment._id}"]`) as HTMLInputElement;
                                         setTimeout(() => replyInput?.focus(), 100);
                                       }}
