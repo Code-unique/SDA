@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion'
-import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/use-toast'
 import { Input } from '@/components/ui/input'
@@ -31,37 +30,24 @@ import {
   Crown,
   UserPlus,
   UserCheck,
-  MapPin,
-  Calendar,
-  Tag,
-  ShoppingBag,
   MoreHorizontal,
   Send,
   ThumbsUp,
   Trash2,
   Edit,
   Flag,
-  Download,
   Copy,
   Check,
   TrendingUp,
   RefreshCw,
   Hash,
   Flame,
-  Eye,
   Clock,
-  Star,
-  Zap,
-  Users,
-  ExternalLink,
-  HeartOff,
-  BookmarkPlus,
+  ShoppingBag,
   MessageSquare,
   ChevronDown,
   ChevronUp,
   MoreVertical,
-  Smile,
-  AtSign,
   Hash as HashIcon
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -86,14 +72,8 @@ interface PostUser {
   email: string;
   isVerified: boolean;
   isPro: boolean;
-  followers: string[];
-  following: string[];
-  badges?: string[];
   bio?: string;
-  location?: string;
-  website?: string;
   createdAt: string;
-  updatedAt: string;
 }
 
 interface Comment {
@@ -110,7 +90,6 @@ interface Comment {
 interface Post {
   _id: string;
   caption: string;
-  content: string;
   media: MediaItem[];
   author: PostUser;
   likes: string[];
@@ -118,16 +97,10 @@ interface Post {
   comments: Comment[];
   tags: string[];
   hashtags?: string[];
-  category?: string;
-  location?: string;
-  isFeatured: boolean;
   aiGenerated?: boolean;
   availableForSale?: boolean;
-  collaboration?: boolean;
   price?: number;
-  currency?: string;
   views?: number;
-  engagement?: number;
   shares?: number;
   createdAt: string;
   updatedAt: string;
@@ -138,7 +111,6 @@ interface TrendingHashtag {
   tag: string;
   count: number;
   trendScore?: number;
-  lastUsed?: string;
 }
 
 interface BatchStatuses {
@@ -165,6 +137,7 @@ export default function PostDetailPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
+  const [isFollowLoading, setIsFollowLoading] = useState(false);
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
@@ -191,7 +164,6 @@ export default function PostDetailPage() {
   const [isVideoLoaded, setIsVideoLoaded] = useState(false);
   const [showVideoControls, setShowVideoControls] = useState(false);
   const [videoDuration, setVideoDuration] = useState(0);
-  const [videoControlsTimeout, setVideoControlsTimeout] = useState<NodeJS.Timeout | null>(null);
 
   // Refs
   const headerRef = useRef<HTMLDivElement>(null);
@@ -266,13 +238,9 @@ export default function PostDetailPage() {
 
   const showVideoControlsTemporary = () => {
     setShowVideoControls(true);
-    if (videoControlsTimeout) {
-      clearTimeout(videoControlsTimeout);
-    }
-    const timeout = setTimeout(() => {
+    setTimeout(() => {
       setShowVideoControls(false);
     }, 3000);
-    setVideoControlsTimeout(timeout);
   };
 
   const formatTime = (seconds: number): string => {
@@ -297,7 +265,7 @@ export default function PostDetailPage() {
         if (data.success && data.data) {
           const postData = data.data;
           setPost(postData);
-          
+
           // Fetch statuses if signed in
           if (isSignedIn && postData._id) {
             try {
@@ -356,7 +324,7 @@ export default function PostDetailPage() {
     if (postId && userLoaded) {
       fetchPost();
     }
-  }, [postId, userLoaded]);
+  }, [postId, userLoaded, fetchPost]);
 
   // Close menus on outside click
   useEffect(() => {
@@ -500,7 +468,7 @@ export default function PostDetailPage() {
 
   // Handle follow
   const handleFollow = async () => {
-    if (!post?.author?._id) return;
+    if (!post?.author?._id || isFollowLoading) return;
 
     if (!isSignedIn) {
       toast({
@@ -512,38 +480,52 @@ export default function PostDetailPage() {
     }
 
     const authorId = post.author._id;
-    const previousIsFollowing = statuses.followStatuses[authorId] || false;
+    const previousIsFollowing = isFollowing;
 
     // Optimistic update
     setIsFollowing(!previousIsFollowing);
+    setIsFollowLoading(true);
 
     try {
-      const response = await fetch(`/api/users/follow`, {
+      const response = await fetch(`/api/users/${authorId}/follow`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: authorId })
+        credentials: 'include'
       });
 
-      if (!response.ok) throw new Error("Follow request failed");
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Follow error:', errorText);
+        throw new Error("Follow request failed");
+      }
 
       const result = await response.json();
       
       if (result.success) {
+        setStatuses(prev => ({
+          ...prev,
+          followStatuses: { ...prev.followStatuses, [authorId]: !previousIsFollowing }
+        }));
+
         toast({
           title: !previousIsFollowing ? "Following" : "Unfollowed",
           description: !previousIsFollowing
             ? `You are now following ${post.author.firstName}`
             : `You unfollowed ${post.author.firstName}`,
         });
+      } else {
+        throw new Error(result.error || "Follow request failed");
       }
-    } catch (error) {
+    } catch (error: any) {
       setIsFollowing(previousIsFollowing);
       
       toast({
         title: "Error",
-        description: "Failed to follow user",
+        description: error.message || "Failed to follow user",
         variant: "destructive"
       });
+    } finally {
+      setIsFollowLoading(false);
     }
   };
 
@@ -576,10 +558,7 @@ export default function PostDetailPage() {
         email: currentUser?.primaryEmailAddress?.emailAddress || '',
         isVerified: false,
         isPro: false,
-        followers: [],
-        following: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        createdAt: new Date().toISOString()
       },
       text: originalCommentText,
       post: postId,
@@ -613,7 +592,6 @@ export default function PostDetailPage() {
             description: "Your comment has been posted"
           });
         } else {
-          // Remove temp comment on error
           setPost(prev => prev ? {
             ...prev,
             comments: prev.comments?.filter(c => c._id !== tempCommentId) || []
@@ -622,7 +600,6 @@ export default function PostDetailPage() {
         }
       }
     } catch (error) {
-      // Remove temp comment on error
       setPost(prev => prev ? {
         ...prev,
         comments: prev.comments?.filter(c => c._id !== tempCommentId) || []
@@ -635,7 +612,6 @@ export default function PostDetailPage() {
       });
     } finally {
       setIsCommenting(false);
-      // Auto-scroll to new comment
       setTimeout(() => {
         if (commentsContainerRef.current) {
           commentsContainerRef.current.scrollTop = 0;
@@ -664,10 +640,7 @@ export default function PostDetailPage() {
         email: currentUser?.primaryEmailAddress?.emailAddress || '',
         isVerified: false,
         isPro: false,
-        followers: [],
-        following: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        createdAt: new Date().toISOString()
       },
       text: originalReplyText,
       post: postId,
@@ -713,7 +686,6 @@ export default function PostDetailPage() {
             description: "Your reply has been posted"
           });
         } else {
-          // Remove temp reply on error
           setPost(prev => {
             if (!prev) return null;
             return {
@@ -733,7 +705,6 @@ export default function PostDetailPage() {
         }
       }
     } catch (error) {
-      // Remove temp reply on error
       setPost(prev => {
         if (!prev) return null;
         return {
@@ -939,7 +910,6 @@ export default function PostDetailPage() {
       return;
     }
 
-    // Refresh statuses if user is signed in and we have a post
     const refreshStatuses = async () => {
       try {
         const response = await fetch('/api/batch-status', {
@@ -978,15 +948,6 @@ export default function PostDetailPage() {
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
-
-  // Cleanup timeouts
-  useEffect(() => {
-    return () => {
-      if (videoControlsTimeout) {
-        clearTimeout(videoControlsTimeout);
-      }
-    };
-  }, [videoControlsTimeout]);
 
   // Get trending color based on index
   const getTrendColor = (index: number) => {
@@ -1427,7 +1388,7 @@ export default function PostDetailPage() {
                 </div>
               </div>
 
-              {/* Author & Caption Card */}
+              {/* Author Card */}
               <div className="rounded-3xl bg-white/50 dark:bg-slate-800/50 backdrop-blur-xl border border-white/30 dark:border-slate-700/30 shadow-xl mb-6 overflow-hidden">
                 <div className="p-6">
                   {/* Author */}
@@ -1468,7 +1429,7 @@ export default function PostDetailPage() {
                       variant="outline"
                       size="sm"
                       onClick={handleFollow}
-                      disabled={!isSignedIn}
+                      disabled={!isSignedIn || isFollowLoading}
                       className={cn(
                         "rounded-full px-4 py-2 backdrop-blur-sm",
                         isFollowing 
@@ -1476,7 +1437,9 @@ export default function PostDetailPage() {
                           : "bg-gradient-to-r from-rose-500 to-pink-500 text-white hover:from-rose-600 hover:to-pink-600 border-0"
                       )}
                     >
-                      {isFollowing ? (
+                      {isFollowLoading ? (
+                        <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                      ) : isFollowing ? (
                         <>
                           <UserCheck className="w-3.5 h-3.5 mr-1.5" />
                           Following
@@ -1572,7 +1535,7 @@ export default function PostDetailPage() {
                 </motion.div>
               )}
 
-              {/* STUNNING COMPACT COMMENTS SECTION */}
+              {/* Comments Section */}
               <AnimatePresence>
                 {showComments && (
                   <motion.div
@@ -1603,7 +1566,7 @@ export default function PostDetailPage() {
                         </button>
                       </div>
 
-                      {/* Compact Add Comment */}
+                      {/* Add Comment */}
                       <div className="flex items-center gap-3">
                         <Avatar className="w-10 h-10 border-2 border-white/80 dark:border-slate-700/80 flex-shrink-0">
                           <AvatarImage src={currentUser?.imageUrl} />
@@ -2026,7 +1989,7 @@ export default function PostDetailPage() {
               {post.tags && post.tags.length > 0 && (
                 <div className="rounded-3xl bg-white/50 dark:bg-slate-800/50 backdrop-blur-xl border border-white/30 dark:border-slate-700/30 shadow-xl p-6">
                   <h4 className="font-bold text-lg text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-                    <Tag className="w-5 h-5 text-emerald-500" />
+                    <HashIcon className="w-5 h-5 text-emerald-500" />
                     Related Tags
                   </h4>
                   <div className="flex flex-wrap gap-2">

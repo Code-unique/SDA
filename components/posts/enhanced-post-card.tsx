@@ -66,6 +66,7 @@ interface EnhancedPostCardProps {
   featured?: boolean
   viewMode?: 'grid' | 'masonry' | 'feed' | 'detailed'
   className?: string
+  autoPlayVideo?: boolean
 }
 
 const formatNumber = (num: number): string => {
@@ -149,7 +150,8 @@ export function EnhancedPostCard({
   compact = false,
   featured = false,
   viewMode = 'masonry',
-  className
+  className,
+  autoPlayVideo = true
 }: EnhancedPostCardProps) {
   const { user: currentUser, isLoaded: userLoaded, isSignedIn: clerkIsSignedIn } = useUser()
   const router = useRouter()
@@ -203,6 +205,7 @@ export function EnhancedPostCard({
   const autoPlayTimerRef = useRef<NodeJS.Timeout | null>(null)
   const imageRef = useRef<HTMLImageElement>(null)
   const videoControlsTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const observerRef = useRef<IntersectionObserver | null>(null)
   
   // Current media item - declared before hooks that reference them
   const mediaArray = useMemo(() => Array.isArray(post.media) ? post.media : [], [post.media])
@@ -211,6 +214,69 @@ export function EnhancedPostCard({
   const isCurrentMediaVideo = currentMedia?.type === 'video'
   const userId = currentUserId || currentUser?.id || ''
   const isSignedIn = !!clerkIsSignedIn
+
+  // Intersection Observer for auto-play
+  useEffect(() => {
+    if (!videoRef.current || !autoPlayVideo) return
+
+    const observerCallback = (entries: IntersectionObserverEntry[]) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting && isCurrentMediaVideo) {
+          // Video is in viewport
+          if (videoRef.current && !state.isPlaying) {
+            videoRef.current.play().catch(error => {
+              console.log('Auto-play prevented:', error)
+              // Fallback: try to play with user interaction
+              document.addEventListener('click', handleUserInteractionForPlayback, { once: true })
+            })
+            setState(prev => ({ 
+              ...prev, 
+              isPlaying: true 
+            }))
+          }
+        } else {
+          // Video is out of viewport
+          if (videoRef.current && state.isPlaying) {
+            videoRef.current.pause()
+            setState(prev => ({ 
+              ...prev, 
+              isPlaying: false 
+            }))
+          }
+        }
+      })
+    }
+
+    // Handle user interaction for playback (fallback for autoplay restrictions)
+    const handleUserInteractionForPlayback = () => {
+      if (videoRef.current && !state.isPlaying) {
+        videoRef.current.play().catch(error => {
+          console.log('Playback failed even after user interaction:', error)
+        })
+      }
+    }
+
+    // Set up intersection observer
+    observerRef.current = new IntersectionObserver(
+      observerCallback,
+      {
+        threshold: 0.5, // 50% of video should be visible
+        rootMargin: '0px 0px -100px 0px' // Trigger slightly before leaving viewport
+      }
+    )
+
+    if (videoRef.current) {
+      observerRef.current.observe(videoRef.current)
+    }
+
+    // Cleanup
+    return () => {
+      if (observerRef.current) {
+        observerRef.current.disconnect()
+      }
+      document.removeEventListener('click', handleUserInteractionForPlayback)
+    }
+  }, [isCurrentMediaVideo, autoPlayVideo, state.isPlaying])
 
   // 1. Prevent currentMediaIndex from going out of bounds
   useEffect(() => {
@@ -570,13 +636,25 @@ export function EnhancedPostCard({
       if (state.isPlaying) {
         videoRef.current.pause()
       } else {
-        videoRef.current.play()
+        videoRef.current.play().catch(error => {
+          console.log('Play failed:', error)
+        })
       }
-      setState(prev => ({ 
-        ...prev, 
-        isPlaying: !prev.isPlaying 
-      }))
     }
+  }
+
+  const handleVideoPlay = () => {
+    setState(prev => ({ 
+      ...prev, 
+      isPlaying: true 
+    }))
+  }
+
+  const handleVideoPause = () => {
+    setState(prev => ({ 
+      ...prev, 
+      isPlaying: false 
+    }))
   }
 
   const toggleMute = (e: React.MouseEvent) => {
@@ -629,20 +707,16 @@ export function EnhancedPostCard({
       mediaLoading: false,
       videoDuration: videoRef.current?.duration || 0
     }))
-  }
-
-  const handleVideoPlay = () => {
-    setState(prev => ({ 
-      ...prev, 
-      isPlaying: true 
-    }))
-  }
-
-  const handleVideoPause = () => {
-    setState(prev => ({ 
-      ...prev, 
-      isPlaying: false 
-    }))
+    
+    // Try to auto-play if video is in viewport
+    if (autoPlayVideo && observerRef.current && videoRef.current) {
+      const isIntersecting = observerRef.current.takeRecords?.().some(entry => entry.isIntersecting) || false
+      if (isIntersecting && !state.isPlaying) {
+        videoRef.current.play().catch(error => {
+          console.log('Auto-play on load prevented:', error)
+        })
+      }
+    }
   }
 
   const handleVideoEnd = () => {
@@ -718,58 +792,6 @@ export function EnhancedPostCard({
     router.push(`/posts/${post._id}`)
   }, [post._id, router])
 
-  // 2. Fixed autoplay timer handling with centralized cleanup
-  useEffect(() => {
-    const startAutoPlay = () => {
-      if (viewMode === 'masonry' && state.isHovered && isCurrentMediaVideo) {
-        // Clear any existing timer
-        if (autoPlayTimerRef.current) {
-          clearTimeout(autoPlayTimerRef.current)
-        }
-        
-        autoPlayTimerRef.current = setTimeout(() => {
-          if (videoRef.current && !state.isPlaying) {
-            videoRef.current.play()
-            setState(prev => ({ 
-              ...prev, 
-              isPlaying: true 
-            }))
-          }
-        }, 300)
-      }
-    }
-
-    const stopAutoPlay = () => {
-      if (autoPlayTimerRef.current) {
-        clearTimeout(autoPlayTimerRef.current)
-        autoPlayTimerRef.current = null
-      }
-      if (videoRef.current && state.isPlaying) {
-        videoRef.current.pause()
-        setState(prev => ({ 
-          ...prev, 
-          isPlaying: false 
-        }))
-      }
-    }
-
-    if (viewMode === 'masonry' && state.isHovered && isCurrentMediaVideo) {
-      startAutoPlay()
-    } else {
-      stopAutoPlay()
-    }
-
-    // Cleanup function
-    return () => {
-      stopAutoPlay()
-    }
-  }, [
-    state.isHovered,
-    state.isPlaying,
-    isCurrentMediaVideo,
-    viewMode
-  ])
-
   // Close menus on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -814,11 +836,6 @@ export function EnhancedPostCard({
             ...prev, 
             isPlaying: false 
           }))
-        }
-        // Clear autoplay timer when tab is hidden
-        if (autoPlayTimerRef.current) {
-          clearTimeout(autoPlayTimerRef.current)
-          autoPlayTimerRef.current = null
         }
       }
     }
@@ -901,6 +918,7 @@ export function EnhancedPostCard({
                       muted={state.isMuted}
                       loop
                       playsInline
+                      autoPlay={autoPlayVideo}
                       preload="metadata"
                       onLoadedData={handleVideoLoaded}
                       onTimeUpdate={handleVideoTimeUpdate}
@@ -1341,12 +1359,17 @@ export function EnhancedPostCard({
               {isCurrentMediaVideo ? (
                 <div className="relative w-full h-full">
                   <video
+                    ref={videoRef}
                     src={currentMedia.url}
                     className="w-full h-full object-cover"
                     muted
                     loop
                     playsInline
+                    autoPlay={autoPlayVideo}
                     preload="metadata"
+                    onLoadedData={handleVideoLoaded}
+                    onPlay={handleVideoPlay}
+                    onPause={handleVideoPause}
                   />
                   <div className="absolute inset-0 flex items-center justify-center bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                     <Play className="w-8 h-8 text-white/80" />
