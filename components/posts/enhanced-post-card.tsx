@@ -38,7 +38,7 @@ import {
   Minimize2
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Post } from '@/types/post'
+import { Post, User } from '@/types/post'
 
 interface BatchStatuses {
   likeStatuses: Record<string, boolean>
@@ -70,12 +70,14 @@ interface EnhancedPostCardProps {
 }
 
 const formatNumber = (num: number): string => {
+  if (!num && num !== 0) return '0'
   if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
   if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
   return num.toString()
 }
 
 const getTimeAgo = (date: string): string => {
+  if (!date) return 'Recently'
   const now = new Date()
   const postDate = new Date(date)
   const diffInHours = (now.getTime() - postDate.getTime()) / (1000 * 60 * 60)
@@ -86,49 +88,68 @@ const getTimeAgo = (date: string): string => {
   return postDate.toLocaleDateString()
 }
 
-const getSafeArray = (data: any): any[] => {
-  if (!data) return []
-  if (Array.isArray(data)) return data
-  if (typeof data === 'number') return []
-  return []
+// Helper function to safely get author properties
+const getAuthorProperty = <T,>(author: string | User, property: keyof User, defaultValue: T): T => {
+  if (!author || typeof author === 'string') return defaultValue
+  return (author as User)[property] as T || defaultValue
 }
 
-const isUserInArray = (array: any[], userId?: string): boolean => {
-  if (!userId || !array || !Array.isArray(array)) return false
-  return array.some(item => {
-    if (!item) return false
-    if (typeof item === 'string') return item === userId
-    if (typeof item === 'object' && item._id) return item._id === userId
-    return false
-  })
-}
-
-const getCount = (data: any): number => {
-  if (!data) return 0
-  if (typeof data === 'number') return data
-  if (Array.isArray(data)) return data.length
-  return 0
-}
-
-const getCommentCountFromPost = (post: Post): number => {
-  if (post.commentCount && typeof post.commentCount === 'number') {
-    return post.commentCount
-  }
-  if ((post as any).commentsCount && typeof (post as any).commentsCount === 'number') {
+// IMPORTANT: Helper functions to get counts from post
+const getCommentCount = (post: Post): number => {
+  // First check for commentsCount (from API)
+  if ((post as any).commentsCount !== undefined && typeof (post as any).commentsCount === 'number') {
     return (post as any).commentsCount
   }
-  const commentsArray = getSafeArray(post.comments)
-  if (commentsArray.length > 0) {
-    return commentsArray.length
+  
+  // Then check for commentCount
+  if ((post as any).commentCount !== undefined && typeof (post as any).commentCount === 'number') {
+    return (post as any).commentCount
   }
+  
+  // Fallback to comments array length
+  if (Array.isArray(post.comments)) {
+    return post.comments.length
+  }
+  
   return 0
 }
 
-const getCommentsArray = (comments: any): any[] => {
-  if (!comments) return []
-  if (Array.isArray(comments)) return comments
-  if (typeof comments === 'number') return []
-  return []
+const getLikeCount = (post: Post): number => {
+  // First check for likesCount (from API)
+  if ((post as any).likesCount !== undefined && typeof (post as any).likesCount === 'number') {
+    return (post as any).likesCount
+  }
+  
+  // Then check for likeCount
+  if ((post as any).likeCount !== undefined && typeof (post as any).likeCount === 'number') {
+    return (post as any).likeCount
+  }
+  
+  // Fallback to likes array length
+  if (Array.isArray(post.likes)) {
+    return post.likes.length
+  }
+  
+  return 0
+}
+
+const getSaveCount = (post: Post): number => {
+  // First check for savesCount (from API)
+  if ((post as any).savesCount !== undefined && typeof (post as any).savesCount === 'number') {
+    return (post as any).savesCount
+  }
+  
+  // Then check for saveCount
+  if ((post as any).saveCount !== undefined && typeof (post as any).saveCount === 'number') {
+    return (post as any).saveCount
+  }
+  
+  // Fallback to saves array length
+  if (Array.isArray(post.saves)) {
+    return post.saves.length
+  }
+  
+  return 0
 }
 
 export function EnhancedPostCard({
@@ -157,9 +178,10 @@ export function EnhancedPostCard({
   const router = useRouter()
   const { toast } = useToast()
   
-  const initialCommentCount = useMemo(() => {
-    return getCommentCountFromPost(post)
-  }, [post])
+  // Get counts using helper functions
+  const initialCommentCount = useMemo(() => getCommentCount(post), [post])
+  const initialLikeCount = useMemo(() => getLikeCount(post), [post])
+  const initialSaveCount = useMemo(() => getSaveCount(post), [post])
 
   const [state, setState] = useState({
     currentMediaIndex: 0,
@@ -168,8 +190,8 @@ export function EnhancedPostCard({
     isLiked: false,
     isSaved: false,
     isFollowing: false,
-    likeCount: getCount(post.likes),
-    saveCount: getCount(post.saves),
+    likeCount: initialLikeCount,
+    saveCount: initialSaveCount,
     commentCount: initialCommentCount,
     showShareMenu: false,
     showOptionsMenu: false,
@@ -207,7 +229,6 @@ export function EnhancedPostCard({
   const videoControlsTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const observerRef = useRef<IntersectionObserver | null>(null)
   
-  // Current media item - declared before hooks that reference them
   const mediaArray = useMemo(() => Array.isArray(post.media) ? post.media : [], [post.media])
   const currentMedia = mediaArray[state.currentMediaIndex] || mediaArray[0]
   const hasMedia = mediaArray.length > 0
@@ -215,118 +236,76 @@ export function EnhancedPostCard({
   const userId = currentUserId || currentUser?.id || ''
   const isSignedIn = !!clerkIsSignedIn
 
-  // Intersection Observer for auto-play
+  // Safely get author properties
+  const author = useMemo(() => {
+    if (!post.author || typeof post.author === 'string') {
+      return null
+    }
+    return post.author as User
+  }, [post.author])
+
+  const authorId = useMemo(() => getAuthorProperty(post.author, '_id', ''), [post.author])
+  const authorFirstName = useMemo(() => getAuthorProperty(post.author, 'firstName', 'User'), [post.author])
+  const authorUsername = useMemo(() => getAuthorProperty(post.author, 'username', ''), [post.author])
+  const authorAvatar = useMemo(() => getAuthorProperty(post.author, 'avatar', ''), [post.author])
+  const authorIsVerified = useMemo(() => getAuthorProperty(post.author, 'isVerified', false), [post.author])
+  const authorFollowers = useMemo(() => {
+    const followers = getAuthorProperty(post.author, 'followers', [])
+    return Array.isArray(followers) ? followers : []
+  }, [post.author])
+
+  // Update counts when post changes
   useEffect(() => {
-    if (!videoRef.current || !autoPlayVideo) return
-
-    const observerCallback = (entries: IntersectionObserverEntry[]) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting && isCurrentMediaVideo) {
-          // Video is in viewport
-          if (videoRef.current && !state.isPlaying) {
-            videoRef.current.play().catch(error => {
-              console.log('Auto-play prevented:', error)
-              // Fallback: try to play with user interaction
-              document.addEventListener('click', handleUserInteractionForPlayback, { once: true })
-            })
-            setState(prev => ({ 
-              ...prev, 
-              isPlaying: true 
-            }))
-          }
-        } else {
-          // Video is out of viewport
-          if (videoRef.current && state.isPlaying) {
-            videoRef.current.pause()
-            setState(prev => ({ 
-              ...prev, 
-              isPlaying: false 
-            }))
-          }
-        }
-      })
-    }
-
-    // Handle user interaction for playback (fallback for autoplay restrictions)
-    const handleUserInteractionForPlayback = () => {
-      if (videoRef.current && !state.isPlaying) {
-        videoRef.current.play().catch(error => {
-          console.log('Playback failed even after user interaction:', error)
-        })
-      }
-    }
-
-    // Set up intersection observer
-    observerRef.current = new IntersectionObserver(
-      observerCallback,
-      {
-        threshold: 0.5, // 50% of video should be visible
-        rootMargin: '0px 0px -100px 0px' // Trigger slightly before leaving viewport
-      }
-    )
-
-    if (videoRef.current) {
-      observerRef.current.observe(videoRef.current)
-    }
-
-    // Cleanup
-    return () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect()
-      }
-      document.removeEventListener('click', handleUserInteractionForPlayback)
-    }
-  }, [isCurrentMediaVideo, autoPlayVideo, state.isPlaying])
-
-  // 1. Prevent currentMediaIndex from going out of bounds
-  useEffect(() => {
-    if (mediaArray.length > 0 && state.currentMediaIndex >= mediaArray.length) {
-      setState(prev => ({
-        ...prev,
-        currentMediaIndex: 0,
-        isPlaying: false,
-        isVideoLoaded: false,
-        mediaLoading: true
-      }))
-    }
-  }, [mediaArray.length, state.currentMediaIndex])
-
-  // Update comment count when post changes
-  useEffect(() => {
-    const newCommentCount = getCommentCountFromPost(post)
-    setState(prev => {
-      if (prev.commentCount === newCommentCount) return prev
-      return {
-        ...prev,
-        commentCount: newCommentCount
-      }
-    })
+    setState(prev => ({
+      ...prev,
+      commentCount: getCommentCount(post),
+      likeCount: getLikeCount(post),
+      saveCount: getSaveCount(post)
+    }))
   }, [post])
 
-  // Initialize states
+  // Initialize states from batch data or API
   const initializeFromPostData = useCallback(() => {
-    const likesArray = getSafeArray(post.likes)
-    const savesArray = getSafeArray(post.saves)
-    const followersArray = getSafeArray(post.author?.followers)
+    const likesArray = Array.isArray(post.likes) ? post.likes : []
+    const savesArray = Array.isArray(post.saves) ? post.saves : []
     
-    const liked = isUserInArray(likesArray, userId)
-    const saved = isUserInArray(savesArray, userId)
-    const following = isUserInArray(followersArray, userId)
+    const liked = userId && likesArray.some(item => {
+      if (!item) return false
+      if (typeof item === 'string') return item === userId
+      if (typeof item === 'object' && (item as any)._id) return (item as any)._id === userId
+      return false
+    })
+    
+    const saved = userId && savesArray.some(item => {
+      if (!item) return false
+      if (typeof item === 'string') return item === userId
+      if (typeof item === 'object' && (item as any)._id) return (item as any)._id === userId
+      return false
+    })
+    
+    const following = userId && authorFollowers.some((item: any) => {
+      if (!item) return false
+      if (typeof item === 'string') return item === userId
+      if (typeof item === 'object' && (item as any)._id) return (item as any)._id === userId
+      return false
+    })
     
     setState(prev => ({
       ...prev,
-      isLiked: liked,
-      isSaved: saved,
-      isFollowing: following,
-      commentCount: initialCommentCount
+      isLiked: !!liked,
+      isSaved: !!saved,
+      isFollowing: !!following,
+      commentCount: getCommentCount(post),
+      likeCount: getLikeCount(post),
+      saveCount: getSaveCount(post)
     }))
     
     setStatuses({
-      likeStatuses: { [post._id]: liked },
-      saveStatuses: { [post._id]: { saved: saved } },
-      followStatuses: { [post.author?._id]: following }
+      likeStatuses: { [post._id]: !!liked },
+      saveStatuses: { [post._id]: { saved: !!saved } },
+      followStatuses: { [authorId]: !!following }
     })
-  }, [post._id, post.author?._id, post.likes, post.saves, post.author?.followers, userId, initialCommentCount])
+  }, [post._id, authorId, post.likes, post.saves, authorFollowers, userId, post])
 
   // Fetch statuses
   const fetchStatuses = useCallback(async () => {
@@ -343,7 +322,7 @@ export function EnhancedPostCard({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           postIds: [post._id],
-          userIds: post.author?._id ? [post.author._id] : []
+          userIds: authorId ? [authorId] : []
         })
       })
 
@@ -357,8 +336,7 @@ export function EnhancedPostCard({
             ...prev,
             isLiked: batchData.likeStatuses[post._id] || false,
             isSaved: batchData.saveStatuses[post._id]?.saved || false,
-            isFollowing: batchData.followStatuses[post.author?._id] || false,
-            commentCount: initialCommentCount
+            isFollowing: batchData.followStatuses[authorId] || false
           }))
         } else {
           initializeFromPostData()
@@ -369,7 +347,7 @@ export function EnhancedPostCard({
     } catch (error) {
       initializeFromPostData()
     }
-  }, [post._id, post.author?._id, isSignedIn, initialCommentCount, initializeFromPostData])
+  }, [post._id, authorId, isSignedIn, initializeFromPostData])
 
   useEffect(() => {
     if (batchStatusData) {
@@ -378,13 +356,12 @@ export function EnhancedPostCard({
         ...prev,
         isLiked: batchStatusData.likeStatuses[post._id] || false,
         isSaved: batchStatusData.saveStatuses[post._id]?.saved || false,
-        isFollowing: batchStatusData.followStatuses[post.author?._id] || false,
-        commentCount: initialCommentCount
+        isFollowing: batchStatusData.followStatuses[authorId] || false
       }))
     } else if (userLoaded) {
       fetchStatuses()
     }
-  }, [batchStatusData, post._id, post.author?._id, userLoaded, fetchStatuses, initialCommentCount])
+  }, [batchStatusData, post._id, authorId, userLoaded, fetchStatuses])
 
   // Handle like
   const handleLike = useCallback(async (e: React.MouseEvent) => {
@@ -433,12 +410,21 @@ export function EnhancedPostCard({
         if (!data.success) {
           throw new Error(data.error || 'Like failed')
         }
+        
+        // Update count from response if available
+        if (data.likesCount !== undefined) {
+          setState(prev => ({
+            ...prev,
+            likeCount: data.likesCount
+          }))
+        }
       }
     } catch (error: any) {
+      // Rollback on error
       setState(prev => ({
         ...prev,
         isLiked: wasLiked,
-        likeCount: wasLiked ? prev.likeCount + 1 : prev.likeCount - 1
+        likeCount: wasLiked ? prev.likeCount : prev.likeCount - 1
       }))
       
       setStatuses(prev => ({
@@ -454,7 +440,7 @@ export function EnhancedPostCard({
     } finally {
       setActionLoading(prev => ({ ...prev, like: false }))
     }
-  }, [actionLoading.like, post._id, userId, isSignedIn, toast, onLike, statuses.likeStatuses, state.isLiked])
+  }, [actionLoading.like, post._id, userId, isSignedIn, toast, onLike, statuses.likeStatuses, state.isLiked, state.likeCount])
 
   // Handle save
   const handleSave = useCallback(async (e: React.MouseEvent) => {
@@ -509,12 +495,21 @@ export function EnhancedPostCard({
         if (!data.success) {
           throw new Error(data.error || 'Save failed')
         }
+        
+        // Update count from response if available
+        if (data.savesCount !== undefined) {
+          setState(prev => ({
+            ...prev,
+            saveCount: data.savesCount
+          }))
+        }
       }
     } catch (error: any) {
+      // Rollback on error
       setState(prev => ({
         ...prev,
         isSaved: wasSaved,
-        saveCount: wasSaved ? prev.saveCount + 1 : prev.saveCount - 1
+        saveCount: wasSaved ? prev.saveCount : prev.saveCount - 1
       }))
       
       setStatuses(prev => ({
@@ -533,11 +528,11 @@ export function EnhancedPostCard({
     } finally {
       setActionLoading(prev => ({ ...prev, save: false }))
     }
-  }, [actionLoading.save, post._id, userId, isSignedIn, toast, onSave, statuses.saveStatuses, state.isSaved])
+  }, [actionLoading.save, post._id, userId, isSignedIn, toast, onSave, statuses.saveStatuses, state.isSaved, state.saveCount])
 
   // Handle follow
   const handleFollow = useCallback(async () => {
-    if (actionLoading.follow || !post.author?._id) return
+    if (actionLoading.follow || !authorId) return
 
     if (!isSignedIn) {
       toast({
@@ -548,7 +543,6 @@ export function EnhancedPostCard({
       return
     }
 
-    const authorId = post.author._id
     const previousIsFollowing = statuses.followStatuses[authorId] || state.isFollowing
 
     setState(prev => ({ 
@@ -564,7 +558,7 @@ export function EnhancedPostCard({
 
     try {
       if (onFollow) {
-        await onFollow(post.author._id)
+        await onFollow(authorId)
       } else {
         const response = await fetch(`/api/users/${authorId}/follow`, {
           method: "POST",
@@ -591,7 +585,7 @@ export function EnhancedPostCard({
     } finally {
       setActionLoading(prev => ({ ...prev, follow: false }))
     }
-  }, [actionLoading.follow, post.author?._id, userId, isSignedIn, toast, onFollow, statuses.followStatuses, state.isFollowing])
+  }, [actionLoading.follow, authorId, userId, isSignedIn, toast, onFollow, statuses.followStatuses, state.isFollowing])
 
   // Handle share
   const handleShare = useCallback(async (method: 'link' | 'social' = 'link') => {
@@ -610,7 +604,7 @@ export function EnhancedPostCard({
         })
       } else if (method === 'social' && navigator.share) {
         await navigator.share({
-          title: `Check out this post by ${post.author?.firstName}`,
+          title: `Check out this post by ${authorFirstName}`,
           text: post.caption,
           url: postUrl,
         })
@@ -626,7 +620,7 @@ export function EnhancedPostCard({
         variant: "destructive"
       })
     }
-  }, [post._id, post.author?.firstName, post.caption, onShare, toast])
+  }, [post._id, authorFirstName, post.caption, onShare, toast])
 
   // Video controls
   const togglePlay = (e: React.MouseEvent) => {
@@ -708,7 +702,6 @@ export function EnhancedPostCard({
       videoDuration: videoRef.current?.duration || 0
     }))
     
-    // Try to auto-play if video is in viewport
     if (autoPlayVideo && observerRef.current && videoRef.current) {
       const isIntersecting = observerRef.current.takeRecords?.().some(entry => entry.isIntersecting) || false
       if (isIntersecting && !state.isPlaying) {
@@ -826,41 +819,18 @@ export function EnhancedPostCard({
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
   }, [])
 
-  // 4. Stop video playback when browser tab becomes hidden
+  // Cleanup
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        if (videoRef.current && state.isPlaying) {
-          videoRef.current.pause()
-          setState(prev => ({ 
-            ...prev, 
-            isPlaying: false 
-          }))
-        }
-      }
-    }
-
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
-  }, [state.isPlaying])
-
-  // 2. Centralized timeout cleanup logic
-  useEffect(() => {
-    const cleanupTimers = () => {
+    return () => {
       if (videoControlsTimeoutRef.current) {
         clearTimeout(videoControlsTimeoutRef.current)
-        videoControlsTimeoutRef.current = null
       }
       if (autoPlayTimerRef.current) {
         clearTimeout(autoPlayTimerRef.current)
-        autoPlayTimerRef.current = null
       }
     }
-
-    return cleanupTimers
   }, [])
 
-  // Format time
   const formatTime = (seconds: number): string => {
     if (isNaN(seconds)) return '0:00'
     const mins = Math.floor(seconds / 60)
@@ -1037,33 +1007,35 @@ export function EnhancedPostCard({
                 {/* Top bar with user info and badges */}
                 <div className="absolute top-0 left-0 right-0 p-3 flex items-center justify-between">
                   {/* User info */}
-                  <Link 
-                    href={`/profile/${post.author?.username}`} 
-                    className="flex items-center gap-2 group/author"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Avatar className="w-7 h-7 border-2 border-white/80">
-                        <AvatarImage src={post.author?.avatar} />
-                        <AvatarFallback className="bg-gradient-to-br from-rose-500 to-pink-500 text-white text-xs font-semibold">
-                          {post.author?.firstName?.[0] || 'U'}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex flex-col">
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs font-semibold text-white drop-shadow-lg">
-                            {post.author?.firstName || 'User'}
+                  {authorUsername && (
+                    <Link 
+                      href={`/profile/${authorUsername}`} 
+                      className="flex items-center gap-2 group/author"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Avatar className="w-7 h-7 border-2 border-white/80">
+                          <AvatarImage src={authorAvatar} />
+                          <AvatarFallback className="bg-gradient-to-br from-rose-500 to-pink-500 text-white text-xs font-semibold">
+                            {authorFirstName?.[0] || 'U'}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs font-semibold text-white drop-shadow-lg">
+                              {authorFirstName}
+                            </span>
+                            {authorIsVerified && (
+                              <Verified className="w-3 h-3 text-blue-400 drop-shadow-lg" />
+                            )}
+                          </div>
+                          <span className="text-xs text-white/80 drop-shadow-lg">
+                            {getTimeAgo(post.createdAt)}
                           </span>
-                          {post.author?.isVerified && (
-                            <Verified className="w-3 h-3 text-blue-400 drop-shadow-lg" />
-                          )}
                         </div>
-                        <span className="text-xs text-white/80 drop-shadow-lg">
-                          {getTimeAgo(post.createdAt)}
-                        </span>
                       </div>
-                    </div>
-                  </Link>
+                    </Link>
+                  )}
 
                   {/* Top badges and options button */}
                   <div className="flex items-center gap-2">
@@ -1105,6 +1077,8 @@ export function EnhancedPostCard({
                           <OptionsMenu
                             post={post}
                             currentUserId={userId}
+                            authorId={authorId}
+                            authorFirstName={authorFirstName}
                             isFollowing={state.isFollowing}
                             onFollow={handleFollow}
                             onEdit={() => onEdit?.(post._id)}
@@ -1116,6 +1090,7 @@ export function EnhancedPostCard({
                             }))}
                             actionLoading={actionLoading}
                             isSignedIn={isSignedIn}
+                            toast={toast}
                           />
                         )}
                       </AnimatePresence>
@@ -1154,7 +1129,7 @@ export function EnhancedPostCard({
                   <div className="h-48 bg-gradient-to-t from-black/90 via-black/60 to-transparent" />
                   
                   <div className="absolute bottom-0 left-0 right-0 p-4 space-y-3">
-                    {/* Stats row */}
+                    {/* Stats row - FIXED: Now shows actual numbers */}
                     <div className="flex items-center gap-4">
                       {/* Like button */}
                       <button
@@ -1457,6 +1432,8 @@ export function EnhancedPostCard({
 function OptionsMenu({
   post,
   currentUserId,
+  authorId,
+  authorFirstName,
   isFollowing,
   onFollow,
   onEdit,
@@ -1464,10 +1441,13 @@ function OptionsMenu({
   onReport,
   onClose,
   actionLoading,
-  isSignedIn
+  isSignedIn,
+  toast
 }: {
   post: Post
   currentUserId?: string
+  authorId: string
+  authorFirstName: string
   isFollowing: boolean
   onFollow: () => void
   onEdit: () => void
@@ -1476,9 +1456,9 @@ function OptionsMenu({
   onClose: () => void
   actionLoading: { follow: boolean }
   isSignedIn: boolean
+  toast: any
 }) {
-  const { toast } = useToast()
-  const isAuthor = currentUserId === post.author._id
+  const isAuthor = currentUserId === authorId
 
   return (
     <motion.div
@@ -1520,8 +1500,8 @@ function OptionsMenu({
             )}
             <span>
               {actionLoading.follow ? 'Processing...' :
-                isFollowing ? `Unfollow ${post.author.firstName}` :
-                  `Follow ${post.author.firstName}`}
+                isFollowing ? `Unfollow ${authorFirstName}` :
+                  `Follow ${authorFirstName}`}
             </span>
           </button>
           <button
@@ -1585,8 +1565,6 @@ function ShareMenu({
   currentMedia: any
   post: Post
 }) {
-  const { toast } = useToast()
-
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95, y: 10 }}

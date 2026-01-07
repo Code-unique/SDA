@@ -1,7 +1,6 @@
-// components/explore/ExploreClient.tsx
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { EnhancedPostCard } from '@/components/posts/enhanced-post-card'
 import { Button } from '@/components/ui/button'
@@ -41,7 +40,7 @@ interface PostApiResponse {
     username: string
     firstName: string
     lastName: string
-    avatar: string
+    avatar?: string
     isVerified?: boolean
     isPro?: boolean
   }
@@ -83,11 +82,23 @@ interface Pagination {
   hasMore: boolean
 }
 
+interface FilterState {
+  searchQuery: string
+  mediaFilter: 'all' | 'images' | 'videos'
+  sortBy: 'recent' | 'popular' | 'trending'
+  selectedHashtag: string | null
+  viewMode: 'masonry' | 'grid'
+}
+
 export default function ExplorePage() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const { toast } = useToast()
   const observerTarget = useRef<HTMLDivElement>(null)
+  const isMountedRef = useRef(true)
+  const loadingRef = useRef(false)
+  const loadingMoreRef = useRef(false)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   const [posts, setPosts] = useState<PostApiResponse[]>([])
   const [trendingHashtags, setTrendingHashtags] = useState<TrendingHashtag[]>([])
@@ -110,35 +121,37 @@ export default function ExplorePage() {
   const [showTrendingHashtags, setShowTrendingHashtags] = useState(false)
   const [showSearchFilters, setShowSearchFilters] = useState(false)
 
-  // Use refs for values that shouldn't trigger re-renders
-  const currentFilters = useRef({
+  // Memoize current filters
+  const currentFilters = useMemo<FilterState>(() => ({
     searchQuery,
     mediaFilter,
     sortBy,
     selectedHashtag,
     viewMode
-  })
+  }), [searchQuery, mediaFilter, sortBy, selectedHashtag, viewMode])
 
-  // Update ref when values change
+  // Setup and cleanup
   useEffect(() => {
-    currentFilters.current = {
-      searchQuery,
-      mediaFilter,
-      sortBy,
-      selectedHashtag,
-      viewMode
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
     }
-  }, [searchQuery, mediaFilter, sortBy, selectedHashtag, viewMode])
+  }, [])
 
   // Fetch trending hashtags
   const fetchTrendingHashtags = useCallback(async () => {
+    if (!isMountedRef.current) return
+    
     try {
       setLoadingTrends(true)
       const response = await fetch('/api/hashtags/trending')
       
       if (response.ok) {
         const data = await response.json()
-        if (data.success && data.hashtags) {
+        if (data.success && data.hashtags && isMountedRef.current) {
           const sortedTrends = data.hashtags
             .sort((a: TrendingHashtag, b: TrendingHashtag) => b.count - a.count)
             .slice(0, 15)
@@ -148,77 +161,68 @@ export default function ExplorePage() {
     } catch (error) {
       console.error('Error fetching trending hashtags:', error)
     } finally {
-      setLoadingTrends(false)
+      if (isMountedRef.current) {
+        setLoadingTrends(false)
+      }
     }
   }, [])
 
-  // Initial load
-  useEffect(() => {
-    const initializePage = async () => {
-      const tag = searchParams.get('tag')
-      const type = searchParams.get('type')
-      const sort = searchParams.get('sort')
-      const query = searchParams.get('search')
-      
-      if (tag) {
-        setSelectedHashtag(tag)
-        setSearchQuery(`#${tag}`)
-      }
-      
-      if (type && ['all', 'images', 'videos'].includes(type)) {
-        setMediaFilter(type as 'all' | 'images' | 'videos')
-      }
-      if (sort && ['recent', 'popular', 'trending'].includes(sort)) {
-        setSortBy(sort as 'recent' | 'popular' | 'trending')
-      }
-      if (query && !tag) {
-        setSearchQuery(query)
-      }
-      
-      // Load initial posts
-      await loadPosts(1, true)
-      
-      // Fetch trending hashtags
-      fetchTrendingHashtags()
+  // Load posts function
+  const loadPosts = useCallback(async (page: number = 1, reset: boolean = false) => {
+    if ((loadingRef.current && !reset) || loadingMoreRef.current || !isMountedRef.current) {
+      return
     }
 
-    initializePage()
-  }, []) // Empty dependency array - runs once on mount
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
 
-  // Load posts function - now uses refs to avoid dependency issues
-  const loadPosts = async (page: number = 1, reset: boolean = false) => {
-    if ((loading && !reset) || loadingMore) return
+    abortControllerRef.current = new AbortController()
 
     if (reset) {
+      loadingRef.current = true
       setLoading(true)
     } else {
+      loadingMoreRef.current = true
       setLoadingMore(true)
     }
 
     try {
-      const filters = currentFilters.current
       const params = new URLSearchParams({
         page: page.toString(),
-        limit: (filters.viewMode === 'grid' ? 24 : 12).toString(),
-        type: filters.mediaFilter,
-        sort: filters.sortBy
+        limit: (currentFilters.viewMode === 'grid' ? 24 : 12).toString(),
+        type: currentFilters.mediaFilter,
+        sort: currentFilters.sortBy
       })
       
-      if (filters.searchQuery) params.set('search', filters.searchQuery)
-      if (filters.selectedHashtag) params.set('hashtag', filters.selectedHashtag)
+      if (currentFilters.searchQuery) {
+        params.set('search', currentFilters.searchQuery)
+      }
+      if (currentFilters.selectedHashtag) {
+        params.set('hashtag', currentFilters.selectedHashtag)
+      }
 
-      const response = await fetch(`/api/posts/explore?${params}`)
-      if (!response.ok) throw new Error('Failed to fetch posts')
+      const response = await fetch(`/api/posts/?${params}`, {
+        signal: abortControllerRef.current.signal
+      })
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: Failed to fetch posts`)
+      }
 
       const data = await response.json()
       
-      if (data.success) {
+      if (data.success && isMountedRef.current) {
         const newPosts = data.posts || []
         
         if (reset || page === 1) {
           setPosts(newPosts)
         } else {
-          setPosts(prev => [...prev, ...newPosts])
+          setPosts(prev => {
+            const existingIds = new Set(prev.map(p => p._id))
+            const uniqueNewPosts = newPosts.filter((post: PostApiResponse) => !existingIds.has(post._id))
+            return [...prev, ...uniqueNewPosts]
+          })
         }
 
         setPagination({
@@ -229,95 +233,191 @@ export default function ExplorePage() {
           hasMore: data.pagination?.hasMore || false
         })
       }
-    } catch (error) {
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        return
+      }
+      
       console.error('Error loading posts:', error)
-      toast({ 
-        title: "Error", 
-        description: "Could not load posts", 
-        variant: "destructive" 
-      })
+      if (isMountedRef.current) {
+        toast({ 
+          title: "Error", 
+          description: "Could not load posts", 
+          variant: "destructive" 
+        })
+      }
     } finally {
-      setLoading(false)
-      setLoadingMore(false)
+      if (isMountedRef.current) {
+        loadingRef.current = false
+        loadingMoreRef.current = false
+        setLoading(false)
+        setLoadingMore(false)
+      }
     }
-  }
+  }, [currentFilters, toast])
 
-  // Debounced search effect
+  // Update URL with current filters
+  const updateUrl = useCallback((filters: FilterState) => {
+    const params = new URLSearchParams()
+    
+    if (filters.selectedHashtag) {
+      params.set('tag', filters.selectedHashtag)
+    }
+    if (filters.mediaFilter !== 'all') {
+      params.set('type', filters.mediaFilter)
+    }
+    if (filters.sortBy !== 'trending') {
+      params.set('sort', filters.sortBy)
+    }
+    if (filters.searchQuery && !filters.selectedHashtag) {
+      params.set('search', filters.searchQuery)
+    }
+    
+    const queryString = params.toString()
+    router.push(`/${queryString ? `?${queryString}` : ''}`, { scroll: false })
+  }, [router])
+
+  // Initialize page from URL params
+  useEffect(() => {
+    const initializePage = async () => {
+      const tag = searchParams.get('tag')
+      const type = searchParams.get('type')
+      const sort = searchParams.get('sort')
+      const query = searchParams.get('search')
+      
+      let hasChanges = false
+      
+      if (tag && tag !== selectedHashtag) {
+        setSelectedHashtag(tag)
+        setSearchQuery(`#${tag}`)
+        hasChanges = true
+      }
+      
+      if (type && ['all', 'images', 'videos'].includes(type) && type !== mediaFilter) {
+        setMediaFilter(type as 'all' | 'images' | 'videos')
+        hasChanges = true
+      }
+      
+      if (sort && ['recent', 'popular', 'trending'].includes(sort) && sort !== sortBy) {
+        setSortBy(sort as 'recent' | 'popular' | 'trending')
+        hasChanges = true
+      }
+      
+      if (query && !tag && query !== searchQuery) {
+        setSearchQuery(query)
+        hasChanges = true
+      }
+      
+      await loadPosts(1, true)
+      fetchTrendingHashtags()
+    }
+
+    if (isMountedRef.current) {
+      initializePage()
+    }
+  }, []) // Run once on mount
+
+  // Update URL when filters change
   useEffect(() => {
     const timeoutId = setTimeout(() => {
-      loadPosts(1, true)
-    }, 500)
-
-    return () => {
-      clearTimeout(timeoutId)
-    }
-  }, [searchQuery]) // Only depends on searchQuery
-
-  // Effect for other filters
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      loadPosts(1, true)
+      if (isMountedRef.current) {
+        updateUrl(currentFilters)
+      }
     }, 300)
 
     return () => {
       clearTimeout(timeoutId)
     }
-  }, [mediaFilter, sortBy, selectedHashtag, viewMode]) // Other filters
+  }, [currentFilters, updateUrl])
 
-  // Infinite scroll
+  // Load posts when filters change
   useEffect(() => {
-    if (!observerTarget.current || !pagination.hasMore || loadingMore) return
+    const timeoutId = setTimeout(() => {
+      if (isMountedRef.current && !loadingRef.current) {
+        loadPosts(1, true)
+      }
+    }, 500)
+
+    return () => {
+      clearTimeout(timeoutId)
+    }
+  }, [searchQuery, loadPosts])
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (isMountedRef.current && !loadingRef.current) {
+        loadPosts(1, true)
+      }
+    }, 300)
+
+    return () => {
+      clearTimeout(timeoutId)
+    }
+  }, [mediaFilter, sortBy, selectedHashtag, viewMode, loadPosts])
+
+  // Infinite scroll setup
+  useEffect(() => {
+    if (!observerTarget.current || !pagination.hasMore || loadingMoreRef.current || loadingRef.current) {
+      return
+    }
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting) {
+        if (entries[0].isIntersecting && isMountedRef.current) {
           loadPosts(pagination.page + 1, false)
         }
       },
-      { threshold: 0.5 }
+      { 
+        threshold: 0.5,
+        rootMargin: '100px'
+      }
     )
 
     const currentTarget = observerTarget.current
     observer.observe(currentTarget)
 
     return () => {
-      if (currentTarget) observer.unobserve(currentTarget)
+      if (currentTarget) {
+        observer.unobserve(currentTarget)
+      }
     }
-  }, [pagination.hasMore, loadingMore, pagination.page])
+  }, [pagination.hasMore, pagination.page, loadPosts])
 
-  const handleHashtagClick = (tag: string) => {
+  const handleHashtagClick = useCallback((tag: string) => {
+    if (!isMountedRef.current) return
+    
     const cleanTag = tag.replace('#', '')
     setSelectedHashtag(cleanTag)
     setSearchQuery(`#${cleanTag}`)
-    router.push(`/explore?tag=${cleanTag}`)
-  }
+  }, [])
 
-  const clearFilters = () => {
+  const clearFilters = useCallback(() => {
+    if (!isMountedRef.current) return
+    
     setSearchQuery('')
     setSelectedHashtag(null)
     setMediaFilter('all')
     setSortBy('trending')
-    router.push('/explore')
-  }
+  }, [])
 
-  const getTrendColor = (index: number) => {
+  const getTrendColor = useCallback((index: number) => {
     if (index === 0) return 'bg-gradient-to-r from-amber-500 to-orange-500'
     if (index === 1) return 'bg-gradient-to-r from-rose-500 to-pink-500'
     if (index === 2) return 'bg-gradient-to-r from-purple-500 to-pink-500'
     if (index < 5) return 'bg-gradient-to-r from-blue-500 to-cyan-500'
     if (index < 10) return 'bg-gradient-to-r from-emerald-500 to-teal-500'
     return 'bg-gradient-to-r from-slate-500 to-slate-600'
-  }
+  }, [])
 
-  const getTrendIcon = (index: number) => {
+  const getTrendIcon = useCallback((index: number) => {
     if (index === 0) return <Flame className="w-3.5 h-3.5" />
     if (index === 1) return <Zap className="w-3.5 h-3.5" />
     if (index === 2) return <Sparkles className="w-3.5 h-3.5" />
     if (index < 5) return <TrendingUp className="w-3.5 h-3.5" />
     return <Hash className="w-3.5 h-3.5" />
-  }
+  }, [])
 
-  const getTrendBadge = (index: number) => {
+  const getTrendBadge = useCallback((index: number) => {
     if (index >= 3) return null
     
     const colors = [
@@ -336,58 +436,80 @@ export default function ExplorePage() {
         {labels[index]}
       </Badge>
     )
+  }, [])
+
+  // Convert API response to PostType
+  const convertToPostType = useCallback((post: PostApiResponse): PostType & { 
+    likesCount?: number; 
+    savesCount?: number; 
+  } => {
+    const author: User = {
+      _id: post.author._id,
+      username: post.author.username,
+      firstName: post.author.firstName,
+      lastName: post.author.lastName,
+      avatar: post.author.avatar || '',
+      isVerified: post.author.isVerified || false,
+      isPro: post.author.isPro || false,
+      email: '', 
+      followers: [],
+      following: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+
+    const media = post.media.map((item, index) => ({
+      type: item.type as 'image' | 'video' | 'gif',
+      url: item.url,
+      thumbnail: item.thumbnail,
+      publicId: `explore_${post._id}_${index}`,
+      order: index
+    }))
+
+    return {
+      _id: post._id,
+      author,
+      media,
+      caption: post.caption,
+      hashtags: post.hashtags,
+      likes: [], // Empty array
+      saves: [], // Empty array
+      comments: [], // Empty array
+      commentCount: post.commentsCount || 0,
+      createdAt: post.createdAt,
+      updatedAt: post.createdAt,
+      views: post.views || 0,
+      category: post.category || '',
+      location: post.location || '',
+      isSponsored: post.isSponsored || false,
+      isFeatured: post.isFeatured || false,
+      availableForSale: post.availableForSale || false,
+      price: post.price || 0,
+      currency: post.currency || 'USD',
+      shares: post.shares || 0,
+      engagement: post.engagement || 0,
+      aiGenerated: post.aiGenerated || false,
+      isPublic: post.isPublic || true,
+      tags: post.tags || [],
+      isEdited: false,
+      isArchived: false,
+      collaboration: false,
+      containsVideo: post.containsVideo || false,
+      // Add count properties explicitly
+      likesCount: post.likesCount || 0,
+      savesCount: post.savesCount || 0
+    }
+  }, [])
+
+  // Memoize posts conversion
+  const convertedPosts = useMemo(() => 
+    posts.map(post => convertToPostType(post))
+  , [posts, convertToPostType])
+
+  if (!isMountedRef.current) {
+    return null
   }
 
-  // Convert API response to PostType for EnhancedPostCard
- // In your explore/page.tsx, update the convertToPostType function:
-
-// Convert API response to PostType for EnhancedPostCard
-const convertToPostType = (post: PostApiResponse): PostType & { commentsCount?: number } => {
-  const author: User = {
-    _id: post.author._id,
-    username: post.author.username,
-    firstName: post.author.firstName,
-    lastName: post.author.lastName,
-    avatar: post.author.avatar,
-    isVerified: post.author.isVerified || false,
-    isPro: post.author.isPro || false,
-    email: '', 
-    followers: [],
-    following: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  }
-
-  // Return both commentCount and commentsCount to ensure compatibility
-  return {
-    _id: post._id,
-    author,
-    media: post.media,
-    caption: post.caption,
-    hashtags: post.hashtags,
-    likes: Array(post.likesCount || 0).fill(''),
-    saves: Array(post.savesCount || 0).fill(''),
-    comments: [], // Empty array since we have count
-    commentCount: post.commentsCount || 0, // Pass as commentCount
-    commentsCount: post.commentsCount || 0, // Also pass as commentsCount for backward compatibility
-    createdAt: post.createdAt,
-    views: post.views || 0,
-    category: post.category || '',
-    location: post.location || '',
-    isSponsored: post.isSponsored || false,
-    isFeatured: post.isFeatured || false,
-    availableForSale: post.availableForSale || false,
-    price: post.price || 0,
-    currency: post.currency || 'USD',
-    shares: post.shares || 0,
-    engagement: post.engagement || 0,
-    aiGenerated: post.aiGenerated || false,
-    isPublic: post.isPublic || true,
-    tags: post.tags || []
-  }
-}
-
-  // Render the component
   return (
     <div className="container mx-auto px-4 py-6 min-h-screen">
       {/* Header with View Toggle */}
@@ -567,7 +689,7 @@ const convertToPostType = (post: PostApiResponse): PostType & { commentsCount?: 
                   variant="outline"
                   size="sm"
                   className="w-full rounded-xl"
-                  onClick={() => router.push('/explore/trending')}
+                  onClick={() => router.push('/trending')}
                 >
                   View All Trending Topics
                 </Button>
@@ -765,7 +887,7 @@ const convertToPostType = (post: PostApiResponse): PostType & { commentsCount?: 
                 : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
             )}
           >
-            {posts.map((post, index) => (
+            {convertedPosts.map((post, index) => (
               <motion.div
                 key={post._id}
                 initial={{ opacity: 0, y: 20 }}
@@ -773,7 +895,7 @@ const convertToPostType = (post: PostApiResponse): PostType & { commentsCount?: 
                 transition={{ delay: index * 0.05 }}
               >
                 <EnhancedPostCard 
-                  post={convertToPostType(post)}
+                  post={post}
                   viewMode={viewMode} 
                 />
               </motion.div>

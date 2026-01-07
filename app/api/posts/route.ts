@@ -91,6 +91,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
+
 export async function GET(request: NextRequest) {
   try {
     await connectToDatabase();
@@ -121,9 +122,50 @@ export async function GET(request: NextRequest) {
 
     const result = await PostService.explorePosts(page, limit, filters);
 
+    // Transform the posts to include counts
+    const transformedPosts = result.posts.map((post: any) => {
+      // Calculate counts
+      const likesCount = Array.isArray(post.likes) ? post.likes.length : 0;
+      const savesCount = Array.isArray(post.saves) ? post.saves.length : 0;
+      const commentsCount = Array.isArray(post.comments) ? post.comments.length : 0;
+      
+      // Ensure author is properly populated
+      let author = post.author;
+      if (typeof post.author === 'string') {
+        // If author is just an ID, we need to fetch it separately
+        // For now, create a minimal author object
+        author = {
+          _id: post.author,
+          username: 'unknown',
+          firstName: 'Unknown',
+          lastName: 'User',
+          avatar: '',
+          isVerified: false,
+          isPro: false
+        };
+      }
+
+      return {
+        ...post,
+        _id: post._id.toString(),
+        author: {
+          ...author,
+          _id: author._id ? author._id.toString() : author._id
+        },
+        likesCount,
+        savesCount,
+        commentsCount,
+        // Also keep the arrays for backward compatibility
+        likes: post.likes || [],
+        saves: post.saves || [],
+        comments: post.comments || []
+      };
+    });
+
     return NextResponse.json({
       success: true,
-      ...result
+      posts: transformedPosts,
+      pagination: result.pagination
     });
 
   } catch (error: any) {

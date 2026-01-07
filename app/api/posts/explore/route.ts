@@ -1,7 +1,7 @@
-//app/api/posts/explore/route.ts
+// app/api/posts/explore/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
-import Post from '@/lib/models/Post';
+import PostModel from '@/lib/models/Post';
 import "@/lib/loadmodels";
 
 export async function GET(request: NextRequest) {
@@ -23,42 +23,83 @@ export async function GET(request: NextRequest) {
     else if (type === 'videos') filters.containsVideo = true;
     
     // Hashtag Filter
-    if (hashtag) filters.hashtags = { $in: [hashtag.toLowerCase()] };
+    if (hashtag) {
+      filters.hashtags = { $in: [hashtag.toLowerCase()] };
+    }
     
     // Search Filter
     if (search) {
+      const searchRegex = new RegExp(search, 'i');
       filters.$or = [
-        { caption: { $regex: search, $options: 'i' } },
-        { hashtags: { $in: [new RegExp(`^${search}$`, 'i')] } }
+        { caption: { $regex: searchRegex } },
+        { hashtags: { $in: [search.toLowerCase()] } }
       ];
     }
     
     // Sort Logic
     let sortOptions: any = { createdAt: -1 };
-    if (sort === 'popular') sortOptions = { likes: -1, createdAt: -1 };
-    else if (sort === 'trending') sortOptions = { engagement: -1, createdAt: -1 };
+    if (sort === 'popular') {
+      sortOptions = { likesCount: -1, createdAt: -1 };
+    } else if (sort === 'trending') {
+      sortOptions = { engagement: -1, createdAt: -1 };
+    }
 
+    // Build query
+    const query = PostModel.find(filters)
+      .populate('author', 'username firstName lastName avatar isVerified isPro')
+      .sort(sortOptions);
+
+    // Execute query with pagination
     const [posts, total] = await Promise.all([
-      Post.find(filters)
-        .populate('author', 'username firstName lastName avatar isVerified isPro')
-        .sort(sortOptions)
+      query
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
-      Post.countDocuments(filters)
+      PostModel.countDocuments(filters)
     ]);
+
+    // Transform the posts
+    const transformedPosts = posts.map(post => {
+      const postObj = post as any;
+      
+      return {
+        _id: postObj._id.toString(),
+        author: postObj.author ? {
+          _id: postObj.author._id?.toString() || '',
+          username: postObj.author.username || '',
+          firstName: postObj.author.firstName || '',
+          lastName: postObj.author.lastName || '',
+          avatar: postObj.author.avatar || '',
+          isVerified: postObj.author.isVerified || false,
+          isPro: postObj.author.isPro || false
+        } : null,
+        media: postObj.media || [],
+        caption: postObj.caption || '',
+        hashtags: postObj.hashtags || [],
+        likesCount: postObj.likes?.length || 0,
+        savesCount: postObj.saves?.length || 0,
+        commentsCount: postObj.comments?.length || 0,
+        createdAt: postObj.createdAt?.toISOString() || new Date().toISOString(),
+        containsVideo: postObj.containsVideo || false,
+        views: postObj.views || 0,
+        category: postObj.category || '',
+        location: postObj.location || '',
+        isSponsored: postObj.isSponsored || false,
+        isFeatured: postObj.isFeatured || false,
+        availableForSale: postObj.availableForSale || false,
+        price: postObj.price || 0,
+        currency: postObj.currency || 'USD',
+        shares: postObj.shares || 0,
+        engagement: postObj.engagement || 0,
+        aiGenerated: postObj.aiGenerated || false,
+        isPublic: postObj.isPublic || true,
+        tags: postObj.tags || []
+      };
+    });
 
     return NextResponse.json({
       success: true,
-      posts: posts.map(post => ({
-        ...post,
-        _id: post._id.toString(),
-        author: post.author ? { ...post.author, _id: post.author._id.toString() } : null,
-        // Pre-calculate counts for frontend performance
-        likesCount: post.likes?.length || 0,
-        savesCount: post.saves?.length || 0,
-        commentsCount: post.comments?.length || 0
-      })),
+      posts: transformedPosts,
       pagination: {
         page,
         limit,
@@ -70,6 +111,9 @@ export async function GET(request: NextRequest) {
 
   } catch (error: any) {
     console.error('Error fetching explore posts:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ 
+      success: false, 
+      error: error.message || 'Failed to fetch posts' 
+    }, { status: 500 });
   }
 }

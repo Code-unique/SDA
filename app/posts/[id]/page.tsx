@@ -1,3 +1,4 @@
+// app/posts/[id]/page.tsx - UPDATED COMPLETE VERSION
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
@@ -48,75 +49,26 @@ import {
   ChevronDown,
   ChevronUp,
   MoreVertical,
-  Hash as HashIcon
+  Hash as HashIcon,
+  Reply,
+  Edit3,
+  X,
+  AlertCircle,
+  ExternalLink
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUser } from '@clerk/nextjs'
 import Link from 'next/link'
+import { Textarea } from '@/components/ui/textarea'
 
-interface MediaItem {
-  url: string;
-  type: 'image' | 'video';
-  order: number;
-  thumbnail?: string;
-  duration?: number;
-}
+// Import updated interfaces
+import { Post, User, Comment, BatchStatuses, TrendingHashtag } from '@/types/post'
 
-interface PostUser {
-  _id: string;
-  clerkId: string;
-  username: string;
-  firstName: string;
-  lastName: string;
-  avatar: string;
-  email: string;
-  isVerified: boolean;
-  isPro: boolean;
-  bio?: string;
-  createdAt: string;
-}
-
-interface Comment {
-  _id: string;
-  text: string;
-  user: PostUser;
-  post: string;
-  likes: string[];
-  replies?: Comment[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface Post {
-  _id: string;
-  caption: string;
-  media: MediaItem[];
-  author: PostUser;
-  likes: string[];
-  saves: string[];
-  comments: Comment[];
-  tags: string[];
-  hashtags?: string[];
-  aiGenerated?: boolean;
-  availableForSale?: boolean;
-  price?: number;
-  views?: number;
-  shares?: number;
-  createdAt: string;
-  updatedAt: string;
-  isPublic: boolean;
-}
-
-interface TrendingHashtag {
-  tag: string;
-  count: number;
-  trendScore?: number;
-}
-
-interface BatchStatuses {
-  likeStatuses: Record<string, boolean>;
-  saveStatuses: Record<string, { saved: boolean; savedAt?: string }>;
-  followStatuses: Record<string, boolean>;
+interface CommentWithNesting extends Comment {
+  replies?: CommentWithNesting[];
+  parentComment?: string;
+  isReplying?: boolean;
+  isEditing?: boolean;
 }
 
 export default function PostDetailPage() {
@@ -150,20 +102,28 @@ export default function PostDetailPage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [trendingHashtags, setTrendingHashtags] = useState<TrendingHashtag[]>([]);
   const [loadingTrends, setLoadingTrends] = useState(false);
-  const [showComments, setShowComments] = useState(false);
-  const [expandedComment, setExpandedComment] = useState<string | null>(null);
+  const [showComments, setShowComments] = useState(true);
+  const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
   const [activeCommentMenu, setActiveCommentMenu] = useState<string | null>(null);
   const [replyToComment, setReplyToComment] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [isReplying, setIsReplying] = useState(false);
+  const [editingComment, setEditingComment] = useState<string | null>(null);
+  const [editCommentText, setEditCommentText] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [showEditPostModal, setShowEditPostModal] = useState(false);
+  const [editPostData, setEditPostData] = useState({
+    caption: '',
+    hashtags: ''
+  });
+  const [isVideoLoaded, setIsVideoLoaded] = useState(false);
+  const [showVideoControls, setShowVideoControls] = useState(false);
+  const [videoDuration, setVideoDuration] = useState(0);
   const [statuses, setStatuses] = useState<BatchStatuses>({
     likeStatuses: {},
     saveStatuses: {},
     followStatuses: {}
   });
-  const [isVideoLoaded, setIsVideoLoaded] = useState(false);
-  const [showVideoControls, setShowVideoControls] = useState(false);
-  const [videoDuration, setVideoDuration] = useState(0);
 
   // Refs
   const headerRef = useRef<HTMLDivElement>(null);
@@ -173,6 +133,7 @@ export default function PostDetailPage() {
   const shareRef = useRef<HTMLDivElement>(null);
   const commentInputRef = useRef<HTMLInputElement>(null);
   const commentsContainerRef = useRef<HTMLDivElement>(null);
+  const editCommentRef = useRef<HTMLTextAreaElement>(null);
   
   // Scroll animations
   const { scrollY } = useScroll();
@@ -224,18 +185,6 @@ export default function PostDetailPage() {
     setVideoDuration(videoRef.current?.duration || 0);
   };
 
-  const handleVideoPlay = () => {
-    setIsPlaying(true);
-  };
-
-  const handleVideoPause = () => {
-    setIsPlaying(false);
-  };
-
-  const handleVideoEnd = () => {
-    setIsPlaying(false);
-  };
-
   const showVideoControlsTemporary = () => {
     setShowVideoControls(true);
     setTimeout(() => {
@@ -250,7 +199,7 @@ export default function PostDetailPage() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Fetch post data
+  // Fetch post data with proper error handling
   const fetchPost = useCallback(async () => {
     if (!postId || !userLoaded) return;
     
@@ -260,60 +209,84 @@ export default function PostDetailPage() {
       
       const response = await fetch(`/api/posts/${postId}`);
       
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.data) {
-          const postData = data.data;
-          setPost(postData);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.success && data.data) {
+        const postData = data.data;
+        
+        // Ensure comments array exists and has proper structure
+        const processedPost = {
+          ...postData,
+          comments: Array.isArray(postData.comments) ? postData.comments.map((comment: any) => ({
+            ...comment,
+            user: typeof comment.user === 'string' ? { _id: comment.user } : comment.user,
+            replies: comment.replies || [],
+            likes: comment.likes || []
+          })) : [],
+          author: typeof postData.author === 'string' ? { _id: postData.author } : postData.author,
+          media: postData.media || [],
+          hashtags: postData.hashtags || [],
+          likes: postData.likes || [],
+          saves: postData.saves || []
+        };
+        
+        setPost(processedPost);
+        
+        // Set edit data
+        setEditPostData({
+          caption: processedPost.caption,
+          hashtags: Array.isArray(processedPost.hashtags) ? processedPost.hashtags.join(' ') : ''
+        });
+        
+        // Fetch statuses if signed in
+        if (isSignedIn && processedPost._id) {
+          try {
+            const statusResponse = await fetch('/api/batch-status', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                postIds: [processedPost._id],
+                userIds: processedPost.author?._id ? [processedPost.author._id] : []
+              })
+            });
 
-          // Fetch statuses if signed in
-          if (isSignedIn && postData._id) {
-            try {
-              const statusResponse = await fetch('/api/batch-status', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  postIds: [postData._id],
-                  userIds: postData.author?._id ? [postData.author._id] : []
-                })
-              });
-
-              if (statusResponse.ok) {
-                const statusData = await statusResponse.json();
-                if (statusData?.success && statusData.data) {
-                  setStatuses(statusData.data);
-                  setIsSaved(!!statusData.data.saveStatuses?.[postData._id]?.saved);
-                  if (postData.author?._id) {
-                    setIsFollowing(!!statusData.data.followStatuses?.[postData.author._id]);
-                  }
+            if (statusResponse.ok) {
+              const statusData = await statusResponse.json();
+              if (statusData?.success && statusData.data) {
+                setStatuses(statusData.data);
+                setIsSaved(!!statusData.data.saveStatuses?.[processedPost._id]?.saved);
+                if (processedPost.author?._id) {
+                  setIsFollowing(!!statusData.data.followStatuses?.[processedPost.author._id]);
                 }
               }
-            } catch (err) {
-              console.error('Error fetching statuses:', err);
             }
+          } catch (err) {
+            console.error('Error fetching statuses:', err);
           }
+        }
 
-          // Fetch trending hashtags
-          try {
-            const hashtagsResponse = await fetch('/api/hashtags/trending');
-            if (hashtagsResponse.ok) {
-              const hashtagsData = await hashtagsResponse.json();
-              if (hashtagsData.success && hashtagsData.hashtags) {
-                setTrendingHashtags(hashtagsData.hashtags);
-              }
+        // Fetch trending hashtags
+        try {
+          const hashtagsResponse = await fetch('/api/hashtags/trending');
+          if (hashtagsResponse.ok) {
+            const hashtagsData = await hashtagsResponse.json();
+            if (hashtagsData.success && hashtagsData.hashtags) {
+              setTrendingHashtags(hashtagsData.hashtags);
             }
-          } catch (error) {
-            console.error('Error fetching trending hashtags:', error);
           }
-        } else {
-          setError(data.error || 'Failed to load post');
+        } catch (error) {
+          console.error('Error fetching trending hashtags:', error);
         }
       } else {
-        setError('Failed to load post');
+        setError(data.error || 'Failed to load post');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching post:', error);
-      setError('Failed to load post');
+      setError(error.message || 'Failed to load post');
     } finally {
       setLoading(false);
     }
@@ -341,20 +314,7 @@ export default function PostDetailPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Close comment menu on outside click
-  useEffect(() => {
-    const handleClickOutsideCommentMenu = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (activeCommentMenu && !target.closest?.(`[data-comment="${activeCommentMenu}"]`)) {
-        setActiveCommentMenu(null);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutsideCommentMenu);
-    return () => document.removeEventListener('mousedown', handleClickOutsideCommentMenu);
-  }, [activeCommentMenu]);
-
-  // Handle like
+  // Handle like with proper typing
   const handleLike = async () => {
     if (!post || isLiking) return;
 
@@ -367,19 +327,30 @@ export default function PostDetailPage() {
       return;
     }
 
-    const wasLiked = statuses.likeStatuses[postId] || false;
+    const wasLiked = statuses.likeStatuses[post._id] || false;
 
     // Optimistic update
-    setPost(prev => prev ? {
-      ...prev,
-      likes: wasLiked 
-        ? prev.likes.filter(id => id !== currentUserId)
-        : [...prev.likes, currentUserId]
-    } : null);
+    setPost(prev => {
+      if (!prev) return null;
+      
+      const currentLikes = Array.isArray(prev.likes) ? prev.likes : [];
+      const isUserInLikes = currentLikes.some(like => 
+        typeof like === 'string' ? like === currentUserId : (like as User)._id === currentUserId
+      );
+      
+      return {
+        ...prev,
+        likes: wasLiked 
+          ? currentLikes.filter(like => 
+              typeof like === 'string' ? like !== currentUserId : (like as User)._id !== currentUserId
+            )
+          : [...currentLikes, currentUserId]
+      };
+    });
 
     setStatuses(prev => ({
       ...prev,
-      likeStatuses: { ...prev.likeStatuses, [postId]: !wasLiked }
+      likeStatuses: { ...prev.likeStatuses, [post._id]: !wasLiked }
     }));
 
     setIsLiking(true);
@@ -387,8 +358,7 @@ export default function PostDetailPage() {
     try {
       const response = await fetch(`/api/posts/${postId}/like`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: currentUserId }),
+        headers: { "Content-Type": "application/json" }
       });
 
       if (!response.ok) {
@@ -428,7 +398,7 @@ export default function PostDetailPage() {
       return;
     }
 
-    const wasSaved = statuses.saveStatuses[postId]?.saved || false;
+    const wasSaved = statuses.saveStatuses[post._id]?.saved || false;
 
     // Optimistic update
     setIsSaved(!wasSaved);
@@ -437,8 +407,7 @@ export default function PostDetailPage() {
     try {
       const response = await fetch(`/api/posts/${postId}/save`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUserId }),
+        headers: { 'Content-Type': 'application/json' }
       });
 
       if (response.ok) {
@@ -468,7 +437,10 @@ export default function PostDetailPage() {
 
   // Handle follow
   const handleFollow = async () => {
-    if (!post?.author?._id || isFollowLoading) return;
+    if (!post?.author || isFollowLoading) return;
+
+    const authorId = typeof post.author === 'string' ? post.author : post.author._id;
+    if (!authorId) return;
 
     if (!isSignedIn) {
       toast({
@@ -479,7 +451,6 @@ export default function PostDetailPage() {
       return;
     }
 
-    const authorId = post.author._id;
     const previousIsFollowing = isFollowing;
 
     // Optimistic update
@@ -494,8 +465,6 @@ export default function PostDetailPage() {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Follow error:', errorText);
         throw new Error("Follow request failed");
       }
 
@@ -510,8 +479,8 @@ export default function PostDetailPage() {
         toast({
           title: !previousIsFollowing ? "Following" : "Unfollowed",
           description: !previousIsFollowing
-            ? `You are now following ${post.author.firstName}`
-            : `You unfollowed ${post.author.firstName}`,
+            ? `You are now following ${typeof post.author !== 'string' ? post.author.firstName : 'User'}`
+            : `You unfollowed ${typeof post.author !== 'string' ? post.author.firstName : 'User'}`,
         });
       } else {
         throw new Error(result.error || "Follow request failed");
@@ -529,7 +498,7 @@ export default function PostDetailPage() {
     }
   };
 
-  // Handle comment
+  // Handle comment submission
   const handleAddComment = async () => {
     if (!commentText.trim() || !post || isCommenting) {
       if (!isSignedIn) {
@@ -545,8 +514,8 @@ export default function PostDetailPage() {
     const tempCommentId = `temp-${Date.now()}`;
     const originalCommentText = commentText.trim();
     
-    // Create temp comment
-    const tempComment: Comment = {
+    // Create temp comment with proper structure
+    const tempComment: CommentWithNesting = {
       _id: tempCommentId,
       user: {
         _id: currentUserId,
@@ -558,11 +527,15 @@ export default function PostDetailPage() {
         email: currentUser?.primaryEmailAddress?.emailAddress || '',
         isVerified: false,
         isPro: false,
-        createdAt: new Date().toISOString()
-      },
+        followers: [],
+        following: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      } as User,
       text: originalCommentText,
       post: postId,
       likes: [],
+      replies: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -592,12 +565,15 @@ export default function PostDetailPage() {
             description: "Your comment has been posted"
           });
         } else {
+          // Rollback on error
           setPost(prev => prev ? {
             ...prev,
             comments: prev.comments?.filter(c => c._id !== tempCommentId) || []
           } : null);
           setCommentText(originalCommentText);
         }
+      } else {
+        throw new Error('Failed to add comment');
       }
     } catch (error) {
       setPost(prev => prev ? {
@@ -612,6 +588,7 @@ export default function PostDetailPage() {
       });
     } finally {
       setIsCommenting(false);
+      // Auto-scroll to new comment
       setTimeout(() => {
         if (commentsContainerRef.current) {
           commentsContainerRef.current.scrollTop = 0;
@@ -620,118 +597,190 @@ export default function PostDetailPage() {
     }
   };
 
-  // Handle reply
-  const handleAddReply = async (commentId: string) => {
-    if (!replyText.trim() || isReplying) return;
+  // Handle reply to comment
+  const handleAddReply = async (commentId: string, parentCommentId?: string) => {
+  if (!replyText.trim() || isReplying) return;
 
-    const tempReplyId = `temp-reply-${Date.now()}`;
-    const originalReplyText = replyText.trim();
+  const tempReplyId = `temp-reply-${Date.now()}`;
+  const originalReplyText = replyText.trim();
+  const parentId = parentCommentId || commentId;
 
-    // Create temp reply
-    const tempReply: Comment = {
-      _id: tempReplyId,
-      user: {
-        _id: currentUserId,
-        clerkId: currentUser?.id ?? "",
-        username: currentUser?.username || 'user',
-        firstName: currentUser?.firstName || 'User',
-        lastName: currentUser?.lastName || '',
-        avatar: currentUser?.imageUrl || '',
-        email: currentUser?.primaryEmailAddress?.emailAddress || '',
-        isVerified: false,
-        isPro: false,
-        createdAt: new Date().toISOString()
-      },
-      text: originalReplyText,
-      post: postId,
-      likes: [],
+  // Create temp reply
+  const tempReply: CommentWithNesting = {
+    _id: tempReplyId,
+    user: {
+      _id: currentUserId,
+      clerkId: currentUser?.id ?? "",
+      username: currentUser?.username || 'user',
+      firstName: currentUser?.firstName || 'User',
+      lastName: currentUser?.lastName || '',
+      avatar: currentUser?.imageUrl || '',
+      email: currentUser?.primaryEmailAddress?.emailAddress || '',
+      isVerified: false,
+      isPro: false,
+      followers: [],
+      following: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
-    };
+    } as User,
+    text: originalReplyText,
+    post: postId,
+    likes: [],
+    replies: [],
+    parentComment: parentId,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
 
-    // Optimistic update
+  // Optimistic update - Add as a new comment
+  setPost(prev => {
+    if (!prev) return null;
+    return {
+      ...prev,
+      comments: [...(prev.comments || []), tempReply]
+    };
+  });
+
+  setReplyText('');
+  setIsReplying(true);
+  setReplyToComment(null);
+
+  try {
+    const response = await fetch(`/api/posts/${postId}/comments/${parentId}/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        text: originalReplyText
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.success && data.data) {
+        setPost(data.data);
+        toast({
+          title: "Reply added",
+          description: "Your reply has been posted"
+        });
+      } else {
+        // Rollback on error
+        setPost(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            comments: prev.comments?.filter(c => c._id !== tempReplyId) || []
+          };
+        });
+        setReplyText(originalReplyText);
+      }
+    } else {
+      throw new Error('Failed to add reply');
+    }
+  } catch (error) {
     setPost(prev => {
       if (!prev) return null;
       return {
         ...prev,
-        comments: prev.comments?.map(comment => {
-          if (comment._id === commentId) {
-            return {
-              ...comment,
-              replies: [...(comment.replies || []), tempReply]
-            };
-          }
-          return comment;
-        }) || []
+        comments: prev.comments?.filter(c => c._id !== tempReplyId) || []
       };
     });
+    setReplyText(originalReplyText);
+    toast({
+      title: "Error",
+      description: "Failed to add reply",
+      variant: "destructive"
+    });
+  } finally {
+    setIsReplying(false);
+  }
+};
 
-    setReplyText('');
-    setIsReplying(true);
-    setReplyToComment(null);
+
+  // Handle comment like
+  const handleLikeComment = async (commentId: string) => {
+    if (!isSignedIn) {
+      toast({
+        title: "Please sign in",
+        description: "You need to be signed in to like comments",
+        variant: "destructive"
+      });
+      return;
+    }
 
     try {
-      const response = await fetch(`/api/posts/${postId}/comments/${commentId}/reply`, {
+      const response = await fetch(`/api/posts/${postId}/comments/${commentId}/like`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data) {
+          setPost(prev => {
+            if (!prev) return null;
+            return {
+              ...prev,
+              comments: prev.comments?.map(comment => 
+                comment._id === commentId 
+                  ? { ...comment, likes: data.data.likes }
+                  : comment
+              ) || []
+            };
+          });
+        }
+      } else {
+        throw new Error('Failed to like comment');
+      }
+    } catch (error) {
+      console.error('Error liking comment:', error);
+      toast({
+        title: "Error",
+        description: "Failed to like comment",
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Handle edit comment
+  const handleEditComment = async (commentId: string) => {
+    if (!editCommentText.trim() || isEditing) return;
+
+    setIsEditing(true);
+
+    try {
+      const response = await fetch(`/api/posts/${postId}/comments/${commentId}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: originalReplyText }),
+        body: JSON.stringify({ text: editCommentText.trim() }),
       });
 
       if (response.ok) {
         const data = await response.json();
         if (data.success && data.data) {
           setPost(data.data);
+          setEditingComment(null);
+          setEditCommentText('');
           toast({
-            title: "Reply added",
-            description: "Your reply has been posted"
+            title: "Comment updated",
+            description: "Your comment has been updated"
           });
-        } else {
-          setPost(prev => {
-            if (!prev) return null;
-            return {
-              ...prev,
-              comments: prev.comments?.map(comment => {
-                if (comment._id === commentId) {
-                  return {
-                    ...comment,
-                    replies: comment.replies?.filter(r => r._id !== tempReplyId) || []
-                  };
-                }
-                return comment;
-              }) || []
-            };
-          });
-          setReplyText(originalReplyText);
         }
+      } else {
+        throw new Error('Failed to edit comment');
       }
     } catch (error) {
-      setPost(prev => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          comments: prev.comments?.map(comment => {
-            if (comment._id === commentId) {
-              return {
-                ...comment,
-                replies: comment.replies?.filter(r => r._id !== tempReplyId) || []
-              };
-            }
-            return comment;
-          }) || []
-        };
-      });
-      setReplyText(originalReplyText);
+      console.error('Error editing comment:', error);
       toast({
         title: "Error",
-        description: "Failed to add reply",
+        description: "Failed to edit comment",
         variant: "destructive"
       });
     } finally {
-      setIsReplying(false);
+      setIsEditing(false);
     }
   };
 
-  // Delete comment
+  // Handle delete comment
   const handleDeleteComment = async (commentId: string) => {
     if (!isSignedIn) {
       toast({
@@ -741,6 +790,8 @@ export default function PostDetailPage() {
       });
       return;
     }
+
+    if (!confirm('Are you sure you want to delete this comment?')) return;
 
     try {
       const response = await fetch(`/api/posts/${postId}/comments/${commentId}`, {
@@ -760,6 +811,8 @@ export default function PostDetailPage() {
             description: "Your comment has been deleted",
           });
         }
+      } else {
+        throw new Error('Failed to delete comment');
       }
     } catch (error) {
       toast({
@@ -770,42 +823,40 @@ export default function PostDetailPage() {
     }
   };
 
-  // Like comment
-  const handleLikeComment = async (commentId: string) => {
-    if (!isSignedIn) {
-      toast({
-        title: "Please sign in",
-        description: "You need to be signed in to like comments",
-        variant: "destructive"
-      });
-      return;
-    }
+  // Handle edit post
+  const handleEditPost = async () => {
+    if (!editPostData.caption.trim()) return;
 
     try {
-      const response = await fetch(`/api/posts/${postId}/comments/${commentId}/like`, {
-        method: 'POST',
+      const response = await fetch(`/api/posts/${postId}/edit`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUserId }),
+        body: JSON.stringify({
+          caption: editPostData.caption,
+          hashtags: editPostData.hashtags.split(' ').filter(tag => tag.trim() !== '')
+        }),
       });
 
       if (response.ok) {
         const data = await response.json();
         if (data.success && data.data) {
-          setPost(prev => {
-            if (!prev) return null;
-            return {
-              ...prev,
-              comments: prev.comments?.map(comment => 
-                comment._id === commentId 
-                  ? { ...comment, likes: data.data.likes }
-                  : comment
-              ) || []
-            };
+          setPost(data.data);
+          setShowEditPostModal(false);
+          toast({
+            title: "Post updated",
+            description: "Your post has been updated successfully"
           });
         }
+      } else {
+        throw new Error('Failed to update post');
       }
     } catch (error) {
-      console.error('Error liking comment:', error);
+      console.error('Error editing post:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update post",
+        variant: "destructive"
+      });
     }
   };
 
@@ -833,7 +884,7 @@ export default function PostDetailPage() {
       try {
         await navigator.share({
           title: post?.caption || 'Check out this design',
-          text: `Check out this design by ${post?.author.firstName}`,
+          text: `Check out this design by ${typeof post?.author !== 'string' ? post?.author.firstName : 'User'}`,
           url: window.location.href,
         });
       } catch (error) {
@@ -859,6 +910,8 @@ export default function PostDetailPage() {
           description: "Your post has been deleted",
         });
         router.push('/');
+      } else {
+        throw new Error('Failed to delete post');
       }
     } catch (error) {
       toast({
@@ -870,9 +923,14 @@ export default function PostDetailPage() {
   };
 
   // Helper functions
-  const isLiked = statuses.likeStatuses[postId] || false;
+  const isLiked = statuses.likeStatuses[post?._id || ''] || false;
   const isCommentAuthor = (commentUserId: string) => commentUserId === currentUserId;
-  const isCommentLiked = (comment: Comment) => comment.likes?.some(like => like === currentUserId) || false;
+  const isCommentLiked = (comment: Comment) => {
+    if (!comment.likes || !Array.isArray(comment.likes)) return false;
+    return comment.likes.some(like => 
+      typeof like === 'string' ? like === currentUserId : (like as User)._id === currentUserId
+    );
+  };
   
   const getTimeAgo = (date: string): string => {
     const now = new Date();
@@ -889,65 +947,413 @@ export default function PostDetailPage() {
   const isCurrentMediaVideo = post?.media?.[currentMediaIndex]?.type === 'video';
 
   // Format number
-  const formatNumber = (num: number): string => {
+  const formatNumber = (num?: number): string => {
+    if (!num && num !== 0) return '0';
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
     if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
     return num.toString();
   };
 
-  // Refresh statuses on auth change
-  useEffect(() => {
-    if (!userLoaded || !post) return;
+  // Get comment replies
+  const getCommentReplies = (commentId: string): CommentWithNesting[] => {
+  if (!post || !post.comments) return [];
+  return post.comments.filter(comment => 
+    comment.parentComment === commentId
+  ) as CommentWithNesting[];
+};
 
-    if (!isSignedIn) {
-      setStatuses({
-        likeStatuses: {},
-        saveStatuses: {},
-        followStatuses: {}
-      });
-      setIsSaved(false);
-      setIsFollowing(false);
-      return;
+  // Toggle expanded comments
+  const toggleExpandComment = (commentId: string) => {
+    const newExpanded = new Set(expandedComments);
+    if (newExpanded.has(commentId)) {
+      newExpanded.delete(commentId);
+    } else {
+      newExpanded.add(commentId);
     }
+    setExpandedComments(newExpanded);
+  };
 
-    const refreshStatuses = async () => {
-      try {
-        const response = await fetch('/api/batch-status', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            postIds: [postId],
-            userIds: post?.author?._id ? [post.author._id] : []
-          })
-        });
+  // Get comment count
+  const getCommentCount = (): number => {
+    if (!post || !post.comments) return 0;
+    return Array.isArray(post.comments) ? post.comments.length : 0;
+  };
 
-        if (response.ok) {
-          const data = await response.json();
-          if (data?.success && data.data) {
-            setStatuses(data.data);
-            setIsSaved(!!data.data.saveStatuses?.[postId]?.saved);
-            if (post?.author?._id) {
-              setIsFollowing(!!data.data.followStatuses?.[post.author._id]);
-            }
-          }
-        }
-      } catch (err) {
-        console.error('Error refreshing statuses:', err);
-      }
-    };
+  // Get likes count
+  const getLikesCount = (): number => {
+    if (!post || !post.likes) return 0;
+    return Array.isArray(post.likes) ? post.likes.length : 0;
+  };
 
-    refreshStatuses();
-  }, [userLoaded, isSignedIn, postId, post?._id, post?.author?._id]);
+  // Get saves count
+  const getSavesCount = (): number => {
+    if (!post || !post.saves) return 0;
+    return Array.isArray(post.saves) ? post.saves.length : 0;
+  };
 
-  // Fullscreen change handler
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
+  // Get author username
+  const getAuthorUsername = (): string => {
+    if (!post?.author) return 'Unknown';
+    return typeof post.author === 'string' ? 'Unknown' : post.author.username || 'Unknown';
+  };
 
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, []);
+  // Get author name
+  const getAuthorName = (): string => {
+    if (!post?.author) return 'Unknown User';
+    if (typeof post.author === 'string') return 'Unknown User';
+    return `${post.author.firstName || ''} ${post.author.lastName || ''}`.trim() || post.author.username || 'Unknown User';
+  };
+
+  // Get author avatar
+  const getAuthorAvatar = (): string | undefined => {
+  if (!post?.author) return undefined;
+  return typeof post.author === 'string' ? undefined : 
+    (post.author.avatar && post.author.avatar.trim() !== '' ? post.author.avatar : undefined);
+};
+
+  // Get author verification status
+  const getAuthorVerified = (): boolean => {
+    if (!post?.author) return false;
+    return typeof post.author === 'string' ? false : post.author.isVerified || false;
+  };
+
+  // Get author pro status
+  const getAuthorPro = (): boolean => {
+    if (!post?.author) return false;
+    return typeof post.author === 'string' ? false : post.author.isPro || false;
+  };
+
+  // Render comment with replies
+  const renderComment = (comment: CommentWithNesting, depth = 0) => {
+  const replies = getCommentReplies(comment._id);
+  const isAuthor = isCommentAuthor(typeof comment.user === 'string' ? comment.user : (comment.user?._id || ''));
+  const isLiked = isCommentLiked(comment);
+  const isExpanded = expandedComments.has(comment._id);
+  const isEditingThis = editingComment === comment._id;
+  
+  // Safely get comment user data
+  const commentUser = (() => {
+    // If user is a string ID
+    if (typeof comment.user === 'string') {
+      return {
+        _id: comment.user,
+        username: 'User',
+        avatar: '',
+        firstName: 'User',
+        lastName: '',
+        isVerified: false,
+        isPro: false,
+        followers: [],
+        following: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      } as User;
+    }
+    
+    // If user is populated object
+    if (comment.user && typeof comment.user === 'object') {
+      return {
+        _id: comment.user._id || '',
+        username: comment.user.username || 'User',
+        avatar: comment.user.avatar && comment.user.avatar.trim() !== '' 
+          ? comment.user.avatar 
+          : undefined,
+        firstName: comment.user.firstName || 'User',
+        lastName: comment.user.lastName || '',
+        isVerified: comment.user.isVerified || false,
+        isPro: comment.user.isPro || false,
+        followers: [],
+        following: [],
+        createdAt: comment.user.createdAt || new Date().toISOString(),
+        updatedAt: comment.user.updatedAt || new Date().toISOString()
+      } as User;
+    }
+    
+    // Fallback
+    return {
+      _id: '',
+      username: 'User',
+      avatar: '',
+      firstName: 'User',
+      lastName: '',
+      isVerified: false,
+      isPro: false,
+      followers: [],
+      following: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    } as User;
+  })();
+
+  return (
+    <div key={comment._id} className={cn("space-y-2", depth > 0 && "ml-8 pl-4 border-l border-slate-200 dark:border-slate-700")}>
+      {/* Comment Card */}
+      <div className={cn(
+        "p-4 rounded-xl transition-all duration-300",
+        isExpanded 
+          ? "bg-blue-50/50 dark:bg-blue-900/10 border border-blue-200/50 dark:border-blue-800/30" 
+          : "bg-slate-50/50 dark:bg-slate-800/50 hover:bg-slate-100/50 dark:hover:bg-slate-700/50 border border-transparent hover:border-slate-200 dark:hover:border-slate-700"
+      )}>
+        <div className="flex items-start gap-3">
+          {/* User Avatar */}
+          <Link href={`/profile/${commentUser.username}`} className="flex-shrink-0">
+            <Avatar className="w-8 h-8 ring-2 ring-white/50 dark:ring-slate-700/50">
+              <AvatarImage src={commentUser.avatar} />
+              <AvatarFallback className="bg-gradient-to-br from-blue-500 to-cyan-500 text-white text-xs font-semibold">
+                {commentUser.firstName?.[0] || commentUser.username?.[0] || 'U'}
+              </AvatarFallback>
+            </Avatar>
+          </Link>
+
+          {/* Comment Content */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2">
+                <Link 
+                  href={`/profile/${commentUser.username}`}
+                  className="font-semibold text-sm text-slate-900 dark:text-white hover:text-blue-600 transition-colors"
+                >
+                  {commentUser.username}
+                </Link>
+                {commentUser.isVerified && (
+                  <Verified className="w-3.5 h-3.5 text-blue-500" />
+                )}
+                {commentUser.isPro && (
+                  <Crown className="w-3.5 h-3.5 text-amber-500" />
+                )}
+                <span className="text-xs text-slate-500">
+                  {getTimeAgo(comment.createdAt)}
+                </span>
+                {comment.isEdited && (
+                  <span className="text-xs text-slate-500 italic">(edited)</span>
+                )}
+              </div>
+              
+              {/* Comment Menu */}
+              <div className="relative">
+                <button
+                  onClick={() => setActiveCommentMenu(
+                    activeCommentMenu === comment._id ? null : comment._id
+                  )}
+                  className="w-6 h-6 rounded-full flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                >
+                  <MoreVertical className="w-4 h-4 text-slate-500" />
+                </button>
+                
+                <AnimatePresence>
+                  {activeCommentMenu === comment._id && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                      className="absolute right-0 top-8 z-50 w-48 bg-white dark:bg-slate-800 rounded-lg shadow-2xl border border-slate-200 dark:border-slate-700 py-1"
+                    >
+                      <button
+                        onClick={() => {
+                          setReplyToComment(comment._id);
+                          setReplyText(`@${commentUser.username} `);
+                          setActiveCommentMenu(null);
+                        }}
+                        className="flex items-center gap-3 w-full px-4 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                      >
+                        <Reply className="w-3.5 h-3.5" />
+                        <span>Reply</span>
+                      </button>
+                      
+                      <button 
+                        onClick={() => handleLikeComment(comment._id)}
+                        className="flex items-center gap-3 w-full px-4 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                      >
+                        <Heart className={cn("w-3.5 h-3.5", isLiked ? "text-rose-500 fill-current" : "text-rose-500")} />
+                        <span>{isLiked ? 'Unlike' : 'Like'}</span>
+                      </button>
+                      
+                      {isAuthor && (
+                        <>
+                          <button 
+                            onClick={() => {
+                              setEditingComment(comment._id);
+                              setEditCommentText(comment.text);
+                              setActiveCommentMenu(null);
+                              setTimeout(() => editCommentRef.current?.focus(), 100);
+                            }}
+                            className="flex items-center gap-3 w-full px-4 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            <span>Edit</span>
+                          </button>
+                          
+                          <button 
+                            onClick={() => {
+                              setActiveCommentMenu(null);
+                              handleDeleteComment(comment._id);
+                            }}
+                            className="flex items-center gap-3 w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Delete</span>
+                          </button>
+                        </>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+            
+            {/* Comment Text (Editable) */}
+            {isEditingThis ? (
+              <div className="mt-2 space-y-2">
+                <Textarea
+                  ref={editCommentRef}
+                  value={editCommentText}
+                  onChange={(e) => setEditCommentText(e.target.value)}
+                  className="min-h-[80px] text-sm"
+                  placeholder="Edit your comment..."
+                />
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => handleEditComment(comment._id)}
+                    disabled={isEditing || !editCommentText.trim()}
+                    className="h-8"
+                  >
+                    {isEditing ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setEditingComment(null);
+                      setEditCommentText('');
+                    }}
+                    className="h-8"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-slate-800 dark:text-slate-200 text-sm mt-1 leading-relaxed">
+                {comment.text}
+              </p>
+            )}
+            
+            {/* Comment Actions */}
+            <div className="flex items-center gap-4 mt-3">
+              <button 
+                onClick={() => handleLikeComment(comment._id)}
+                disabled={!isSignedIn}
+                className={cn(
+                  "flex items-center gap-1.5 text-xs transition-all duration-300",
+                  isLiked ? 'text-rose-500 font-semibold' : 'text-slate-500 hover:text-rose-500',
+                  !isSignedIn && 'opacity-50 cursor-not-allowed'
+                )}
+              >
+                <ThumbsUp className={cn("w-4 h-4", isLiked && "fill-current")} />
+                <span>{Array.isArray(comment.likes) ? comment.likes.length : 0}</span>
+              </button>
+              
+              <button
+                onClick={() => {
+                  setReplyToComment(comment._id);
+                  setReplyText(`@${commentUser.username} `);
+                }}
+                className="text-xs text-blue-500 hover:text-blue-600 flex items-center gap-1.5 transition-colors"
+              >
+                <Reply className="w-3.5 h-3.5" />
+                <span>Reply</span>
+              </button>
+              
+              {replies.length > 0 && (
+                <button
+                  onClick={() => toggleExpandComment(comment._id)}
+                  className="text-xs text-blue-500 hover:text-blue-600 flex items-center gap-1.5 ml-auto"
+                >
+                  {isExpanded ? (
+                    <>
+                      <ChevronUp className="w-3.5 h-3.5" />
+                      Hide {replies.length} replies
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-3.5 h-3.5" />
+                      View {replies.length} replies
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+        
+        {/* Reply Input */}
+        {replyToComment === comment._id && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            className="mt-3 ml-10"
+          >
+            <div className="flex items-center gap-2">
+              <Avatar className="w-6 h-6">
+                <AvatarImage src={currentUser?.imageUrl} />
+                <AvatarFallback className="text-xs">
+                  {currentUser?.firstName?.[0] || 'U'}
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex-1 relative">
+                <Input
+                  value={replyText}
+                  onChange={(e) => setReplyText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleAddReply(comment._id);
+                    }
+                    if (e.key === 'Escape') {
+                      setReplyToComment(null);
+                      setReplyText('');
+                    }
+                  }}
+                  placeholder="Write a reply..."
+                  className="text-sm h-9"
+                />
+                <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setReplyToComment(null);
+                      setReplyText('');
+                    }}
+                    className="h-6 px-2 text-xs"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => handleAddReply(comment._id)}
+                    disabled={!replyText.trim() || isReplying}
+                    className="h-6 px-2 text-xs"
+                  >
+                    {isReplying ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Reply'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </div>
+      
+      {/* Replies */}
+      {isExpanded && replies.length > 0 && (
+        <div className="space-y-2">
+          {replies.map(reply => renderComment(reply, depth + 1))}
+        </div>
+      )}
+    </div>
+  );
+};
 
   // Get trending color based on index
   const getTrendColor = (index: number) => {
@@ -969,8 +1375,8 @@ export default function PostDetailPage() {
     return <NotFoundState error={error} />;
   }
 
-  const currentMedia = post.media[currentMediaIndex];
-  const commentCount = post.comments?.length || 0;
+  const currentMedia = post.media?.[currentMediaIndex];
+  const commentCount = getCommentCount();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-rose-50/30 dark:from-slate-950 dark:via-slate-900 dark:to-rose-950/20">
@@ -999,7 +1405,7 @@ export default function PostDetailPage() {
             <div className="flex items-center gap-4 px-3 py-1.5 bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm rounded-full">
               <div className="flex items-center gap-1.5">
                 <Heart className={cn("w-3.5 h-3.5", isLiked ? "text-rose-500 fill-current" : "text-slate-500")} />
-                <span className="text-sm font-medium">{formatNumber(post.likes?.length || 0)}</span>
+                <span className="text-sm font-medium">{formatNumber(getLikesCount())}</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <MessageCircle className="w-3.5 h-3.5 text-slate-500" />
@@ -1007,7 +1413,7 @@ export default function PostDetailPage() {
               </div>
               <div className="flex items-center gap-1.5">
                 <Bookmark className={cn("w-3.5 h-3.5", isSaved ? "text-amber-500 fill-current" : "text-slate-500")} />
-                <span className="text-sm font-medium">{formatNumber(post.saves?.length || 0)}</span>
+                <span className="text-sm font-medium">{formatNumber(getSavesCount())}</span>
               </div>
             </div>
           </div>
@@ -1100,10 +1506,13 @@ export default function PostDetailPage() {
                     exit={{ opacity: 0, scale: 0.95, y: 10 }}
                     className="absolute right-0 top-12 w-56 bg-white/95 dark:bg-slate-800/95 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 dark:border-slate-700/50 py-2"
                   >
-                    {currentUserId === post.author.clerkId ? (
+                    {currentUserId === (typeof post.author !== 'string' ? post.author?.clerkId : '') ? (
                       <>
                         <button 
-                          onClick={() => setShowOptionsMenu(false)}
+                          onClick={() => {
+                            setShowEditPostModal(true);
+                            setShowOptionsMenu(false);
+                          }}
                           className="flex items-center gap-3 w-full px-4 py-3 text-sm hover:bg-slate-100/50 dark:hover:bg-slate-700/50 transition-colors"
                         >
                           <Edit className="w-4 h-4 text-blue-500" />
@@ -1178,8 +1587,8 @@ export default function PostDetailPage() {
             transition={{ duration: 0.6 }}
             className="grid grid-cols-1 lg:grid-cols-3 gap-6"
           >
-            {/* Left Column - Media */}
-            <div className="lg:col-span-2">
+            {/* Left Column - Media & Comments */}
+            <div className="lg:col-span-2 space-y-6">
               {/* Glass Morphic Media Container */}
               <div 
                 ref={mediaContainerRef}
@@ -1201,9 +1610,9 @@ export default function PostDetailPage() {
                           muted={isMuted}
                           onTimeUpdate={handleVideoProgress}
                           onLoadedData={handleVideoLoaded}
-                          onPlay={handleVideoPlay}
-                          onPause={handleVideoPause}
-                          onEnded={handleVideoEnd}
+                          onPlay={() => setIsPlaying(true)}
+                          onPause={() => setIsPlaying(false)}
+                          onEnded={() => setIsPlaying(false)}
                           className="w-full h-auto max-h-[75vh] object-contain"
                           playsInline
                           preload="metadata"
@@ -1212,7 +1621,7 @@ export default function PostDetailPage() {
                         {/* Video Controls */}
                         <div className={cn(
                           "absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent transition-all duration-300",
-                          (showVideoControls || isHovered || isPlaying) ? "opacity-100" : "opacity-0"
+                          (showVideoControls || isHovered) ? "opacity-100" : "opacity-0"
                         )}>
                           {/* Top progress bar */}
                           <div className="absolute top-4 left-4 right-4">
@@ -1252,7 +1661,7 @@ export default function PostDetailPage() {
                                   onClick={togglePlay}
                                   className="w-12 h-12 bg-white/20 backdrop-blur-lg text-white hover:bg-white/30 hover:scale-110 transition-all"
                                 >
-                                  {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+                                  {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
                                 </Button>
                                 <Button
                                   variant="ghost"
@@ -1325,7 +1734,7 @@ export default function PostDetailPage() {
                 )}
 
                 {/* Media Navigation */}
-                {post.media.length > 1 && (
+                {post.media && post.media.length > 1 && (
                   <>
                     <button
                       onClick={() => setCurrentMediaIndex(prev => (prev - 1 + post.media.length) % post.media.length)}
@@ -1388,23 +1797,23 @@ export default function PostDetailPage() {
                 </div>
               </div>
 
-              {/* Author Card */}
+              {/* Author & Actions Card */}
               <div className="rounded-3xl bg-white/50 dark:bg-slate-800/50 backdrop-blur-xl border border-white/30 dark:border-slate-700/30 shadow-xl mb-6 overflow-hidden">
                 <div className="p-6">
                   {/* Author */}
                   <div className="flex items-center justify-between mb-4">
                     <Link 
-                      href={`/profile/${post.author?.username}`} 
+                      href={`/profile/${getAuthorUsername()}`} 
                       className="flex items-center gap-3 group/author"
                     >
                       <div className="relative">
                         <Avatar className="w-12 h-12 border-2 border-white/80 dark:border-slate-700/80">
-                          <AvatarImage src={post.author?.avatar} />
+                          <AvatarImage src={getAuthorAvatar()} />
                           <AvatarFallback className="bg-gradient-to-br from-rose-500 to-pink-500 text-white font-semibold">
-                            {post.author?.firstName?.[0] || 'U'}
+                            {getAuthorName()[0]}
                           </AvatarFallback>
                         </Avatar>
-                        {post.author?.isVerified && (
+                        {getAuthorVerified() && (
                           <div className="absolute -bottom-1 -right-1 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-full p-1 border-2 border-white/80 dark:border-slate-700/80">
                             <Verified className="w-2.5 h-2.5 text-white" />
                           </div>
@@ -1413,14 +1822,14 @@ export default function PostDetailPage() {
                       <div>
                         <div className="flex items-center gap-2">
                           <p className="font-semibold text-slate-900 dark:text-white group-hover/author:text-rose-600 transition-colors">
-                            {post.author?.firstName} {post.author?.lastName}
+                            {getAuthorName()}
                           </p>
-                          {post.author?.isPro && (
+                          {getAuthorPro() && (
                             <Crown className="w-3.5 h-3.5 text-amber-500" />
                           )}
                         </div>
                         <p className="text-sm text-slate-600 dark:text-slate-400">
-                          @{post.author?.username}
+                          @{getAuthorUsername()}
                         </p>
                       </div>
                     </Link>
@@ -1458,6 +1867,21 @@ export default function PostDetailPage() {
                     <p className="text-slate-900 dark:text-white text-lg leading-relaxed">
                       {post.caption}
                     </p>
+                    
+                    {/* Hashtags */}
+                    {post.hashtags && post.hashtags.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        {post.hashtags.map((tag, index) => (
+                          <Link 
+                            key={index}
+                            href={`/explore?hashtag=${tag}`}
+                            className="text-blue-500 hover:text-blue-600 text-sm"
+                          >
+                            #{tag}
+                          </Link>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* Stats & Actions */}
@@ -1477,11 +1901,14 @@ export default function PostDetailPage() {
                         ) : (
                           <Heart className={cn("w-5 h-5", isLiked && "fill-current")} />
                         )}
-                        <span className="font-semibold">{formatNumber(post.likes?.length || 0)}</span>
+                        <span className="font-semibold">{formatNumber(getLikesCount())}</span>
                       </button>
 
                       <button
-                        onClick={() => setShowComments(!showComments)}
+                        onClick={() => {
+                          setShowComments(true);
+                          setTimeout(() => commentInputRef.current?.focus(), 100);
+                        }}
                         className="flex items-center gap-2 text-slate-600 dark:text-slate-400 hover:text-blue-500 transition-all duration-300 hover:scale-105"
                       >
                         <MessageCircle className="w-5 h-5" />
@@ -1502,7 +1929,7 @@ export default function PostDetailPage() {
                         ) : (
                           <Bookmark className={cn("w-5 h-5", isSaved && "fill-current")} />
                         )}
-                        <span className="font-semibold">{formatNumber(post.saves?.length || 0)}</span>
+                        <span className="font-semibold">{formatNumber(getSavesCount())}</span>
                       </button>
                     </div>
 
@@ -1516,33 +1943,14 @@ export default function PostDetailPage() {
                 </div>
               </div>
 
-              {/* Comments Toggle Button */}
-              {!showComments && commentCount > 0 && (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="mb-6"
-                >
-                  <Button
-                    onClick={() => setShowComments(true)}
-                    variant="outline"
-                    className="w-full rounded-2xl bg-white/50 dark:bg-slate-800/50 backdrop-blur-xl border border-white/30 dark:border-slate-700/30 hover:bg-slate-100/50 dark:hover:bg-slate-700/50 h-12 group"
-                  >
-                    <MessageCircle className="w-4 h-4 mr-2 text-blue-500" />
-                    <span className="text-slate-700 dark:text-slate-300">View {commentCount} comments</span>
-                    <ChevronDown className="w-4 h-4 ml-2 text-slate-400 group-hover:translate-y-0.5 transition-transform" />
-                  </Button>
-                </motion.div>
-              )}
-
               {/* Comments Section */}
               <AnimatePresence>
                 {showComments && (
                   <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="rounded-3xl bg-white/50 dark:bg-slate-800/50 backdrop-blur-xl border border-white/30 dark:border-slate-700/30 shadow-xl overflow-hidden mb-6"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 20 }}
+                    className="rounded-3xl bg-white/50 dark:bg-slate-800/50 backdrop-blur-xl border border-white/30 dark:border-slate-700/30 shadow-xl overflow-hidden"
                   >
                     {/* Comments Header */}
                     <div className="sticky top-0 z-10 p-6 border-b border-slate-200/50 dark:border-slate-700/50 bg-white/80 dark:bg-slate-800/80 backdrop-blur-xl">
@@ -1612,281 +2020,16 @@ export default function PostDetailPage() {
                     {/* Comments List */}
                     <div 
                       ref={commentsContainerRef}
-                      className="max-h-[600px] overflow-y-auto custom-scrollbar"
+                      className="max-h-[600px] overflow-y-auto custom-scrollbar p-4"
                     >
-                      {post.comments?.length > 0 ? (
-                        <div className="p-4 space-y-2">
-                          {post.comments.map((comment) => (
-                            <div key={comment._id} className="group relative">
-                              {/* Main Comment */}
-                              <div className={cn(
-                                "flex items-start gap-3 p-3 rounded-2xl transition-all duration-300",
-                                expandedComment === comment._id 
-                                  ? "bg-blue-50/50 dark:bg-blue-900/10 border border-blue-200/50 dark:border-blue-800/30" 
-                                  : "hover:bg-slate-100/30 dark:hover:bg-slate-700/30"
-                              )}>
-                                {/* User Avatar */}
-                                <Link href={`/profile/${comment.user.username}`} className="flex-shrink-0">
-                                  <Avatar className="w-10 h-10 ring-2 ring-white/50 dark:ring-slate-700/50">
-                                    <AvatarImage src={comment.user.avatar} />
-                                    <AvatarFallback className="bg-gradient-to-br from-blue-500 to-cyan-500 text-white text-sm font-semibold">
-                                      {comment.user.firstName[0]}
-                                    </AvatarFallback>
-                                  </Avatar>
-                                </Link>
-
-                                {/* Comment Content */}
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-start justify-between gap-2 mb-1">
-                                    <div className="flex-1">
-                                      <div className="flex items-center gap-2 mb-1">
-                                        <Link 
-                                          href={`/profile/${comment.user.username}`}
-                                          className="font-semibold text-sm text-slate-900 dark:text-white hover:text-blue-600 transition-colors"
-                                        >
-                                          {comment.user.username}
-                                        </Link>
-                                        {comment.user.isVerified && (
-                                          <Verified className="w-3.5 h-3.5 text-blue-500" />
-                                        )}
-                                        {comment.user.isPro && (
-                                          <Crown className="w-3.5 h-3.5 text-amber-500" />
-                                        )}
-                                      </div>
-                                      
-                                      <p className="text-slate-800 dark:text-slate-200 text-sm mb-2 leading-relaxed">
-                                        {comment.text}
-                                      </p>
-                                    </div>
-                                    
-                                    {/* Comment Menu */}
-                                    <div className="relative" data-comment={comment._id}>
-                                      <button
-                                        onClick={() => setActiveCommentMenu(
-                                          activeCommentMenu === comment._id ? null : comment._id
-                                        )}
-                                        className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-slate-100/50 dark:hover:bg-slate-700/50 transition-colors opacity-0 group-hover:opacity-100"
-                                      >
-                                        <MoreVertical className="w-4 h-4 text-slate-500" />
-                                      </button>
-                                      
-                                      <AnimatePresence>
-                                        {activeCommentMenu === comment._id && (
-                                          <motion.div
-                                            initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                                            exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                                            className="absolute right-0 top-8 z-50 w-48 bg-white/95 dark:bg-slate-800/95 backdrop-blur-lg rounded-xl shadow-2xl border border-white/20 dark:border-slate-700/50 py-2"
-                                          >
-                                            <button
-                                              onClick={() => {
-                                                setReplyToComment(comment._id);
-                                                setReplyText(`@${comment.user.username} `);
-                                                setActiveCommentMenu(null);
-                                                setTimeout(() => {
-                                                  const replyInput = document.querySelector(`[data-reply-input="${comment._id}"]`) as HTMLInputElement;
-                                                  replyInput?.focus();
-                                                }, 100);
-                                              }}
-                                              className="flex items-center gap-3 w-full px-4 py-2.5 text-sm hover:bg-slate-100/50 dark:hover:bg-slate-700/50 transition-colors"
-                                            >
-                                              <MessageSquare className="w-3.5 h-3.5 text-blue-500" />
-                                              <span>Reply</span>
-                                            </button>
-                                            <button 
-                                              onClick={() => handleLikeComment(comment._id)}
-                                              className="flex items-center gap-3 w-full px-4 py-2.5 text-sm hover:bg-slate-100/50 dark:hover:bg-slate-700/50 transition-colors"
-                                            >
-                                              <Heart className={cn("w-3.5 h-3.5", isCommentLiked(comment) ? "text-rose-500 fill-current" : "text-rose-500")} />
-                                              <span>{isCommentLiked(comment) ? 'Unlike' : 'Like'}</span>
-                                            </button>
-                                            {isCommentAuthor(comment.user._id) && (
-                                              <button 
-                                                onClick={() => {
-                                                  setActiveCommentMenu(null);
-                                                  handleDeleteComment(comment._id);
-                                                }}
-                                                className="flex items-center gap-3 w-full px-4 py-2.5 text-sm text-red-600 hover:bg-red-50/50 dark:hover:bg-red-900/20 transition-colors"
-                                              >
-                                                <Trash2 className="w-3.5 h-3.5" />
-                                                <span>Delete</span>
-                                              </button>
-                                            )}
-                                          </motion.div>
-                                        )}
-                                      </AnimatePresence>
-                                    </div>
-                                  </div>
-                                  
-                                  {/* Comment Actions */}
-                                  <div className="flex items-center gap-4">
-                                    <button 
-                                      onClick={() => handleLikeComment(comment._id)}
-                                      disabled={!isSignedIn}
-                                      className={cn(
-                                        "flex items-center gap-1.5 text-xs transition-all duration-300",
-                                        isCommentLiked(comment) 
-                                          ? 'text-rose-500 font-semibold' 
-                                          : 'text-slate-500 hover:text-rose-500',
-                                        !isSignedIn && 'opacity-50 cursor-not-allowed'
-                                      )}
-                                    >
-                                      <ThumbsUp className={cn("w-4 h-4", isCommentLiked(comment) && "fill-current")} />
-                                      <span>{comment.likes?.length || 0}</span>
-                                    </button>
-                                    
-                                    <button
-                                      onClick={() => {
-                                        setReplyToComment(comment._id);
-                                        setReplyText(`@${comment.user.username} `);
-                                        const replyInput = document.querySelector(`[data-reply-input="${comment._id}"]`) as HTMLInputElement;
-                                        setTimeout(() => replyInput?.focus(), 100);
-                                      }}
-                                      className="text-xs text-blue-500 hover:text-blue-600 flex items-center gap-1.5 transition-colors"
-                                    >
-                                      <MessageSquare className="w-3.5 h-3.5" />
-                                      <span>Reply</span>
-                                    </button>
-                                    
-                                    <span className="text-xs text-slate-400">
-                                      {getTimeAgo(comment.createdAt)}
-                                    </span>
-                                    
-                                    {comment.replies && comment.replies.length > 0 && (
-                                      <button
-                                        onClick={() => setExpandedComment(
-                                          expandedComment === comment._id ? null : comment._id
-                                        )}
-                                        className="text-xs text-blue-500 hover:text-blue-600 flex items-center gap-1.5 ml-auto"
-                                      >
-                                        {expandedComment === comment._id ? (
-                                          <>
-                                            <ChevronUp className="w-3.5 h-3.5" />
-                                            Hide {comment.replies.length} replies
-                                          </>
-                                        ) : (
-                                          <>
-                                            <ChevronDown className="w-3.5 h-3.5" />
-                                            View {comment.replies.length} replies
-                                          </>
-                                        )}
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Reply Input */}
-                              {replyToComment === comment._id && (
-                                <motion.div
-                                  initial={{ opacity: 0, height: 0 }}
-                                  animate={{ opacity: 1, height: 'auto' }}
-                                  className="ml-12 mt-2"
-                                >
-                                  <div className="flex items-center gap-3 p-3 rounded-xl bg-blue-50/30 dark:bg-blue-900/10 border border-blue-200/30 dark:border-blue-800/30">
-                                    <Avatar className="w-8 h-8">
-                                      <AvatarImage src={currentUser?.imageUrl} />
-                                      <AvatarFallback className="text-xs">
-                                        {currentUser?.firstName?.[0] || 'U'}
-                                      </AvatarFallback>
-                                    </Avatar>
-                                    <div className="flex-1 relative">
-                                      <Input
-                                        data-reply-input={comment._id}
-                                        placeholder="Write a reply..."
-                                        value={replyText}
-                                        onChange={(e) => setReplyText(e.target.value)}
-                                        onKeyDown={(e) => {
-                                          if (e.key === 'Enter' && !e.shiftKey) {
-                                            e.preventDefault();
-                                            handleAddReply(comment._id);
-                                          }
-                                          if (e.key === 'Escape') {
-                                            setReplyToComment(null);
-                                            setReplyText('');
-                                          }
-                                        }}
-                                        className="rounded-xl pr-24 bg-white/70 dark:bg-slate-700/70 border-blue-200/50 dark:border-blue-800/50 h-10"
-                                      />
-                                      <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center gap-1">
-                                        <Button
-                                          size="sm"
-                                          variant="ghost"
-                                          onClick={() => {
-                                            setReplyToComment(null);
-                                            setReplyText('');
-                                          }}
-                                          className="h-8 px-3 text-xs"
-                                        >
-                                          Cancel
-                                        </Button>
-                                        <Button
-                                          size="sm"
-                                          onClick={() => handleAddReply(comment._id)}
-                                          disabled={!replyText.trim() || isReplying}
-                                          className="h-8 px-3 text-xs bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600"
-                                        >
-                                          {isReplying ? (
-                                            <Loader2 className="w-3 h-3 animate-spin" />
-                                          ) : (
-                                            'Reply'
-                                          )}
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </motion.div>
-                              )}
-
-                              {/* Replies */}
-                              {comment.replies && expandedComment === comment._id && (
-                                <motion.div
-                                  initial={{ opacity: 0, height: 0 }}
-                                  animate={{ opacity: 1, height: 'auto' }}
-                                  className="ml-12 mt-2 space-y-2"
-                                >
-                                  {comment.replies.map((reply) => (
-                                    <div key={reply._id} className="flex items-start gap-3 p-3 rounded-xl bg-slate-50/50 dark:bg-slate-800/50">
-                                      <Avatar className="w-8 h-8">
-                                        <AvatarImage src={reply.user.avatar} />
-                                        <AvatarFallback className="text-xs bg-gradient-to-br from-purple-500 to-pink-500 text-white">
-                                          {reply.user.firstName[0]}
-                                        </AvatarFallback>
-                                      </Avatar>
-                                      <div className="flex-1">
-                                        <div className="flex items-center gap-2 mb-1">
-                                          <span className="font-semibold text-xs">
-                                            {reply.user.username}
-                                          </span>
-                                          {reply.user.isVerified && (
-                                            <Verified className="w-3 h-3 text-blue-500" />
-                                          )}
-                                        </div>
-                                        <p className="text-xs text-slate-700 dark:text-slate-300 mb-2">
-                                          {reply.text}
-                                        </p>
-                                        <div className="flex items-center gap-3">
-                                          <button 
-                                            onClick={() => handleLikeComment(reply._id)}
-                                            className="text-xs text-slate-500 hover:text-rose-500 flex items-center gap-1"
-                                          >
-                                            <ThumbsUp className="w-3 h-3" />
-                                            <span>{reply.likes?.length || 0}</span>
-                                          </button>
-                                          <span className="text-xs text-slate-400">
-                                            {getTimeAgo(reply.createdAt)}
-                                          </span>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </motion.div>
-                              )}
-                            </div>
-                          ))}
+                      {post.comments && post.comments.length > 0 ? (
+                        <div className="space-y-2">
+                          {post.comments
+                            .filter(comment => !comment.parentComment)
+                            .map(comment => renderComment(comment as CommentWithNesting))}
                         </div>
                       ) : (
-                        <div className="p-8 text-center">
+                        <div className="text-center py-8 text-slate-500">
                           <div className="relative mx-auto w-20 h-20 mb-4">
                             <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 to-cyan-500/20 rounded-2xl blur-lg" />
                             <MessageCircle className="relative w-20 h-20 text-slate-300 dark:text-slate-600 mx-auto" />
@@ -1986,21 +2129,21 @@ export default function PostDetailPage() {
               </div>
 
               {/* Related Tags */}
-              {post.tags && post.tags.length > 0 && (
+              {post.hashtags && post.hashtags.length > 0 && (
                 <div className="rounded-3xl bg-white/50 dark:bg-slate-800/50 backdrop-blur-xl border border-white/30 dark:border-slate-700/30 shadow-xl p-6">
                   <h4 className="font-bold text-lg text-slate-900 dark:text-white mb-4 flex items-center gap-2">
                     <HashIcon className="w-5 h-5 text-emerald-500" />
                     Related Tags
                   </h4>
                   <div className="flex flex-wrap gap-2">
-                    {post.tags.map((tag, index) => (
+                    {post.hashtags.map((tag, index) => (
                       <Badge 
                         key={index}
                         variant="secondary"
                         className="rounded-full bg-slate-100/50 dark:bg-slate-700/50 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 cursor-pointer transition-all duration-300 hover:scale-105"
                         onClick={() => router.push(`/explore?tag=${tag}`)}
                       >
-                        {tag}
+                        #{tag}
                       </Badge>
                     ))}
                   </div>
@@ -2045,6 +2188,78 @@ export default function PostDetailPage() {
           </motion.div>
         </div>
       </div>
+
+      {/* Edit Post Modal */}
+      <AnimatePresence>
+        {showEditPostModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={() => setShowEditPostModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-md"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold">Edit Post</h3>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowEditPostModal(false)}
+                >
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Caption</label>
+                  <Textarea
+                    value={editPostData.caption}
+                    onChange={(e) => setEditPostData(prev => ({ ...prev, caption: e.target.value }))}
+                    className="min-h-[100px]"
+                    maxLength={2200}
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium mb-2">Hashtags</label>
+                  <Input
+                    value={editPostData.hashtags}
+                    onChange={(e) => setEditPostData(prev => ({ ...prev, hashtags: e.target.value }))}
+                    placeholder="#fashion #design #art"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Separate tags with spaces
+                  </p>
+                </div>
+                
+                <div className="flex gap-3">
+                  <Button
+                    onClick={handleEditPost}
+                    className="flex-1"
+                  >
+                    Save Changes
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowEditPostModal(false)}
+                    className="flex-1"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Add custom scrollbar styles */}
       <style jsx global>{`
@@ -2118,7 +2333,7 @@ const NotFoundState = ({ error }: { error?: string | null }) => {
             transition={{ delay: 0.2, type: "spring" }}
             className="w-20 h-20 bg-gradient-to-r from-rose-100 to-pink-100 dark:from-rose-900/20 dark:to-pink-900/20 rounded-2xl flex items-center justify-center mx-auto mb-6"
           >
-            <Sparkles className="w-10 h-10 text-rose-400" />
+            <AlertCircle className="w-10 h-10 text-rose-400" />
           </motion.div>
           <h3 className="text-2xl font-bold text-slate-900 dark:text-white mb-3">
             Design Not Found
