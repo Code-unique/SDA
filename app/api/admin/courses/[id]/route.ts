@@ -194,7 +194,6 @@ export async function PATCH(
           ? new mongoose.Types.ObjectId(module._id) 
           : new mongoose.Types.ObjectId(),
         title: module.title?.substring(0, 200) || `Module ${moduleIndex + 1}`,
-        // UPDATED: description is optional
         description: module.description?.substring(0, 1000) || undefined,
         thumbnailUrl: module.thumbnailUrl || undefined,
         order: typeof module.order === 'number' ? module.order : moduleIndex,
@@ -203,35 +202,42 @@ export async function PATCH(
     };
 
     const transformChapters = (chapters: any[], moduleIndex: number): IChapter[] => {
-      return chapters.map((chapter, chapterIndex) => ({
-        _id: chapter._id && mongoose.Types.ObjectId.isValid(chapter._id) 
-          ? new mongoose.Types.ObjectId(chapter._id) 
-          : new mongoose.Types.ObjectId(),
-        title: chapter.title?.substring(0, 200) || `Chapter ${chapterIndex + 1}`,
-        // UPDATED: description is optional
-        description: chapter.description?.substring(0, 1000) || undefined,
-        order: typeof chapter.order === 'number' ? chapter.order : chapterIndex,
-        lessons: transformLessons(chapter.lessons || [], chapterIndex)
-      }));
+      return chapters.map((chapter, chapterIndex) => {
+  const chapterData: IChapter = {
+    _id: chapter._id && mongoose.Types.ObjectId.isValid(chapter._id) 
+      ? new mongoose.Types.ObjectId(chapter._id) 
+      : new mongoose.Types.ObjectId(),
+    title: chapter.title?.substring(0, 200) || `Chapter ${chapterIndex + 1}`,
+    description: chapter.description?.substring(0, 1000) || undefined,
+    order: typeof chapter.order === 'number' ? chapter.order : chapterIndex,
+    lessons: transformLessons(chapter.lessons || [], chapterIndex) as ILesson[] // Cast to ILesson[]
+  };
+  return chapterData;
+});
     };
 
-    const transformLessons = (lessons: any[], chapterIndex: number): ILesson[] => {
+    const transformLessons = (lessons: any[], chapterIndex: number): Omit<ILesson, 'createdAt' | 'updatedAt'>[] => {
       return lessons.map((lesson, lessonIndex) => ({
         _id: lesson._id && mongoose.Types.ObjectId.isValid(lesson._id) 
           ? new mongoose.Types.ObjectId(lesson._id) 
           : new mongoose.Types.ObjectId(),
         title: lesson.title?.substring(0, 200) || `Lesson ${lessonIndex + 1}`,
-        // UPDATED: description and content are optional
-        description: lesson.description?.substring(0, 1000) || undefined,
-        content: lesson.content || undefined,
-        video: lesson.video as IS3Asset || {
-          key: '',
-          url: '',
-          size: 0,
-          type: 'video'
+        description: lesson.description || '',
+        content: lesson.content || '',
+        videoSource: lesson.videoSource || {
+          type: lesson.video?.type || 's3',
+          key: lesson.video?.key || '',
+          url: lesson.video?.url || '',
+          size: lesson.video?.size || 0,
+          duration: lesson.duration || 0,
+          mimeType: lesson.video?.mimeType || 'video/mp4',
+          originalFileName: lesson.video?.originalFileName || '',
+          width: lesson.video?.width,
+          height: lesson.video?.height
         },
-        duration: Math.max(0, Math.min(lesson.duration || 0, 10000)),
-        isPreview: !!lesson.isPreview,
+        video: lesson.video,
+        duration: lesson.duration || 0,
+        isPreview: lesson.isPreview || false,
         resources: transformResources(lesson.resources || []),
         order: typeof lesson.order === 'number' ? lesson.order : lessonIndex
       }));
@@ -261,7 +267,6 @@ export async function PATCH(
       ...(body.price !== undefined && { price: body.price }),
       ...(body.isFree !== undefined && { isFree: !!body.isFree }),
       ...(body.level && { level: body.level }),
-      // UPDATED: category is now optional
       ...(body.category !== undefined && { 
         category: body.category ? body.category.substring(0, 50) : undefined 
       }),

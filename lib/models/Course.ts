@@ -1,5 +1,5 @@
 import mongoose, { Document, Schema, Model } from 'mongoose';
-
+import { Types } from 'mongoose';
 // S3 Asset Interface
 export interface IS3Asset {
   key: string;
@@ -11,6 +11,15 @@ export interface IS3Asset {
   height?: number;
 }
 
+// NEW: Video Source Interface
+export interface IVideoSource {
+  type: 'uploaded' | 'library';
+  videoLibraryId?: mongoose.Types.ObjectId;
+  video: IS3Asset;
+  uploadedAt?: Date;
+  uploadedBy?: mongoose.Types.ObjectId;
+}
+
 export interface ILessonResource {
   _id?: mongoose.Types.ObjectId;
   title: string;
@@ -19,21 +28,23 @@ export interface ILessonResource {
 }
 
 export interface ILesson {
-  _id?: mongoose.Types.ObjectId;
+  _id: Types.ObjectId;
   title: string;
-  description?: string; // Made optional
-  content?: string; // Made optional
-  video: IS3Asset;
+  description: string;
+  content: string;
+  videoSource: IVideoSource;
+  video?: IS3Asset; // Optional for backward compatibility
   duration: number;
   isPreview: boolean;
   resources: ILessonResource[];
   order: number;
+  createdAt: Date;
+  updatedAt: Date;
 }
-
 export interface IChapter {
   _id?: mongoose.Types.ObjectId;
   title: string;
-  description?: string; // Made optional
+  description?: string;
   order: number;
   lessons: ILesson[];
   createdAt?: Date;
@@ -43,7 +54,7 @@ export interface IChapter {
 export interface IModule {
   _id?: mongoose.Types.ObjectId;
   title: string;
-  description?: string; // Made optional
+  description?: string;
   thumbnailUrl?: string;
   order: number;
   chapters: IChapter[];
@@ -60,7 +71,6 @@ export interface IRating {
   updatedAt?: Date;
 }
 
-// UPDATED: Student progress interface with manual enrollment support
 export interface IStudentProgress {
   user: mongoose.Types.ObjectId;
   enrolledAt: Date;
@@ -70,8 +80,8 @@ export interface IStudentProgress {
   paymentMethod?: 'bank_transfer' | 'digital_wallet' | 'cash' | 'other' | 'manual_grant';
   paymentAmount?: number;
   enrolledThrough: 'free' | 'manual_payment' | 'manual_grant' | 'promo';
-  grantedBy?: mongoose.Types.ObjectId; // Admin who granted manual access
-  paymentRequestId?: mongoose.Types.ObjectId; // Reference to payment request
+  grantedBy?: mongoose.Types.ObjectId;
+  paymentRequestId?: mongoose.Types.ObjectId;
 }
 
 export interface ICourse extends Document {
@@ -83,7 +93,7 @@ export interface ICourse extends Document {
   price: number;
   isFree: boolean;
   level: 'beginner' | 'intermediate' | 'advanced';
-  category?: string; // Made optional
+  category?: string;
   tags: string[];
   thumbnail: IS3Asset;
   previewVideo?: IS3Asset;
@@ -101,7 +111,6 @@ export interface ICourse extends Document {
   learningOutcomes: string[];
   createdAt: Date;
   updatedAt: Date;
-  // NEW: Track manual enrollment stats
   manualEnrollments: number;
 }
 
@@ -122,11 +131,23 @@ const LessonResourceSchema = new Schema<ILessonResource>({
   type: { type: String, enum: ['pdf', 'document', 'link', 'video'], required: true }
 });
 
+// UPDATED: Lesson Schema with videoSource
 const LessonSchema = new Schema<ILesson>({
   title: { type: String, required: true, maxlength: 200 },
-  description: { type: String, maxlength: 1000 }, // Removed required: true
-  content: { type: String }, // Removed required: true
-  video: { type: S3AssetSchema, required: true },
+  description: { type: String, maxlength: 1000 },
+  content: { type: String },
+  videoSource: {
+    type: {
+      type: String,
+      enum: ['uploaded', 'library'],
+      required: true,
+      default: 'uploaded'
+    },
+    videoLibraryId: { type: Schema.Types.ObjectId, ref: 'VideoLibrary' },
+    video: { type: S3AssetSchema, required: true },
+    uploadedAt: { type: Date, default: Date.now },
+    uploadedBy: { type: Schema.Types.ObjectId, ref: 'User' }
+  },
   duration: { type: Number, default: 0, min: 0, max: 10000 },
   isPreview: { type: Boolean, default: false },
   resources: [LessonResourceSchema],
@@ -135,14 +156,14 @@ const LessonSchema = new Schema<ILesson>({
 
 const ChapterSchema = new Schema<IChapter>({
   title: { type: String, required: true, maxlength: 200 },
-  description: { type: String, maxlength: 1000 }, // Removed required: true
+  description: { type: String, maxlength: 1000 },
   order: { type: Number, required: true, min: 0 },
   lessons: [LessonSchema]
 }, { timestamps: true });
 
 const ModuleSchema = new Schema<IModule>({
   title: { type: String, required: true, maxlength: 200 },
-  description: { type: String, maxlength: 1000 }, // Removed required: true
+  description: { type: String, maxlength: 1000 },
   thumbnailUrl: { type: String },
   order: { type: Number, required: true, min: 0 },
   chapters: [ChapterSchema]
@@ -155,7 +176,6 @@ const RatingSchema = new Schema<IRating>({
   createdAt: { type: Date, default: Date.now }
 });
 
-// UPDATED: Student progress schema
 const StudentProgressSchema = new Schema<IStudentProgress>({
   user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   enrolledAt: { type: Date, default: Date.now },
@@ -220,7 +240,7 @@ const CourseSchema = new Schema<ICourse>(
     },
     category: {
       type: String,
-      maxlength: 50 // Removed required: true
+      maxlength: 50
     },
     tags: [{
       type: String,
@@ -276,7 +296,6 @@ const CourseSchema = new Schema<ICourse>(
       type: String,
       maxlength: 200
     }],
-    // NEW: Track manual enrollments
     manualEnrollments: {
       type: Number,
       default: 0,
@@ -346,14 +365,14 @@ CourseSchema.index({ isPublished: 1, isFeatured: 1 });
 CourseSchema.index({ category: 1 });
 CourseSchema.index({ 'students.user': 1 });
 CourseSchema.index({ createdAt: -1 });
-CourseSchema.index({ manualEnrollments: -1 }); // NEW: Index for manual enrollments
+CourseSchema.index({ manualEnrollments: -1 });
 
 // Static method to find published courses
 CourseSchema.statics.findPublished = function () {
   return this.find({ isPublished: true });
 };
 
-// UPDATED: Instance method to add a student with manual enrollment support
+// Instance method to add a student with manual enrollment support
 CourseSchema.methods.addStudent = function (
   userId: mongoose.Types.ObjectId,
   enrolledThrough: 'free' | 'manual_payment' | 'manual_grant' | 'promo' = 'free',
@@ -390,7 +409,7 @@ CourseSchema.methods.addStudent = function (
   return this.save();
 };
 
-// NEW: Method to check if user is enrolled
+// Method to check if user is enrolled
 CourseSchema.methods.isUserEnrolled = function (userId: mongoose.Types.ObjectId): boolean {
   const course = this as ICourse;
   return course.students.some(student =>
@@ -398,7 +417,7 @@ CourseSchema.methods.isUserEnrolled = function (userId: mongoose.Types.ObjectId)
   );
 };
 
-// NEW: Method to get user's enrollment status
+// Method to get user's enrollment status
 CourseSchema.methods.getUserEnrollment = function (userId: mongoose.Types.ObjectId) {
   const course = this as ICourse;
   return course.students.find(student =>
@@ -412,4 +431,7 @@ interface ICourseModel extends Model<ICourse> {
 }
 
 // Export the model properly
-export default mongoose.models.Course as ICourseModel || mongoose.model<ICourse, ICourseModel>('Course', CourseSchema);
+const CourseModel = mongoose.models.Course as ICourseModel || 
+  mongoose.model<ICourse, ICourseModel>('Course', CourseSchema);
+
+export default CourseModel;
