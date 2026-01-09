@@ -19,6 +19,7 @@
 
 # production
 /build
+/dist    # <--- ignore compiled output
 
 # misc
 .DS_Store
