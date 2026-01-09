@@ -232,33 +232,50 @@ export default function VideoLibraryPage() {
   }
 
   // Delete selected MongoDB videos
-  const deleteSelectedVideos = async () => {
-    if (!selectedVideos.length) {
-      alert('Please select videos to delete')
-      return
-    }
-    
-    if (!confirm(`Delete ${selectedVideos.length} selected videos?`)) {
-      return
-    }
-    
-    try {
-      const response = await fetch('/api/admin/video-library/bulk', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videoIds: selectedVideos })
-      })
-      
-      if (response.ok) {
-        setVideos(prev => prev.filter(v => !selectedVideos.includes(v._id)))
-        setSelectedVideos([])
-        alert(`✅ Deleted ${selectedVideos.length} videos`)
-      }
-    } catch (error) {
-      console.error('Delete failed:', error)
-      alert('Failed to delete videos')
-    }
+  // Delete selected MongoDB videos
+const deleteSelectedVideos = async () => {
+  if (!selectedVideos.length) {
+    alert('Please select videos to delete');
+    return;
   }
+  
+  if (!confirm(`Are you sure you want to delete ${selectedVideos.length} selected videos?`)) {
+    return;
+  }
+  
+  try {
+    const response = await fetch('/api/admin/video-library/bulk', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ videoIds: selectedVideos })
+    });
+    
+    const result = await response.json();
+    
+    if (response.ok && result.success) {
+      // Remove deleted videos from state
+      setVideos(prev => prev.filter(v => !selectedVideos.includes(v._id)));
+      setSelectedVideos([]);
+      
+      // Show success message
+      alert(`✅ Successfully deleted ${result.deletedCount} videos`);
+      
+      // Refresh stats
+      fetchVideos();
+    } else {
+      // Handle videos in use
+      if (result.videosInUse) {
+        const inUseTitles = result.videosInUse.map((v: any) => v.title).join(', ');
+        alert(`❌ Cannot delete videos that are in use:\n${inUseTitles}`);
+      } else {
+        alert(`❌ Delete failed: ${result.error || 'Unknown error'}`);
+      }
+    }
+  } catch (error) {
+    console.error('Delete failed:', error);
+    alert('❌ Failed to delete videos. Please check console for details.');
+  }
+};
 
   // Export to CSV
   const exportToCSV = async () => {
