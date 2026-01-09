@@ -5,8 +5,8 @@ import { useAuth } from '@clerk/nextjs'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
-import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
+import { Dialog, DialogContent, DialogTitle, DialogHeader, DialogDescription } from '@/components/ui/dialog'
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Search,
@@ -117,7 +117,7 @@ const VideoLibrarySelector = memo(({
       return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
     }
     if (bytes >= 1024) {
-      return `${(bytes / 1024).toFixed(2)} KB`
+      return `${(bytes / (1024)).toFixed(2)} KB`
     }
     return `${bytes} B`
   }, [])
@@ -304,93 +304,8 @@ const VideoLibrarySelector = memo(({
     onOpenChange(false)
   }, [onOpenChange])
 
-  // Mobile Video Card
-  const MobileVideoCard = memo(({ 
-    video, 
-    isSelected, 
-    isCurrent 
-  }: { 
-    video: VideoLibraryItem
-    isSelected: boolean
-    isCurrent: boolean
-  }) => (
-    <button
-      type="button"
-      className={`
-        relative w-full text-left rounded-xl border-2 transition-all duration-200 active:scale-[0.98]
-        ${isSelected 
-          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 ring-1 ring-blue-500' 
-          : isCurrent
-          ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 ring-1 ring-emerald-500'
-          : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
-        }
-      `}
-      onClick={() => handleSelect(video)}
-    >
-      {/* Thumbnail */}
-      <div className="relative aspect-video bg-gradient-to-br from-slate-900 to-slate-800 rounded-t-xl overflow-hidden">
-        <div className="absolute inset-0 flex items-center justify-center">
-          <Play className="w-8 h-8 text-white/50" />
-        </div>
-        
-        {/* Duration Badge */}
-        <div className="absolute bottom-3 right-3 bg-black/80 text-white text-xs px-2.5 py-1 rounded-lg">
-          {formatDurationSeconds(video.video?.duration || 0)}
-        </div>
-        
-        {/* Selection Indicator */}
-        {isSelected && (
-          <div className="absolute top-3 right-3">
-            <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full flex items-center justify-center shadow-lg">
-              <Check className="w-4 h-4 text-white" />
-            </div>
-          </div>
-        )}
-        
-        {/* Current Indicator */}
-        {isCurrent && (
-          <div className="absolute top-3 left-3">
-            <div className="w-8 h-8 bg-gradient-to-r from-emerald-500 to-green-500 rounded-full flex items-center justify-center shadow-lg">
-              <CheckCircle className="w-4 h-4 text-white" />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Content */}
-      <div className="p-4">
-        {/* Title */}
-        <h4 className="font-semibold text-slate-900 dark:text-white text-base line-clamp-2 mb-2">
-          {video.title}
-        </h4>
-        
-        {/* Description */}
-        <p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-2 mb-3">
-          {video.description || video.video?.originalFileName || 'No description'}
-        </p>
-        
-        {/* Metadata */}
-        <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-          <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1">
-              <HardDrive className="w-3.5 h-3.5" />
-              {formatFileSize(video.video?.size || 0)}
-            </span>
-            <span>•</span>
-            <span className="flex items-center gap-1">
-              <Users className="w-3.5 h-3.5" />
-              {video.usageCount}
-            </span>
-          </div>
-          <span>{formatDate(video.uploadDate)}</span>
-        </div>
-      </div>
-    </button>
-  ))
-  MobileVideoCard.displayName = 'MobileVideoCard'
-
-  // Desktop Video Card
-  const DesktopVideoCard = memo(({ 
+  // Video Card Component
+  const VideoCard = memo(({ 
     video, 
     isSelected, 
     isCurrent 
@@ -405,8 +320,8 @@ const VideoLibrarySelector = memo(({
       <button
         type="button"
         className={`
-          relative w-full text-left overflow-hidden rounded-xl border-2 transition-all duration-300 
-          hover:shadow-lg hover:-translate-y-0.5 cursor-pointer group
+          relative w-full text-left overflow-hidden rounded-lg md:rounded-xl border transition-all duration-200 
+          active:scale-[0.98] md:hover:shadow-lg md:hover:-translate-y-0.5 cursor-pointer group
           ${isSelected 
             ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 ring-2 ring-blue-500' 
             : isCurrent
@@ -419,80 +334,80 @@ const VideoLibrarySelector = memo(({
         {/* Thumbnail */}
         <div className="relative aspect-video bg-gradient-to-br from-slate-900 to-slate-800">
           <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-            <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center">
-              <Play className="w-6 h-6 text-white" />
+            <div className="w-10 h-10 md:w-12 md:h-12 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center">
+              <Play className="w-5 h-5 md:w-6 md:h-6 text-white" />
             </div>
           </div>
           
-          {/* Badges */}
-          <div className="absolute bottom-3 right-3 flex flex-col gap-1.5">
-            <div className="bg-black/80 text-white text-xs px-2.5 py-1 rounded-lg backdrop-blur-sm">
-              {formatDurationSeconds(video.video?.duration || 0)}
-            </div>
-            {resolution && (
-              <div className="bg-black/80 text-white text-xs px-2.5 py-1 rounded-lg backdrop-blur-sm">
-                {resolution.includes('1080') ? 'HD' : resolution.includes('720') ? 'HD' : resolution}
-              </div>
-            )}
+          {/* Duration Badge */}
+          <div className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-1 rounded-lg backdrop-blur-sm">
+            {formatDurationSeconds(video.video?.duration || 0)}
           </div>
+          
+          {/* Resolution Badge */}
+          {resolution && (
+            <div className="absolute bottom-2 left-2 bg-black/80 text-white text-xs px-2 py-1 rounded-lg backdrop-blur-sm">
+              {resolution.includes('1080') ? 'HD' : resolution.includes('720') ? 'HD' : resolution}
+            </div>
+          )}
           
           {/* Selection Indicator */}
           {isSelected && (
-            <div className="absolute top-3 right-3">
-              <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full flex items-center justify-center shadow-lg">
-                <Check className="w-4 h-4 text-white" />
+            <div className="absolute top-2 right-2">
+              <div className="w-7 h-7 md:w-8 md:h-8 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full flex items-center justify-center shadow-lg">
+                <Check className="w-3.5 h-3.5 md:w-4 md:h-4 text-white" />
               </div>
             </div>
           )}
           
           {/* Current Indicator */}
           {isCurrent && (
-            <div className="absolute top-3 left-3">
-              <div className="w-8 h-8 bg-gradient-to-r from-emerald-500 to-green-500 rounded-full flex items-center justify-center shadow-lg">
-                <CheckCircle className="w-4 h-4 text-white" />
+            <div className="absolute top-2 left-2">
+              <div className="w-7 h-7 md:w-8 md:h-8 bg-gradient-to-r from-emerald-500 to-green-500 rounded-full flex items-center justify-center shadow-lg">
+                <CheckCircle className="w-3.5 h-3.5 md:w-4 md:h-4 text-white" />
               </div>
             </div>
           )}
         </div>
 
         {/* Content */}
-        <div className="p-4">
+        <div className="p-3 md:p-4">
           {/* Title */}
-          <h4 className="font-bold text-slate-900 dark:text-white text-base line-clamp-2 mb-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+          <h4 className="font-semibold text-slate-900 dark:text-white text-sm md:text-base line-clamp-2 mb-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
             {video.title}
           </h4>
           
           {/* Description */}
-          <p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-2 mb-3">
+          <p className="text-xs md:text-sm text-slate-600 dark:text-slate-400 line-clamp-2 mb-3">
             {video.description || video.video?.originalFileName || 'No description'}
           </p>
           
           {/* Metadata */}
           <div className="space-y-2">
             {/* Stats */}
-            <div className="flex items-center justify-between text-sm">
-              <div className="flex items-center gap-4">
-                <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
-                  <HardDrive className="w-4 h-4" />
+            <div className="flex items-center justify-between text-xs md:text-sm">
+              <div className="flex items-center gap-2 md:gap-4">
+                <span className="flex items-center gap-1 md:gap-1.5 text-slate-600 dark:text-slate-400">
+                  <HardDrive className="w-3 h-3 md:w-4 md:h-4" />
                   {formatFileSize(video.video?.size || 0)}
                 </span>
-                <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
-                  <Users className="w-4 h-4" />
-                  {video.usageCount} uses
+                <span className="flex items-center gap-1 md:gap-1.5 text-slate-600 dark:text-slate-400">
+                  <Users className="w-3 h-3 md:w-4 md:h-4" />
+                  {video.usageCount}
                 </span>
               </div>
               {video.isPublic && (
-                <Globe className="w-4 h-4 text-blue-500" />
+                <Globe className="w-3 h-3 md:w-4 md:h-4 text-blue-500" />
               )}
             </div>
             
             {/* Categories */}
             {video.categories?.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-1 md:gap-1.5">
                 {video.categories.slice(0, 2).map(category => (
                   <span 
                     key={category}
-                    className="px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs"
+                    className="px-2 py-0.5 md:px-2.5 md:py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs"
                   >
                     {category}
                   </span>
@@ -507,12 +422,12 @@ const VideoLibrarySelector = memo(({
             
             {/* Footer */}
             <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <span className="flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5" />
+              <span className="flex items-center gap-1 md:gap-1.5">
+                <Calendar className="w-3 h-3 md:w-3.5 md:h-3.5" />
                 {formatDate(video.uploadDate)}
               </span>
               {video.uploadedBy && (
-                <span className="text-xs">
+                <span className="text-xs truncate max-w-[80px] md:max-w-none">
                   {video.uploadedBy.firstName}
                 </span>
               )}
@@ -522,15 +437,15 @@ const VideoLibrarySelector = memo(({
       </button>
     )
   })
-  DesktopVideoCard.displayName = 'DesktopVideoCard'
+  VideoCard.displayName = 'VideoCard'
 
   // Empty state
   const EmptyState = () => (
     <div className="flex flex-col items-center justify-center h-full min-h-[300px] px-4">
-      <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 w-16 h-16 mb-4 flex items-center justify-center">
-        <Video className="w-8 h-8 text-slate-400" />
+      <div className="p-3 md:p-4 rounded-2xl bg-gradient-to-r from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 w-12 h-12 md:w-16 md:h-16 mb-4 flex items-center justify-center">
+        <Video className="w-6 h-6 md:w-8 md:h-8 text-slate-400" />
       </div>
-      <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2 text-center">
+      <h3 className="text-base md:text-lg font-bold text-slate-900 dark:text-white mb-2 text-center">
         No videos found
       </h3>
       <p className="text-slate-600 dark:text-slate-400 text-center text-sm max-w-sm">
@@ -554,13 +469,30 @@ const VideoLibrarySelector = memo(({
     </div>
   )
 
+  // Dialog description for accessibility
+  const dialogDescription = `Select a video from your library. ${stats.total} videos available. Use search and filters to find the right video.`
+
   return (
     <>
       {/* Main Dialog */}
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="fixed inset-0 w-full h-full p-0 m-0 overflow-hidden bg-white dark:bg-slate-900 sm:max-w-[90vw] sm:h-[90vh] sm:rounded-2xl sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 flex flex-col">
-          {/* Mobile Header */}
-          <div className="sm:hidden sticky top-0 z-40 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex-shrink-0">
+        <DialogContent 
+          className="
+            max-w-none w-full h-full m-0 p-0 rounded-none
+            sm:max-w-[95vw] sm:max-h-[90vh] sm:rounded-xl
+            md:max-w-[90vw] md:max-h-[85vh]
+            lg:max-w-[85vw]
+            xl:max-w-[80vw]
+            flex flex-col overflow-hidden
+          "
+          aria-describedby="video-library-description"
+        >
+          <DialogDescription id="video-library-description" className="sr-only">
+            {dialogDescription}
+          </DialogDescription>
+
+          {/* Header - Mobile */}
+          <div className="block sm:hidden sticky top-0 z-40 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between p-4">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500">
@@ -575,6 +507,7 @@ const VideoLibrarySelector = memo(({
                 size="icon"
                 onClick={handleClose}
                 className="h-10 w-10"
+                aria-label="Close video library"
               >
                 <X className="w-5 h-5" />
               </Button>
@@ -589,6 +522,7 @@ const VideoLibrarySelector = memo(({
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-10 h-11 rounded-xl text-base"
+                  aria-label="Search videos"
                 />
                 {searchQuery && (
                   <Button
@@ -596,6 +530,7 @@ const VideoLibrarySelector = memo(({
                     size="icon"
                     onClick={() => setSearchQuery('')}
                     className="absolute right-1 top-1/2 transform -translate-y-1/2 h-9 w-9"
+                    aria-label="Clear search"
                   >
                     <X className="w-4 h-4" />
                   </Button>
@@ -605,7 +540,7 @@ const VideoLibrarySelector = memo(({
               {/* Mobile Stats & Filters */}
               <div className="flex items-center justify-between mt-3">
                 <div className="text-sm text-slate-600 dark:text-slate-400">
-                  {stats.total} videos • {formatFileSize(stats.totalSize)}
+                  {stats.total} videos
                 </div>
                 <div className="flex items-center gap-2">
                   <Button
@@ -613,6 +548,7 @@ const VideoLibrarySelector = memo(({
                     size="sm"
                     onClick={() => setShowFilters(true)}
                     className="h-8 px-3"
+                    aria-label="Open filters"
                   >
                     <Filter className="w-4 h-4 mr-1.5" />
                     Filters
@@ -622,6 +558,7 @@ const VideoLibrarySelector = memo(({
                     size="sm"
                     onClick={() => fetchVideos(true)}
                     className="h-8 px-3"
+                    aria-label="Refresh videos"
                   >
                     <RefreshCw className={`w-4 h-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
                     Refresh
@@ -631,8 +568,8 @@ const VideoLibrarySelector = memo(({
             </div>
           </div>
 
-          {/* Desktop Header */}
-          <div className="hidden sm:block sticky top-0 z-40 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex-shrink-0">
+          {/* Header - Desktop */}
+          <div className="hidden sm:block sticky top-0 z-40 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between p-6">
               <div className="flex items-center gap-4">
                 <div className="p-3 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-500">
@@ -652,6 +589,7 @@ const VideoLibrarySelector = memo(({
                 size="icon"
                 onClick={handleClose}
                 className="h-10 w-10"
+                aria-label="Close video library"
               >
                 <X className="w-5 h-5" />
               </Button>
@@ -667,6 +605,7 @@ const VideoLibrarySelector = memo(({
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="pl-12 h-12 rounded-xl text-base"
+                      aria-label="Search videos"
                     />
                     {searchQuery && (
                       <Button
@@ -674,6 +613,7 @@ const VideoLibrarySelector = memo(({
                         size="icon"
                         onClick={() => setSearchQuery('')}
                         className="absolute right-1 top-1/2 transform -translate-y-1/2 h-10 w-10"
+                        aria-label="Clear search"
                       >
                         <X className="w-5 h-5" />
                       </Button>
@@ -686,6 +626,7 @@ const VideoLibrarySelector = memo(({
                     variant="outline"
                     onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
                     className="h-12 px-4"
+                    aria-label={`Switch to ${viewMode === 'grid' ? 'list' : 'grid'} view`}
                   >
                     {viewMode === 'grid' ? (
                       <List className="w-5 h-5" />
@@ -700,6 +641,7 @@ const VideoLibrarySelector = memo(({
                     variant="outline"
                     onClick={clearFilters}
                     className="h-12 px-4"
+                    aria-label="Clear all filters"
                   >
                     <X className="w-5 h-5 mr-2" />
                     Clear
@@ -718,6 +660,7 @@ const VideoLibrarySelector = memo(({
                       variant={selectedCategories.includes(category) ? "default" : "outline"}
                       onClick={() => toggleCategory(category)}
                       className="cursor-pointer px-3 py-1"
+                      aria-label={`${selectedCategories.includes(category) ? 'Remove' : 'Add'} ${category} filter`}
                     >
                       {category}
                     </Badge>
@@ -732,9 +675,9 @@ const VideoLibrarySelector = memo(({
             </div>
           </div>
 
-          {/* Main Content */}
-          <div className="flex flex-1 overflow-hidden min-h-0">
-            {/* Desktop Filters Sidebar */}
+          {/* Main Content Area */}
+          <div className="flex flex-1 overflow-hidden">
+            {/* Desktop Sidebar */}
             <div className="hidden md:flex md:w-64 border-r border-slate-200 dark:border-slate-800 overflow-y-auto flex-shrink-0">
               <div className="w-full p-6">
                 {/* Categories */}
@@ -747,12 +690,15 @@ const VideoLibrarySelector = memo(({
                       <label
                         key={category}
                         className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                        htmlFor={`category-${category}`}
                       >
                         <input
+                          id={`category-${category}`}
                           type="checkbox"
                           checked={selectedCategories.includes(category)}
                           onChange={() => toggleCategory(category)}
                           className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-blue-500 focus:ring-blue-500"
+                          aria-label={`${selectedCategories.includes(category) ? 'Deselect' : 'Select'} ${category}`}
                         />
                         <span className="text-sm flex-1">{category}</span>
                         <span className="text-xs text-slate-500">
@@ -774,6 +720,7 @@ const VideoLibrarySelector = memo(({
                       size="sm"
                       onClick={() => setViewMode('grid')}
                       className="flex-1"
+                      aria-label="Grid view"
                     >
                       Grid
                     </Button>
@@ -782,6 +729,7 @@ const VideoLibrarySelector = memo(({
                       size="sm"
                       onClick={() => setViewMode('list')}
                       className="flex-1"
+                      aria-label="List view"
                     >
                       List
                     </Button>
@@ -790,10 +738,12 @@ const VideoLibrarySelector = memo(({
               </div>
             </div>
 
-            {/* Videos Area */}
-            <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-              {/* Videos Container */}
-              <div className="flex-1 overflow-y-auto" ref={scrollRef}>
+            {/* Videos Container */}
+            <div className="flex-1 flex flex-col min-h-0">
+              <ScrollArea 
+                className="flex-1" 
+                ref={scrollRef}
+              >
                 <div className="p-4 sm:p-6">
                   {loading && videos.length === 0 ? (
                     <SkeletonGrid />
@@ -803,39 +753,35 @@ const VideoLibrarySelector = memo(({
                     <>
                       {/* Grid View */}
                       {viewMode === 'grid' && (
-                        <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">
+                        <div 
+                          className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 md:gap-4 lg:gap-6"
+                          role="list"
+                          aria-label="Video library grid"
+                        >
                           {videos.map((video) => {
                             const isSelected = selectedVideo?._id === video._id
                             const isCurrent = isCurrentVideo(video)
                             
                             return (
-                              <div key={video._id} className="w-full">
-                                {/* Mobile Card */}
-                                <div className="md:hidden">
-                                  <MobileVideoCard
-                                    video={video}
-                                    isSelected={isSelected}
-                                    isCurrent={isCurrent}
-                                  />
-                                </div>
-                                
-                                {/* Desktop Card */}
-                                <div className="hidden md:block">
-                                  <DesktopVideoCard
-                                    video={video}
-                                    isSelected={isSelected}
-                                    isCurrent={isCurrent}
-                                  />
-                                </div>
+                              <div key={video._id} className="w-full" role="listitem">
+                                <VideoCard
+                                  video={video}
+                                  isSelected={isSelected}
+                                  isCurrent={isCurrent}
+                                />
                               </div>
                             )
                           })}
                         </div>
                       )}
 
-                      {/* List View (Desktop only) */}
+                      {/* List View */}
                       {viewMode === 'list' && (
-                        <div className="hidden md:block space-y-4">
+                        <div 
+                          className="space-y-3 md:space-y-4"
+                          role="list"
+                          aria-label="Video library list"
+                        >
                           {videos.map((video) => {
                             const isSelected = selectedVideo?._id === video._id
                             const isCurrent = isCurrentVideo(video)
@@ -845,7 +791,7 @@ const VideoLibrarySelector = memo(({
                                 key={video._id}
                                 type="button"
                                 className={`
-                                  w-full flex items-start gap-4 p-4 rounded-xl border-2 text-left transition-all
+                                  w-full flex items-start gap-3 md:gap-4 p-3 md:p-4 rounded-lg md:rounded-xl border transition-all
                                   ${isSelected 
                                     ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 ring-1 ring-blue-500' 
                                     : isCurrent
@@ -854,40 +800,42 @@ const VideoLibrarySelector = memo(({
                                   }
                                 `}
                                 onClick={() => handleSelect(video)}
+                                aria-label={`Select video: ${video.title}`}
+                                aria-pressed={isSelected}
                               >
                                 {/* Thumbnail */}
-                                <div className="relative w-40 aspect-video rounded-lg overflow-hidden bg-gradient-to-br from-slate-900 to-slate-800 flex-shrink-0">
+                                <div className="relative w-24 md:w-40 aspect-video rounded-lg overflow-hidden bg-gradient-to-br from-slate-900 to-slate-800 flex-shrink-0">
                                   <div className="absolute inset-0 flex items-center justify-center">
-                                    <Play className="w-6 h-6 text-white/50" />
+                                    <Play className="w-4 h-4 md:w-6 md:h-6 text-white/50" />
                                   </div>
-                                  <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
+                                  <div className="absolute bottom-1 right-1 md:bottom-2 md:right-2 bg-black/70 text-white text-xs px-1.5 py-0.5 md:px-2 md:py-1 rounded">
                                     {formatDurationSeconds(video.video?.duration || 0)}
                                   </div>
                                 </div>
                                 
                                 {/* Content */}
                                 <div className="flex-1 min-w-0">
-                                  <div className="flex items-start justify-between mb-2">
-                                    <h4 className="font-bold text-slate-900 dark:text-white line-clamp-2">
+                                  <div className="flex items-start justify-between mb-1 md:mb-2">
+                                    <h4 className="font-semibold md:font-bold text-slate-900 dark:text-white line-clamp-2 text-sm md:text-base">
                                       {video.title}
                                     </h4>
                                     {isSelected && (
-                                      <Check className="w-5 h-5 text-blue-500 flex-shrink-0" />
+                                      <Check className="w-4 h-4 md:w-5 md:h-5 text-blue-500 flex-shrink-0" aria-hidden="true" />
                                     )}
                                   </div>
                                   
-                                  <p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-2 mb-3">
+                                  <p className="text-xs md:text-sm text-slate-600 dark:text-slate-400 line-clamp-2 mb-2 md:mb-3">
                                     {video.description}
                                   </p>
                                   
-                                  <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
-                                    <span className="flex items-center gap-1.5">
-                                      <HardDrive className="w-4 h-4" />
+                                  <div className="flex flex-wrap items-center gap-2 md:gap-3 text-xs md:text-sm text-slate-500 dark:text-slate-400">
+                                    <span className="flex items-center gap-1 md:gap-1.5">
+                                      <HardDrive className="w-3 h-3 md:w-4 md:h-4" />
                                       {formatFileSize(video.video?.size || 0)}
                                     </span>
                                     <span>•</span>
-                                    <span className="flex items-center gap-1.5">
-                                      <Users className="w-4 h-4" />
+                                    <span className="flex items-center gap-1 md:gap-1.5">
+                                      <Users className="w-3 h-3 md:w-4 md:h-4" />
                                       {video.usageCount} uses
                                     </span>
                                     <span>•</span>
@@ -903,7 +851,7 @@ const VideoLibrarySelector = memo(({
                       {/* Loading More Indicator */}
                       {loadingMore && (
                         <div className="text-center py-8">
-                          <RefreshCw className="w-6 h-6 animate-spin text-blue-500 mx-auto" />
+                          <RefreshCw className="w-6 h-6 animate-spin text-blue-500 mx-auto" aria-hidden="true" />
                           <p className="text-sm text-slate-600 dark:text-slate-400 mt-2">
                             Loading more videos...
                           </p>
@@ -921,21 +869,21 @@ const VideoLibrarySelector = memo(({
                     </>
                   )}
                 </div>
-              </div>
+              </ScrollArea>
 
               {/* Selected Video Footer */}
               {selectedVideo && (
                 <div className="sticky bottom-0 border-t bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 p-4 flex-shrink-0">
                   <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-4 flex-1 min-w-0">
-                      <div className="hidden sm:block w-12 h-12 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <Video className="w-6 h-6 text-white" />
+                    <div className="flex items-center gap-3 md:gap-4 flex-1 min-w-0">
+                      <div className="w-10 h-10 md:w-12 md:h-12 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <Video className="w-5 h-5 md:w-6 md:h-6 text-white" aria-hidden="true" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-slate-900 dark:text-white truncate">
+                        <p className="font-semibold text-slate-900 dark:text-white truncate text-sm md:text-base">
                           {selectedVideo.title}
                         </p>
-                        <p className="text-sm text-slate-600 dark:text-slate-400 truncate">
+                        <p className="text-xs md:text-sm text-slate-600 dark:text-slate-400 truncate">
                           {formatFileSize(selectedVideo.video?.size || 0)} • {formatDurationSeconds(selectedVideo.video?.duration || 0)}
                         </p>
                       </div>
@@ -944,13 +892,15 @@ const VideoLibrarySelector = memo(({
                       <Button
                         variant="outline"
                         onClick={() => setSelectedVideo(null)}
-                        className="h-11 px-4 text-sm"
+                        className="h-9 md:h-11 px-3 md:px-4 text-xs md:text-sm"
+                        aria-label="Clear selection"
                       >
                         Clear
                       </Button>
                       <Button
                         onClick={handleConfirm}
-                        className="h-11 px-6 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white text-sm"
+                        className="h-9 md:h-11 px-4 md:px-6 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white text-xs md:text-sm"
+                        aria-label={`Select ${selectedVideo.title}`}
                       >
                         Select Video
                       </Button>
@@ -965,7 +915,14 @@ const VideoLibrarySelector = memo(({
 
       {/* Mobile Filters Sheet */}
       <Sheet open={showFilters} onOpenChange={setShowFilters}>
-        <SheetContent side="bottom" className="rounded-t-2xl h-[85vh] p-0">
+        <SheetContent 
+          side="bottom" 
+          className="rounded-t-2xl h-[85vh] p-0"
+          aria-describedby="filters-description"
+        >
+          <SheetDescription id="filters-description" className="sr-only">
+            Filter videos by categories and view mode
+          </SheetDescription>
           <div className="flex flex-col h-full">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-800">
               <SheetTitle className="text-lg font-bold">Filters</SheetTitle>
@@ -973,6 +930,7 @@ const VideoLibrarySelector = memo(({
                 variant="ghost"
                 size="icon"
                 onClick={() => setShowFilters(false)}
+                aria-label="Close filters"
               >
                 <X className="w-5 h-5" />
               </Button>
@@ -990,12 +948,15 @@ const VideoLibrarySelector = memo(({
                       <label
                         key={category}
                         className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                        htmlFor={`mobile-category-${category}`}
                       >
                         <input
+                          id={`mobile-category-${category}`}
                           type="checkbox"
                           checked={selectedCategories.includes(category)}
                           onChange={() => toggleCategory(category)}
                           className="w-5 h-5 rounded border-slate-300 dark:border-slate-600 text-blue-500 focus:ring-blue-500"
+                          aria-label={`${selectedCategories.includes(category) ? 'Deselect' : 'Select'} ${category}`}
                         />
                         <span className="text-sm flex-1">{category}</span>
                         <span className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">
@@ -1020,6 +981,7 @@ const VideoLibrarySelector = memo(({
                         setShowFilters(false)
                       }}
                       className="flex-1"
+                      aria-label="Grid view"
                     >
                       Grid
                     </Button>
@@ -1031,6 +993,7 @@ const VideoLibrarySelector = memo(({
                         setShowFilters(false)
                       }}
                       className="flex-1"
+                      aria-label="List view"
                     >
                       List
                     </Button>
@@ -1046,6 +1009,7 @@ const VideoLibrarySelector = memo(({
                   setShowFilters(false)
                 }}
                 className="w-full h-12"
+                aria-label="Apply filters"
               >
                 Apply Filters
               </Button>

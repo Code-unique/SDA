@@ -151,6 +151,15 @@ export async function PATCH(
 
     const body = await request.json();
 
+    // Log incoming data for debugging
+    console.log('=== INCOMING REQUEST DATA ===');
+    console.log('Body received:', {
+      title: body.title,
+      modulesCount: body.modules?.length || 0
+    });
+    console.log('First lesson videoSource:', body.modules?.[0]?.chapters?.[0]?.lessons?.[0]?.videoSource);
+    console.log('=============================');
+
     // Input validation
     if (body.price !== undefined && (typeof body.price !== 'number' || body.price < 0)) {
       return NextResponse.json(
@@ -187,62 +196,7 @@ export async function PATCH(
         .substring(0, 100);
     }
 
-    // Transform modules data with chapters structure
-    const transformModules = (modules: any[]): IModule[] => {
-      return modules.map((module, moduleIndex) => ({
-        _id: module._id && mongoose.Types.ObjectId.isValid(module._id) 
-          ? new mongoose.Types.ObjectId(module._id) 
-          : new mongoose.Types.ObjectId(),
-        title: module.title?.substring(0, 200) || `Module ${moduleIndex + 1}`,
-        description: module.description?.substring(0, 1000) || undefined,
-        thumbnailUrl: module.thumbnailUrl || undefined,
-        order: typeof module.order === 'number' ? module.order : moduleIndex,
-        chapters: transformChapters(module.chapters || [], moduleIndex)
-      }));
-    };
-
-    const transformChapters = (chapters: any[], moduleIndex: number): IChapter[] => {
-      return chapters.map((chapter, chapterIndex) => {
-  const chapterData: IChapter = {
-    _id: chapter._id && mongoose.Types.ObjectId.isValid(chapter._id) 
-      ? new mongoose.Types.ObjectId(chapter._id) 
-      : new mongoose.Types.ObjectId(),
-    title: chapter.title?.substring(0, 200) || `Chapter ${chapterIndex + 1}`,
-    description: chapter.description?.substring(0, 1000) || undefined,
-    order: typeof chapter.order === 'number' ? chapter.order : chapterIndex,
-    lessons: transformLessons(chapter.lessons || [], chapterIndex) as ILesson[] // Cast to ILesson[]
-  };
-  return chapterData;
-});
-    };
-
-    const transformLessons = (lessons: any[], chapterIndex: number): Omit<ILesson, 'createdAt' | 'updatedAt'>[] => {
-      return lessons.map((lesson, lessonIndex) => ({
-        _id: lesson._id && mongoose.Types.ObjectId.isValid(lesson._id) 
-          ? new mongoose.Types.ObjectId(lesson._id) 
-          : new mongoose.Types.ObjectId(),
-        title: lesson.title?.substring(0, 200) || `Lesson ${lessonIndex + 1}`,
-        description: lesson.description || '',
-        content: lesson.content || '',
-        videoSource: lesson.videoSource || {
-          type: lesson.video?.type || 's3',
-          key: lesson.video?.key || '',
-          url: lesson.video?.url || '',
-          size: lesson.video?.size || 0,
-          duration: lesson.duration || 0,
-          mimeType: lesson.video?.mimeType || 'video/mp4',
-          originalFileName: lesson.video?.originalFileName || '',
-          width: lesson.video?.width,
-          height: lesson.video?.height
-        },
-        video: lesson.video,
-        duration: lesson.duration || 0,
-        isPreview: lesson.isPreview || false,
-        resources: transformResources(lesson.resources || []),
-        order: typeof lesson.order === 'number' ? lesson.order : lessonIndex
-      }));
-    };
-
+    // Transform resources
     const transformResources = (resources: any[]): ILessonResource[] => {
       return resources.map((resource, resourceIndex) => ({
         _id: resource._id && mongoose.Types.ObjectId.isValid(resource._id) 
@@ -253,6 +207,174 @@ export async function PATCH(
         type: ['pdf', 'document', 'link', 'video'].includes(resource.type) 
           ? resource.type as 'pdf' | 'document' | 'link' | 'video'
           : 'pdf'
+      }));
+    };
+
+    // Transform lessons - CORRECTED VERSION
+    const transformLessons = (lessons: any[], chapterIndex: number): Omit<ILesson, 'createdAt' | 'updatedAt'>[] => {
+      return lessons.map((lesson, lessonIndex) => {
+        console.log(`Transforming lesson ${lessonIndex + 1}:`, {
+          title: lesson.title,
+          hasVideoSource: !!lesson.videoSource,
+          hasVideo: !!lesson.video,
+          videoSourceType: lesson.videoSource?.type,
+          videoSourceStructure: Object.keys(lesson.videoSource || {})
+        });
+
+        // Create the videoSource structure expected by the model
+        let videoSource: any = null;
+
+        // Handle different cases
+        if (lesson.videoSource) {
+          console.log('Processing videoSource:', lesson.videoSource);
+          
+          // Case 1: videoSource already has nested video object (from video library)
+          if (lesson.videoSource.video) {
+            videoSource = {
+              type: 'uploaded' as const,
+              video: {
+                key: lesson.videoSource.video.key || '',
+                url: lesson.videoSource.video.url || '',
+                size: lesson.videoSource.video.size || 0,
+                type: 'video' as const,
+                duration: lesson.videoSource.video.duration || lesson.duration || 0,
+                width: lesson.videoSource.video.width,
+                height: lesson.videoSource.video.height,
+                uploadedAt: new Date(),
+                fileName: lesson.videoSource.video.fileName || lesson.videoSource.video.originalFileName || lesson.title || ''
+              },
+              uploadedAt: new Date(),
+              uploadedBy: adminUser._id
+            };
+          } 
+          // Case 2: videoSource is a flat S3 asset (from direct upload)
+          else if (lesson.videoSource.key && lesson.videoSource.url) {
+            videoSource = {
+              type: 'uploaded' as const,
+              video: {
+                key: lesson.videoSource.key || '',
+                url: lesson.videoSource.url || '',
+                size: lesson.videoSource.size || 0,
+                type: 'video' as const,
+                duration: lesson.videoSource.duration || lesson.duration || 0,
+                width: lesson.videoSource.width,
+                height: lesson.videoSource.height,
+                uploadedAt: new Date(),
+                fileName: lesson.videoSource.fileName || lesson.videoSource.originalFileName || lesson.title || ''
+              },
+              uploadedAt: new Date(),
+              uploadedBy: adminUser._id
+            };
+          }
+          // Case 3: videoSource has type: 's3' (incorrect format)
+          else if (lesson.videoSource.type === 's3') {
+            videoSource = {
+              type: 'uploaded' as const,
+              video: {
+                key: lesson.videoSource.key || '',
+                url: lesson.videoSource.url || '',
+                size: lesson.videoSource.size || 0,
+                type: 'video' as const,
+                duration: lesson.videoSource.duration || lesson.duration || 0,
+                width: lesson.videoSource.width,
+                height: lesson.videoSource.height,
+                uploadedAt: new Date(),
+                fileName: lesson.videoSource.originalFileName || lesson.title || ''
+              },
+              uploadedAt: new Date(),
+              uploadedBy: adminUser._id
+            };
+          }
+        }
+        // Case 4: Old video format (backward compatibility)
+        else if (lesson.video) {
+          console.log('Processing old video format:', lesson.video);
+          videoSource = {
+            type: 'uploaded' as const,
+            video: {
+              key: lesson.video.key || '',
+              url: lesson.video.url || '',
+              size: lesson.video.size || 0,
+              type: 'video' as const,
+              duration: lesson.video.duration || lesson.duration || 0,
+              width: lesson.video.width,
+              height: lesson.video.height,
+              uploadedAt: new Date(),
+              fileName: lesson.video.fileName || lesson.title || ''
+            },
+            uploadedAt: new Date(),
+            uploadedBy: adminUser._id
+          };
+        }
+        
+        // Case 5: No video data found
+        if (!videoSource) {
+          console.log('No video data found, creating empty structure');
+          videoSource = {
+            type: 'uploaded' as const,
+            video: {
+              key: '',
+              url: '',
+              size: 0,
+              type: 'video' as const,
+              duration: lesson.duration || 0,
+              uploadedAt: new Date(),
+              fileName: lesson.title || ''
+            },
+            uploadedAt: new Date(),
+            uploadedBy: adminUser._id
+          };
+        }
+
+        console.log(`Final videoSource for lesson ${lessonIndex + 1}:`, {
+          type: videoSource.type,
+          hasVideo: !!videoSource.video,
+          videoUrl: videoSource.video?.url
+        });
+
+        return {
+          _id: lesson._id && mongoose.Types.ObjectId.isValid(lesson._id) 
+            ? new mongoose.Types.ObjectId(lesson._id) 
+            : new mongoose.Types.ObjectId(),
+          title: lesson.title?.substring(0, 200) || `Lesson ${lessonIndex + 1}`,
+          description: lesson.description || '',
+          content: lesson.content || '',
+          videoSource: videoSource,
+          duration: lesson.duration || 0,
+          isPreview: lesson.isPreview || false,
+          resources: transformResources(lesson.resources || []),
+          order: typeof lesson.order === 'number' ? lesson.order : lessonIndex
+        };
+      });
+    };
+
+    const transformChapters = (chapters: any[], moduleIndex: number): IChapter[] => {
+  return chapters.map((chapter, chapterIndex) => ({
+    _id: chapter._id && mongoose.Types.ObjectId.isValid(chapter._id) 
+      ? new mongoose.Types.ObjectId(chapter._id) 
+      : new mongoose.Types.ObjectId(),
+    title: chapter.title?.substring(0, 200) || `Chapter ${chapterIndex + 1}`,
+    description: chapter.description?.substring(0, 1000) || undefined,
+    order: typeof chapter.order === 'number' ? chapter.order : chapterIndex,
+    lessons: transformLessons(chapter.lessons || [], chapterIndex)
+      .map(lesson => ({
+        ...lesson,
+        createdAt: lesson._id.getTimestamp(), // Add createdAt
+        updatedAt: new Date() // Add updatedAt
+      }))
+  }));
+};
+
+    const transformModules = (modules: any[]): IModule[] => {
+      return modules.map((module, moduleIndex) => ({
+        _id: module._id && mongoose.Types.ObjectId.isValid(module._id) 
+          ? new mongoose.Types.ObjectId(module._id) 
+          : new mongoose.Types.ObjectId(),
+        title: module.title?.substring(0, 200) || `Module ${moduleIndex + 1}`,
+        description: module.description?.substring(0, 1000) || undefined,
+        thumbnailUrl: module.thumbnailUrl || undefined,
+        order: typeof module.order === 'number' ? module.order : moduleIndex,
+        chapters: transformChapters(module.chapters || [], moduleIndex)
       }));
     };
 
@@ -273,12 +395,13 @@ export async function PATCH(
       ...(body.tags && { tags: body.tags.slice(0, 10).map((tag: string) => tag.substring(0, 30)) }),
       ...(body.thumbnail && { thumbnail: body.thumbnail as IS3Asset }),
       ...(body.previewVideo !== undefined && { previewVideo: body.previewVideo as IS3Asset }),
-      ...(body.modules && { modules: transformedModules }),
+      modules: transformedModules, // Always include modules, even if empty
       ...(body.requirements && { requirements: body.requirements.slice(0, 10).map((req: string) => req.substring(0, 200)) }),
       ...(body.learningOutcomes && { learningOutcomes: body.learningOutcomes.slice(0, 10).map((lo: string) => lo.substring(0, 200)) }),
       ...(body.isFeatured !== undefined && { isFeatured: !!body.isFeatured }),
       ...(body.isPublished !== undefined && { isPublished: !!body.isPublished }),
-      ...(slug && { slug })
+      ...(slug && { slug }),
+      instructor: existingCourse.instructor
     };
 
     console.log('Updating course with data:', {
@@ -326,6 +449,7 @@ export async function PATCH(
 
     if (error.name === 'ValidationError') {
       const errors = Object.values(error.errors).map((err: any) => err.message);
+      console.error('Validation errors:', errors);
       return NextResponse.json(
         { error: 'Validation failed', details: errors },
         { status: 400 }

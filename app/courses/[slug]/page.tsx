@@ -751,113 +751,160 @@ export default function CourseDetailPage() {
   const slug = params.slug as string
 
   // Fetch course data
-  const fetchCourseData = useCallback(async () => {
-    try {
-      setLoading(true)
-      setError(null)
+  // Fetch course data
+const fetchCourseData = useCallback(async () => {
+  try {
+    setLoading(true)
+    setError(null)
 
-      const [courseResponse, progressResponse] = await Promise.all([
-        fetch(`/api/courses/${slug}`),
-        fetch(`/api/courses/${slug}/progress`)
-      ])
+    const [courseResponse, progressResponse] = await Promise.all([
+      fetch(`/api/courses/${slug}`),
+      fetch(`/api/courses/${slug}/progress`)
+    ])
 
-      if (!courseResponse.ok) {
-        throw new Error(`Failed to load course`)
-      }
-
-      const data = await courseResponse.json()
-      
-      const processedCourse: Course = {
-        ...data,
-        thumbnail: data.thumbnail ? {
-          key: data.thumbnail.key || data.thumbnail.public_id,
-          url: data.thumbnail.url || data.thumbnail.secure_url,
-          size: data.thumbnail.size || data.thumbnail.bytes,
-          type: data.thumbnail.type || 'image',
-          width: data.thumbnail.width,
-          height: data.thumbnail.height
-        } : {
-          key: 'default',
-          url: '/placeholder-course.jpg',
-          size: 0,
-          type: 'image'
-        },
-        previewVideo: data.previewVideo ? {
-          key: data.previewVideo.key || data.previewVideo.public_id,
-          url: data.previewVideo.url || data.previewVideo.secure_url,
-          size: data.previewVideo.size || data.previewVideo.bytes,
-          type: data.previewVideo.type || 'video',
-          duration: data.previewVideo.duration
-        } : undefined,
-        modules: data.modules?.map((module: any) => ({
-          ...module,
-          chapters: module.chapters?.map((chapter: any) => ({
-            ...chapter,
-            lessons: chapter.lessons?.map((lesson: any) => ({
-              ...lesson,
-              video: lesson.video ? {
-                key: lesson.video.key || lesson.video.public_id,
-                url: lesson.video.url || lesson.video.secure_url,
-                size: lesson.video.size || lesson.video.bytes,
-                type: lesson.video.type || 'video',
-                duration: lesson.video.duration
-              } : undefined
-            })) || []
-          })) || []
-        })) || [],
-        manualEnrollments: data.manualEnrollments || 0
-      }
-
-      setCourse(processedCourse)
-
-      if (progressResponse.ok) {
-        const progressData = await progressResponse.json()
-        
-        const userProgressData: UserProgress = {
-          _id: progressData._id || `temp-${processedCourse._id}`,
-          courseId: progressData.courseId || processedCourse._id,
-          userId: progressData.userId || 'current-user',
-          enrolled: true,
-          progress: progressData.progress || 0,
-          completed: progressData.completed || false,
-          completedLessons: progressData.completedLessons || [],
-          currentLesson: progressData.currentLesson || null,
-          timeSpent: progressData.timeSpent || 0,
-          lastAccessed: progressData.lastAccessed ? new Date(progressData.lastAccessed) : new Date()
-        }
-        
-        setUserProgress(userProgressData)
-        setCompletedLessons(new Set(userProgressData.completedLessons))
-        
-        if (userProgressData.currentLesson) {
-          const lesson = findLessonById(processedCourse, userProgressData.currentLesson)
-          if (lesson) {
-            setActiveLesson(lesson)
-          }
-        } else if (processedCourse.modules[0]?.chapters[0]?.lessons[0]) {
-          setActiveLesson(processedCourse.modules[0].chapters[0].lessons[0])
-        }
-      } else {
-        setUserProgress(null)
-        setCompletedLessons(new Set())
-        
-        if (processedCourse.modules[0]?.chapters[0]?.lessons[0]) {
-          setActiveLesson(processedCourse.modules[0].chapters[0].lessons[0])
-        }
-      }
-      
-    } catch (err: any) {
-      console.error('Error fetching course:', err)
-      setError(err.message || 'Failed to load course')
-      toast({
-        title: 'Error',
-        description: 'Failed to load course details',
-        variant: 'destructive',
-      })
-    } finally {
-      setLoading(false)
+    if (!courseResponse.ok) {
+      throw new Error(`Failed to load course`)
     }
-  }, [slug, toast])
+
+    const data = await courseResponse.json()
+    
+    // Helper function to extract video from different structures
+    const extractVideoAsset = (videoData: any): S3Asset | undefined => {
+      if (!videoData) return undefined
+      
+      // Case 1: Direct S3Asset format
+      if (videoData.key || videoData.url) {
+        return {
+          key: videoData.key || '',
+          url: videoData.url || videoData.secure_url || '',
+          size: videoData.size || videoData.bytes || 0,
+          type: videoData.type || 'video',
+          duration: videoData.duration,
+          width: videoData.width,
+          height: videoData.height
+        }
+      }
+      
+      // Case 2: videoSource.video format
+      if (videoData.video && (videoData.video.key || videoData.video.url)) {
+        return {
+          key: videoData.video.key || '',
+          url: videoData.video.url || videoData.video.secure_url || '',
+          size: videoData.video.size || videoData.video.bytes || 0,
+          type: videoData.video.type || 'video',
+          duration: videoData.video.duration,
+          width: videoData.video.width,
+          height: videoData.video.height
+        }
+      }
+      
+      // Case 3: Cloudinary format or other variations
+      if (videoData.public_id || videoData.secure_url) {
+        return {
+          key: videoData.public_id || '',
+          url: videoData.secure_url || videoData.url || '',
+          size: videoData.bytes || videoData.size || 0,
+          type: videoData.resource_type || 'video',
+          duration: videoData.duration,
+          width: videoData.width,
+          height: videoData.height
+        }
+      }
+      
+      return undefined
+    }
+
+    const processedCourse: Course = {
+      ...data,
+      thumbnail: data.thumbnail ? {
+        key: data.thumbnail.key || data.thumbnail.public_id || '',
+        url: data.thumbnail.url || data.thumbnail.secure_url || '',
+        size: data.thumbnail.size || data.thumbnail.bytes || 0,
+        type: data.thumbnail.type || 'image',
+        width: data.thumbnail.width,
+        height: data.thumbnail.height
+      } : {
+        key: 'default',
+        url: '/placeholder-course.jpg',
+        size: 0,
+        type: 'image'
+      },
+      previewVideo: extractVideoAsset(data.previewVideo),
+      modules: data.modules?.map((module: any) => ({
+        ...module,
+        chapters: module.chapters?.map((chapter: any) => ({
+          ...chapter,
+          lessons: chapter.lessons?.map((lesson: any) => {
+            // Extract video from lesson - try multiple possible structures
+            const videoAsset = extractVideoAsset(lesson.videoSource || lesson.video)
+            
+            return {
+              ...lesson,
+              video: videoAsset
+            }
+          }) || []
+        })) || []
+      })) || [],
+      manualEnrollments: data.manualEnrollments || 0
+    }
+
+    console.log('Processed course data:', {
+      title: processedCourse.title,
+      modules: processedCourse.modules.length,
+      firstLesson: processedCourse.modules[0]?.chapters[0]?.lessons[0]
+    })
+
+    setCourse(processedCourse)
+
+    // Rest of your progress fetching logic...
+    if (progressResponse.ok) {
+      const progressData = await progressResponse.json()
+      
+      const userProgressData: UserProgress = {
+        _id: progressData._id || `temp-${processedCourse._id}`,
+        courseId: progressData.courseId || processedCourse._id,
+        userId: progressData.userId || 'current-user',
+        enrolled: true,
+        progress: progressData.progress || 0,
+        completed: progressData.completed || false,
+        completedLessons: progressData.completedLessons || [],
+        currentLesson: progressData.currentLesson || null,
+        timeSpent: progressData.timeSpent || 0,
+        lastAccessed: progressData.lastAccessed ? new Date(progressData.lastAccessed) : new Date()
+      }
+      
+      setUserProgress(userProgressData)
+      setCompletedLessons(new Set(userProgressData.completedLessons))
+      
+      if (userProgressData.currentLesson) {
+        const lesson = findLessonById(processedCourse, userProgressData.currentLesson)
+        if (lesson) {
+          setActiveLesson(lesson)
+        }
+      } else if (processedCourse.modules[0]?.chapters[0]?.lessons[0]) {
+        setActiveLesson(processedCourse.modules[0].chapters[0].lessons[0])
+      }
+    } else {
+      setUserProgress(null)
+      setCompletedLessons(new Set())
+      
+      if (processedCourse.modules[0]?.chapters[0]?.lessons[0]) {
+        setActiveLesson(processedCourse.modules[0].chapters[0].lessons[0])
+      }
+    }
+    
+  } catch (err: any) {
+    console.error('Error fetching course:', err)
+    setError(err.message || 'Failed to load course')
+    toast({
+      title: 'Error',
+      description: 'Failed to load course details',
+      variant: 'destructive',
+    })
+  } finally {
+    setLoading(false)
+  }
+}, [slug, toast])
 
   const findLessonById = useCallback((courseData: Course, lessonId: string): Lesson | null => {
     for (const module of courseData.modules) {
@@ -1339,26 +1386,34 @@ export default function CourseDetailPage() {
         <div className="container px-4 py-6">
           <div className="space-y-6">
             {/* Video Player */}
-            <div className="bg-gradient-to-br from-slate-900 to-black rounded-2xl overflow-hidden shadow-2xl">
-              {activeLesson.video ? (
-                <video
-                  src={activeLesson.video.url}
-                  controls
-                  className="w-full aspect-video"
-                  playsInline
-                />
-              ) : (
-                <div className="aspect-video flex items-center justify-center bg-gradient-to-br from-slate-900 to-black">
-                  <div className="text-center p-8">
-                    <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mx-auto mb-4 backdrop-blur-sm">
-                      <PlayCircle className="w-8 h-8 text-white/80" />
-                    </div>
-                    <h3 className="text-white text-lg font-semibold mb-2">Video Loading</h3>
-                    <p className="text-white/60 text-sm">Preparing your lesson...</p>
-                  </div>
-                </div>
-              )}
-            </div>
+           {/* Video Player */}
+<div className="bg-gradient-to-br from-slate-900 to-black rounded-2xl overflow-hidden shadow-2xl">
+  {activeLesson.video?.url ? (
+    <video
+      src={activeLesson.video.url}
+      controls
+      className="w-full aspect-video"
+      playsInline
+    />
+  ) : (
+    <div className="aspect-video flex items-center justify-center bg-gradient-to-br from-slate-900 to-black">
+      <div className="text-center p-8">
+        <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mx-auto mb-4 backdrop-blur-sm">
+          <AlertTriangle className="w-8 h-8 text-amber-400" />
+        </div>
+        <h3 className="text-white text-lg font-semibold mb-2">Video Not Available</h3>
+        <p className="text-white/60 text-sm mb-4">This lesson video is currently unavailable</p>
+        <div className="text-xs text-white/40">
+          <p>Lesson Title: {activeLesson.title}</p>
+          <p>Lesson ID: {activeLesson._id}</p>
+          {activeLesson.video && (
+            <p>Video Data: {JSON.stringify(activeLesson.video, null, 2)}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  )}
+</div>
 
             {/* Lesson Content */}
             <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-200/50 dark:border-slate-700/50 shadow-lg overflow-hidden">
