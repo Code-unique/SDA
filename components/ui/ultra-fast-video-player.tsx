@@ -1,7 +1,15 @@
 // components/ui/ultra-fast-video-player.tsx
 'use client'
 
-import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react'
+import React, { 
+  useRef, 
+  useState, 
+  useEffect, 
+  useCallback, 
+  useMemo,
+  MouseEvent,
+  TouchEvent
+} from 'react'
 import { 
   Play, 
   Pause, 
@@ -19,8 +27,6 @@ import {
   Check,
   SkipForward,
   SkipBack,
-  Shield,
-  CloudOff,
   Battery,
   BatteryCharging,
   FileVideo,
@@ -40,7 +46,7 @@ interface UltraFastVideoPlayerProps {
   autoplay?: boolean
   preload?: 'auto' | 'metadata' | 'none'
   onReady?: () => void
-  onError?: (error: any) => void
+  onError?: (error: string) => void
   onPlay?: () => void
   onPause?: () => void
   onEnded?: () => void
@@ -51,34 +57,32 @@ interface UltraFastVideoPlayerProps {
 interface VideoQuality {
   id: string
   label: string
-  active: boolean
+  bitrate?: number
 }
 
-// Function to get proper MIME type from URL
+interface BatteryInfo {
+  level: number | null
+  charging: boolean
+}
+
+interface NetworkInfo {
+  speed: number | null
+  type: string | null
+  effectiveType: string | null
+}
+
+// Simple MIME type detection
 const getVideoMimeType = (url: string): string => {
   if (!url) return 'video/mp4'
   
-  const extension = url.split('.').pop()?.toLowerCase().split('?')[0] || ''
+  const extension = url.split('.').pop()?.toLowerCase().split(/[?#]/)[0] || ''
   
   switch (extension) {
-    case 'mp4':
-    case 'm4v':
-      return 'video/mp4'
     case 'webm':
       return 'video/webm'
     case 'ogg':
     case 'ogv':
       return 'video/ogg'
-    case 'mov':
-      return 'video/quicktime'
-    case 'avi':
-      return 'video/x-msvideo'
-    case 'wmv':
-      return 'video/x-ms-wmv'
-    case 'flv':
-      return 'video/x-flv'
-    case 'mkv':
-      return 'video/x-matroska'
     case 'm3u8':
       return 'application/x-mpegURL'
     case 'mpd':
@@ -88,19 +92,19 @@ const getVideoMimeType = (url: string): string => {
   }
 }
 
-// Function to fix CORS issues with S3 URLs
-const fixS3CorsUrl = (url: string): string => {
+// Simple URL optimization
+const optimizeVideoUrl = (url: string): string => {
   if (!url) return url
   
-  // For S3 URLs, add cache-busting parameter
-  if (url.includes('s3.amazonaws.com') || url.includes('s3.')) {
-    try {
+  try {
+    // Add cache busting parameter for S3 URLs
+    if (url.includes('s3.amazonaws.com') || url.includes('s3.')) {
       const urlObj = new URL(url)
-      urlObj.searchParams.set('t', Date.now().toString())
+      urlObj.searchParams.set('_t', Date.now().toString().slice(-8))
       return urlObj.toString()
-    } catch {
-      return url
     }
+  } catch {
+    // If URL parsing fails, return original
   }
   
   return url
@@ -125,7 +129,8 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null)
   const progressBarRef = useRef<HTMLDivElement>(null)
   const volumeBarRef = useRef<HTMLDivElement>(null)
-  const hideControlsTimeoutRef = useRef<NodeJS.Timeout | null>(null) // FIXED: Added initial value
+  const hideControlsTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   
   // State
   const [isLoading, setIsLoading] = useState(true)
@@ -139,62 +144,67 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
   const [playbackRate, setPlaybackRate] = useState(1)
   const [isBuffering, setIsBuffering] = useState(false)
   const [bufferProgress, setBufferProgress] = useState(0)
-  const [networkSpeed, setNetworkSpeed] = useState<number | null>(null)
+  const [networkInfo, setNetworkInfo] = useState<NetworkInfo>({ 
+    speed: null, 
+    type: null, 
+    effectiveType: null 
+  })
   const [showSettings, setShowSettings] = useState(false)
-  const [showInfoPanel, setShowInfoPanel] = useState(false) // Consolidated info panel
+  const [showInfoPanel, setShowInfoPanel] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [playbackRates] = useState([0.5, 0.75, 1, 1.25, 1.5, 2])
   const [qualities] = useState<VideoQuality[]>([
-    { id: 'auto', label: 'Auto', active: true },
-    { id: '1080p', label: '1080p', active: false },
-    { id: '720p', label: '720p', active: false },
-    { id: '480p', label: '480p', active: false },
+    { id: 'auto', label: 'Auto (Best)' },
+    { id: '1080p', label: '1080p HD' },
+    { id: '720p', label: '720p HD' },
+    { id: '480p', label: '480p SD' },
   ])
   const [activeQuality, setActiveQuality] = useState<string>('auto')
   const [retryCount, setRetryCount] = useState(0)
   const [isOffline, setIsOffline] = useState(false)
-  const [batteryLevel, setBatteryLevel] = useState<number | null>(null)
-  const [isBatteryCharging, setIsBatteryCharging] = useState(false)
+  const [batteryInfo, setBatteryInfo] = useState<BatteryInfo>({ level: null, charging: false })
   const [currentFormat, setCurrentFormat] = useState<string>('')
   const [hasCorsIssue, setHasCorsIssue] = useState(false)
+  const [isSeeking, setIsSeeking] = useState(false)
+  const [isClickable, setIsClickable] = useState(true)
 
-  // Fix URLs
-  const fixedSrc = useMemo(() => fixS3CorsUrl(src), [src])
-  const mimeType = useMemo(() => getVideoMimeType(fixedSrc), [fixedSrc])
+  // Optimized URLs
+  const optimizedSrc = useMemo(() => optimizeVideoUrl(src), [src])
+  const mimeType = useMemo(() => getVideoMimeType(optimizedSrc), [optimizedSrc])
 
-  // Network speed detection
-  const detectNetworkSpeed = useCallback(async () => {
+  // Network detection
+  const detectNetworkInfo = useCallback(() => {
     try {
-      if ('connection' in navigator) {
-        const connection = (navigator as any).connection
-        if (connection?.downlink) {
-          setNetworkSpeed(Math.round(connection.downlink * 100) / 100)
-          return
-        }
+      const connection = (navigator as any).connection
+      if (connection) {
+        setNetworkInfo({
+          speed: connection.downlink || null,
+          type: connection.type || null,
+          effectiveType: connection.effectiveType || null
+        })
       }
-      
-      setNetworkSpeed(5) // Default to average speed
     } catch {
-      setNetworkSpeed(3)
+      // Network API not supported
     }
   }, [])
 
-  // Battery level detection
+  // Battery detection
   useEffect(() => {
-    if ('getBattery' in navigator) {
-      ;(navigator as any).getBattery().then((battery: any) => {
-        setBatteryLevel(battery.level * 100)
-        setIsBatteryCharging(battery.charging)
-        
-        battery.addEventListener('levelchange', () => {
-          setBatteryLevel(battery.level * 100)
-        })
-        
-        battery.addEventListener('chargingchange', () => {
-          setIsBatteryCharging(battery.charging)
-        })
-      })
+    const updateBatteryInfo = async () => {
+      try {
+        if ('getBattery' in navigator) {
+          const battery = await (navigator as any).getBattery()
+          setBatteryInfo({
+            level: battery.level * 100,
+            charging: battery.charging
+          })
+        }
+      } catch {
+        // Battery API not supported
+      }
     }
+    
+    updateBatteryInfo()
   }, [])
 
   // Offline detection
@@ -217,15 +227,11 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
   useEffect(() => {
     const format = mimeType.split('/').pop()?.toUpperCase() || 'MP4'
     setCurrentFormat(format)
-    
-    if (format === 'QUICKTIME' && !videoRef.current?.canPlayType('video/quicktime')) {
-      console.warn('MOV files may not be supported in all browsers')
-    }
   }, [mimeType])
 
   // Video initialization
   useEffect(() => {
-    if (!fixedSrc) {
+    if (!optimizedSrc) {
       setError('No video source provided')
       return
     }
@@ -249,6 +255,7 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
     const handleLoadedMetadata = () => {
       if (isMounted && video) {
         setDuration(video.duration || 0)
+        detectNetworkInfo()
       }
     }
 
@@ -260,7 +267,7 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
         
         if (autoplay) {
           video.play().catch(err => {
-            console.log('Autoplay prevented:', err.message)
+            console.debug('Autoplay prevented:', err.message)
             if (isMounted) setIsLoading(false)
           })
         }
@@ -284,9 +291,8 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
 
     const handleTimeUpdate = () => {
       if (isMounted && video) {
-        const current = video.currentTime
-        setCurrentTime(current)
-        onTimeUpdate?.(current)
+        setCurrentTime(video.currentTime)
+        onTimeUpdate?.(video.currentTime)
       }
     }
 
@@ -300,7 +306,7 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
     const handleWaiting = () => {
       if (isMounted) {
         setIsBuffering(true)
-        detectNetworkSpeed()
+        detectNetworkInfo()
       }
     }
 
@@ -316,58 +322,32 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
     const handleError = (e: Event) => {
       if (!isMounted) return
       
-      const video = e.target as HTMLVideoElement
-      const videoError = video.error
+      const videoElement = e.target as HTMLVideoElement
+      const videoError = videoElement.error
       
       let errorMessage = 'Failed to load video'
       let isCorsError = false
       
       if (videoError) {
         switch (videoError.code) {
-          case 1:
-            errorMessage = 'Video loading was aborted'
-            break
           case 2:
             errorMessage = 'Network error. Please check your connection.'
             isCorsError = true
             break
           case 3:
-            errorMessage = 'Video format not supported'
+            errorMessage = 'Video decoding error'
             break
           case 4:
-            errorMessage = 'This video format is not supported'
+            errorMessage = 'Video format not supported'
             break
         }
-      }
-      
-      // Check for CORS issues
-      if (video.networkState === video.NETWORK_IDLE && !video.error && video.readyState < 2) {
-        errorMessage = 'CORS issue: Video cannot be loaded'
-        isCorsError = true
-      }
-      
-      // Check if it's an S3 URL
-      if (video.src.includes('s3.amazonaws.com') || video.src.includes('s3.')) {
-        isCorsError = true
       }
       
       setHasCorsIssue(isCorsError)
       setError(errorMessage)
       setIsLoading(false)
       
-      if (onError) {
-        onError(errorMessage)
-      }
-      
-      // Auto-retry for network errors
-      if (isCorsError && retryCount < 2) {
-        setTimeout(() => {
-          if (isMounted) {
-            setRetryCount(prev => prev + 1)
-            video.load()
-          }
-        }, 2000 * (retryCount + 1))
-      }
+      onError?.(errorMessage)
     }
 
     const handleEnded = () => {
@@ -381,7 +361,7 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
       setIsFullscreen(!!document.fullscreenElement)
     }
 
-    // Set up event listeners
+    // Setup event listeners
     const events = [
       ['loadstart', handleLoadStart],
       ['loadedmetadata', handleLoadedMetadata],
@@ -397,46 +377,41 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
     ] as const
 
     events.forEach(([event, handler]) => {
-      video.addEventListener(event, handler as any)
+      video.addEventListener(event, handler as EventListener)
     })
 
-    // Global events
     document.addEventListener('fullscreenchange', handleFullscreenChange)
 
-    // Configure video element
-    video.src = fixedSrc
+    // Configure video
+    video.src = optimizedSrc
     video.poster = poster || ''
     video.preload = preload
     video.playsInline = true
-    
-    // Don't set crossorigin for S3 URLs
-    if (!fixedSrc.includes('s3.')) {
-      video.crossOrigin = 'anonymous'
-    }
-    
     video.defaultPlaybackRate = 1.0
     video.playbackRate = playbackRate
-
-    // Apply network optimization
-    if (networkSpeed !== null && networkSpeed < 1) {
-      video.preload = 'metadata'
+    
+    if (!optimizedSrc.includes('s3.')) {
+      video.crossOrigin = 'anonymous'
     }
 
-    // Initial network speed detection
-    detectNetworkSpeed()
-
-    // Cleanup function
+    // Cleanup
     return () => {
       isMounted = false
       
       // Clear timeouts
       if (hideControlsTimeoutRef.current) {
         clearTimeout(hideControlsTimeoutRef.current)
+        hideControlsTimeoutRef.current = null
+      }
+      
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current)
+        clickTimeoutRef.current = null
       }
       
       // Remove event listeners
       events.forEach(([event, handler]) => {
-        video.removeEventListener(event, handler as any)
+        video.removeEventListener(event, handler as EventListener)
       })
       
       document.removeEventListener('fullscreenchange', handleFullscreenChange)
@@ -445,79 +420,107 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
       video.src = ''
       video.load()
     }
-  }, [fixedSrc, poster, autoplay, preload, retryCount, mimeType])
+  }, [optimizedSrc, poster, autoplay, preload])
 
   // Auto-hide controls
   useEffect(() => {
-    if (!showControls || isLoading || error) return
+    if (!showControls || isLoading || error || !isPlaying || showSettings || showInfoPanel) return
     
-    const hideControls = () => {
-      if (isPlaying) {
-        setShowControls(false)
-      }
-    }
-    
-    hideControlsTimeoutRef.current = setTimeout(hideControls, 3000)
+    hideControlsTimeoutRef.current = setTimeout(() => {
+      setShowControls(false)
+    }, 3000)
     
     return () => {
       if (hideControlsTimeoutRef.current) {
         clearTimeout(hideControlsTimeoutRef.current)
+        hideControlsTimeoutRef.current = null
       }
     }
-  }, [showControls, isPlaying, isLoading, error])
+  }, [showControls, isPlaying, isLoading, error, showSettings, showInfoPanel])
 
-  // Control functions
-  const togglePlay = useCallback(() => {
-    if (!videoRef.current) return
-    
-    if (isPlaying) {
-      videoRef.current.pause()
-    } else {
-      videoRef.current.play().catch(err => {
-        console.error('Play failed:', err.message)
-        setError('Unable to play video. Please click the play button.')
-      })
+  // Control functions with click debouncing
+  const togglePlay = useCallback(async (e?: MouseEvent) => {
+    if (e) {
+      e.stopPropagation()
     }
-  }, [isPlaying])
+    
+    if (!isClickable) return
+    setIsClickable(false)
+    
+    const video = videoRef.current
+    if (!video) {
+      setIsClickable(true)
+      return
+    }
+    
+    try {
+      if (isPlaying) {
+        video.pause()
+      } else {
+        await video.play()
+      }
+    } catch (err) {
+      console.debug('Playback error:', err)
+    }
+    
+    // Re-enable clicking after short delay
+    if (clickTimeoutRef.current) {
+      clearTimeout(clickTimeoutRef.current)
+    }
+    clickTimeoutRef.current = setTimeout(() => {
+      setIsClickable(true)
+    }, 300)
+  }, [isPlaying, isClickable])
 
-  const toggleMute = useCallback(() => {
-    if (!videoRef.current) return
-    videoRef.current.muted = !videoRef.current.muted
+  const toggleMute = useCallback((e: MouseEvent) => {
+    e.stopPropagation()
+    const video = videoRef.current
+    if (!video) return
+    video.muted = !video.muted
   }, [])
 
   const setVideoVolume = useCallback((value: number) => {
-    if (!videoRef.current) return
+    const video = videoRef.current
+    if (!video) return
     const newVolume = Math.max(0, Math.min(1, value))
-    videoRef.current.volume = newVolume
-    videoRef.current.muted = newVolume === 0
+    video.volume = newVolume
+    video.muted = newVolume === 0
   }, [])
 
   const seek = useCallback((time: number) => {
-    if (!videoRef.current) return
+    const video = videoRef.current
+    if (!video) return
     const newTime = Math.max(0, Math.min(duration, time))
-    videoRef.current.currentTime = newTime
+    video.currentTime = newTime
     setCurrentTime(newTime)
   }, [duration])
 
   const seekToPercentage = useCallback((percentage: number) => {
-    if (!videoRef.current || !duration) return
+    if (!duration) return
     const newTime = duration * Math.max(0, Math.min(1, percentage))
     seek(newTime)
   }, [duration, seek])
 
-  const skip = useCallback((seconds: number) => {
-    if (!videoRef.current) return
-    seek(videoRef.current.currentTime + seconds)
+  const skip = useCallback((seconds: number, e: MouseEvent) => {
+    e.stopPropagation()
+    const video = videoRef.current
+    if (!video) return
+    seek(video.currentTime + seconds)
   }, [seek])
 
   const changePlaybackRate = useCallback((rate: number) => {
-    if (!videoRef.current) return
+    const video = videoRef.current
+    if (!video) return
     const newRate = Math.max(0.25, Math.min(4, rate))
-    videoRef.current.playbackRate = newRate
+    video.playbackRate = newRate
     setPlaybackRate(newRate)
   }, [])
 
-  const toggleFullscreen = useCallback(async () => {
+  const toggleFullscreen = useCallback(async (e?: MouseEvent) => {
+    if (e) {
+      e.stopPropagation()
+    }
+    
     if (!containerRef.current) return
     
     try {
@@ -527,11 +530,12 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
         await document.exitFullscreen()
       }
     } catch (err) {
-      console.error('Fullscreen error:', err)
+      console.debug('Fullscreen error:', err)
     }
   }, [])
 
-  const toggleInfoPanel = useCallback(() => {
+  const toggleInfoPanel = useCallback((e: MouseEvent) => {
+    e.stopPropagation()
     setShowInfoPanel(prev => !prev)
     setShowSettings(false)
   }, [])
@@ -543,13 +547,13 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
 
   const retryPlayback = useCallback(() => {
     setError(null)
-    setRetryCount(0)
-    setHasCorsIssue(false)
+    setRetryCount(prev => prev + 1)
     setIsLoading(true)
     
-    if (videoRef.current) {
-      videoRef.current.load()
-      videoRef.current.play().catch(console.error)
+    const video = videoRef.current
+    if (video) {
+      video.load()
+      video.play().catch(console.debug)
     }
   }, [])
 
@@ -561,10 +565,13 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
 
   // Handle mouse movement for controls
   const handleMouseMove = useCallback(() => {
+    if (showSettings || showInfoPanel) return
+    
     setShowControls(true)
     
     if (hideControlsTimeoutRef.current) {
       clearTimeout(hideControlsTimeoutRef.current)
+      hideControlsTimeoutRef.current = null
     }
     
     if (isPlaying) {
@@ -572,50 +579,79 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
         setShowControls(false)
       }, 3000)
     }
-  }, [isPlaying])
+  }, [isPlaying, showSettings, showInfoPanel])
 
-  // Handle progress bar click
-  const handleProgressClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (!progressBarRef.current || !duration) return
+  // Handle progress bar interaction
+  const handleProgressInteraction = useCallback((e: MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation()
+    const progressBar = progressBarRef.current
+    if (!progressBar || !duration || isSeeking) return
     
-    const rect = progressBarRef.current.getBoundingClientRect()
-    const percentage = (e.clientX - rect.left) / rect.width
+    setIsSeeking(true)
+    
+    const rect = progressBar.getBoundingClientRect()
+    const percentage = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
     seekToPercentage(percentage)
-  }, [duration, seekToPercentage])
-
-  // Handle volume bar click
-  const handleVolumeClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (!volumeBarRef.current) return
     
-    const rect = volumeBarRef.current.getBoundingClientRect()
-    const percentage = (e.clientX - rect.left) / rect.width
+    // Small delay before allowing next seek
+    setTimeout(() => setIsSeeking(false), 100)
+  }, [duration, seekToPercentage, isSeeking])
+
+  // Handle volume bar interaction
+  const handleVolumeInteraction = useCallback((e: MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation()
+    const volumeBar = volumeBarRef.current
+    if (!volumeBar) return
+    
+    const rect = volumeBar.getBoundingClientRect()
+    const percentage = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
     setVideoVolume(percentage)
   }, [setVideoVolume])
 
-  // Consolidated Info Panel Component
+  // Handle container click - only toggle play if clicking on video itself
+  const handleContainerClick = useCallback((e: MouseEvent) => {
+    // Don't trigger if clicking on controls or panels
+    const target = e.target as HTMLElement
+    if (
+      target.closest('.controls') || 
+      target.closest('.settings-panel') || 
+      target.closest('.info-panel') ||
+      target.closest('.play-button') ||
+      target.closest('.info-button')
+    ) {
+      return
+    }
+    
+    togglePlay(e)
+  }, [togglePlay])
+
+  // Info Panel Component
   const InfoPanel = useMemo(() => {
     if (!showInfoPanel) return null
 
     const getNetworkStatus = () => {
-      if (!networkSpeed) return { label: 'Unknown', color: 'text-gray-400', icon: <Wifi className="w-4 h-4" /> }
-      if (networkSpeed < 1) return { label: 'Poor', color: 'text-red-400', icon: <WifiOff className="w-4 h-4" /> }
-      if (networkSpeed < 3) return { label: 'Fair', color: 'text-yellow-400', icon: <Wifi className="w-4 h-4" /> }
-      if (networkSpeed < 10) return { label: 'Good', color: 'text-blue-400', icon: <Wifi className="w-4 h-4" /> }
-      return { label: 'Excellent', color: 'text-green-400', icon: <Wifi className="w-4 h-4" /> }
+      const { speed } = networkInfo
+      if (!speed) return { label: 'Unknown', color: 'text-gray-400', icon: <Wifi className="w-4 h-4" /> }
+      if (speed < 1) return { label: 'Poor', color: 'text-red-400', icon: <WifiOff className="w-4 h-4" /> }
+      if (speed < 3) return { label: 'Fair', color: 'text-yellow-400', icon: <Wifi className="w-4 h-4" /> }
+      return { label: 'Good', color: 'text-green-400', icon: <Wifi className="w-4 h-4" /> }
     }
 
     const networkStatus = getNetworkStatus()
 
     return (
-      <div className="absolute top-20 right-4 bg-black/90 backdrop-blur-sm rounded-lg p-4 w-64 border border-white/10 shadow-2xl z-50">
+      <div className="absolute top-20 right-4 bg-black/95 backdrop-blur-sm rounded-lg p-4 w-64 border border-white/10 shadow-2xl z-50 info-panel">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-white flex items-center gap-2">
             <Info className="w-4 h-4" />
-            Video Information
+            Video Info
           </h3>
           <button
-            onClick={() => setShowInfoPanel(false)}
-            className="text-white/60 hover:text-white"
+            onClick={(e) => {
+              e.stopPropagation()
+              setShowInfoPanel(false)
+            }}
+            className="text-white/60 hover:text-white transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -629,15 +665,15 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
               <span className="text-xs text-white/70">Network</span>
             </div>
             <span className={`text-xs font-medium ${networkStatus.color}`}>
-              {networkSpeed ? `${networkSpeed} Mbps` : 'Unknown'}
+              {networkInfo.speed ? `${networkInfo.speed} Mbps` : 'Unknown'}
             </span>
           </div>
 
           {/* Battery */}
-          {batteryLevel !== null && (
+          {batteryInfo.level !== null && (
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                {isBatteryCharging ? (
+                {batteryInfo.charging ? (
                   <BatteryCharging className="w-4 h-4 text-green-400" />
                 ) : (
                   <Battery className="w-4 h-4" />
@@ -645,7 +681,7 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
                 <span className="text-xs text-white/70">Battery</span>
               </div>
               <span className="text-xs text-white">
-                {Math.round(batteryLevel)}%{isBatteryCharging ? ' (Charging)' : ''}
+                {Math.round(batteryInfo.level)}%{batteryInfo.charging ? ' ⚡' : ''}
               </span>
             </div>
           )}
@@ -659,15 +695,6 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
             <span className="text-xs text-white">{currentFormat}</span>
           </div>
 
-          {/* Security */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Shield className="w-4 h-4" />
-              <span className="text-xs text-white/70">Security</span>
-            </div>
-            <span className="text-xs text-green-400">Protected</span>
-          </div>
-
           {/* Quality */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -677,25 +704,14 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
             <span className="text-xs text-white">{activeQuality}</span>
           </div>
 
-          {/* Offline Status */}
-          {isOffline && (
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <CloudOff className="w-4 h-4 text-red-400" />
-                <span className="text-xs text-white/70">Status</span>
-              </div>
-              <span className="text-xs text-red-400">Offline</span>
-            </div>
-          )}
-
           {/* Buffer Progress */}
           {bufferProgress > 0 && (
             <div className="pt-3 border-t border-white/10">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-white/70">Buffer</span>
-                <span className="text-xs text-white">{bufferProgress.toFixed(1)}%</span>
+                <span className="text-xs text-white">{bufferProgress.toFixed(0)}%</span>
               </div>
-              <div className="w-full h-1 bg-white/20 rounded-full overflow-hidden">
+              <div className="w-full h-1.5 bg-white/20 rounded-full overflow-hidden">
                 <div 
                   className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-300"
                   style={{ width: `${bufferProgress}%` }}
@@ -706,35 +722,33 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
         </div>
       </div>
     )
-  }, [showInfoPanel, networkSpeed, batteryLevel, isBatteryCharging, currentFormat, activeQuality, isOffline, bufferProgress])
+  }, [showInfoPanel, networkInfo, batteryInfo, currentFormat, activeQuality, bufferProgress])
 
   // Top Info Button Component
   const TopInfoButton = useMemo(() => {
     const getStatusColor = () => {
-      if (isOffline) return 'bg-red-600'
-      if (hasCorsIssue) return 'bg-amber-600'
-      if (networkSpeed && networkSpeed > 5) return 'bg-green-600'
-      return 'bg-black/60'
+      if (isOffline) return 'bg-gradient-to-r from-red-600 to-red-700'
+      if (hasCorsIssue) return 'bg-gradient-to-r from-amber-600 to-amber-700'
+      if (networkInfo.speed && networkInfo.speed > 5) return 'bg-gradient-to-r from-green-600 to-emerald-700'
+      return 'bg-gradient-to-r from-blue-600 to-blue-700'
     }
 
     const getStatusIcon = () => {
-      if (isOffline) return <CloudOff className="w-3 h-3" />
+      if (isOffline) return <WifiOff className="w-3 h-3" />
       if (hasCorsIssue) return <AlertCircle className="w-3 h-3" />
-      if (networkSpeed && networkSpeed > 5) return <Zap className="w-3 h-3" />
-      return <Shield className="w-3 h-3" />
+      return <Zap className="w-3 h-3" />
     }
 
     const getStatusText = () => {
       if (isOffline) return 'Offline'
-      if (hasCorsIssue) return 'CORS Issue'
-      if (networkSpeed && networkSpeed > 5) return 'Turbo'
-      return 'Protected'
+      if (hasCorsIssue) return 'CORS'
+      return networkInfo.speed && networkInfo.speed > 5 ? 'Fast' : 'Normal'
     }
 
     return (
       <button
         onClick={toggleInfoPanel}
-        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg backdrop-blur-sm text-white transition-all hover:scale-105 ${getStatusColor()}`}
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg backdrop-blur-sm text-white transition-all hover:scale-105 info-button ${getStatusColor()}`}
       >
         {getStatusIcon()}
         <span className="text-xs font-medium">{getStatusText()}</span>
@@ -745,7 +759,7 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
         )}
       </button>
     )
-  }, [isOffline, hasCorsIssue, networkSpeed, showInfoPanel, toggleInfoPanel])
+  }, [isOffline, hasCorsIssue, networkInfo.speed, showInfoPanel, toggleInfoPanel])
 
   // Error state
   if (error) {
@@ -770,25 +784,23 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
             <div className="mb-4 p-3 bg-amber-900/30 rounded-lg border border-amber-700/50">
               <p className="text-amber-300 text-xs mb-2 flex items-center gap-1">
                 <AlertCircle className="w-3 h-3" />
-                <span className="font-semibold">CORS Solution:</span>
+                <span className="font-semibold">Quick Fix:</span>
               </p>
               <ul className="text-amber-200/80 text-xs space-y-1 text-left">
-                <li>• Check S3 bucket CORS configuration</li>
-                <li>• Make sure CORS config is properly saved</li>
-                <li>• Clear browser cache and try again</li>
+                <li>• Ensure CORS is enabled on your S3/CDN</li>
+                <li>• Try loading in incognito mode</li>
+                <li>• Check video URL accessibility</li>
               </ul>
             </div>
           )}
           
-          <div className="flex flex-col gap-3">
-            <Button
-              onClick={retryPlayback}
-              className="bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white font-medium"
-            >
-              <RotateCw className="w-4 h-4 mr-2" />
-              Retry Playback
-            </Button>
-          </div>
+          <Button
+            onClick={retryPlayback}
+            className="bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white font-medium"
+          >
+            <RotateCw className="w-4 h-4 mr-2" />
+            Retry Playback
+          </Button>
         </div>
       </div>
     )
@@ -799,13 +811,7 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
       ref={containerRef}
       className={`relative w-full aspect-video bg-black rounded-2xl overflow-hidden group ${className}`}
       onMouseMove={handleMouseMove}
-      onMouseEnter={() => setShowControls(true)}
-      onMouseLeave={() => {
-        if (isPlaying) {
-          setShowControls(false)
-        }
-      }}
-      onClick={togglePlay}
+      onClick={handleContainerClick}
       onDoubleClick={toggleFullscreen}
     >
       {/* Video element */}
@@ -814,12 +820,11 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
         className="w-full h-full object-contain"
         playsInline
         controls={false}
-        disablePictureInPicture={false}
-        disableRemotePlayback={true}
-        crossOrigin={fixedSrc.includes('s3.') ? undefined : 'anonymous'}
+        preload={preload}
+        crossOrigin={optimizedSrc.includes('s3.') ? undefined : 'anonymous'}
       />
       
-      {/* Consolidated Top Info Button */}
+      {/* Top Info Button */}
       <div className="absolute top-4 right-4 z-40">
         {TopInfoButton}
       </div>
@@ -832,14 +837,13 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
         <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center z-30">
           <div className="relative">
             <Loader2 className="w-16 h-16 text-white animate-spin" />
-            <div className="absolute inset-0 bg-gradient-to-r from-red-500/20 to-orange-500/20 blur-xl rounded-full" />
           </div>
           <p className="text-white/80 text-sm mt-4">
-            {isBuffering ? 'Buffering...' : 'Loading video...'}
+            {isBuffering ? 'Buffering...' : 'Loading...'}
           </p>
           {bufferProgress > 0 && (
-            <div className="w-48 mt-2">
-              <div className="w-full h-1 bg-white/30 rounded-full overflow-hidden">
+            <div className="w-48 mt-4">
+              <div className="w-full h-1.5 bg-white/20 rounded-full overflow-hidden">
                 <div 
                   className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-300"
                   style={{ width: `${bufferProgress}%` }}
@@ -853,14 +857,14 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
       {/* Center play button (when paused) */}
       {!isPlaying && !isLoading && !error && (
         <div 
-          className="absolute inset-0 flex items-center justify-center cursor-pointer z-20"
+          className="absolute inset-0 flex items-center justify-center z-20 play-button"
           onClick={(e) => {
             e.stopPropagation()
-            togglePlay()
+            togglePlay(e)
           }}
         >
-          <div className="w-24 h-24 bg-white/10 backdrop-blur-sm rounded-full flex items-center justify-center hover:scale-110 transition-transform group-hover:opacity-100 opacity-80">
-            <Play className="w-12 h-12 text-white ml-2" />
+          <div className="w-20 h-20 bg-white/10 backdrop-blur-sm rounded-full flex items-center justify-center hover:scale-110 transition-transform">
+            <Play className="w-10 h-10 text-white ml-1" />
           </div>
         </div>
       )}
@@ -869,32 +873,30 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
       {(showControls || isLoading || error) && (
         <>
           {/* Top gradient */}
-          <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-black/90 via-black/50 to-transparent pointer-events-none z-10" />
+          <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-black/80 via-black/40 to-transparent pointer-events-none z-10" />
           
           {/* Bottom controls */}
           <div 
-            className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 via-black/80 to-transparent p-4 z-10"
+            className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 via-black/70 to-transparent p-4 z-10 controls"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Progress bar */}
             <div className="mb-4 relative">
               {/* Buffer progress */}
               <div 
-                className="absolute top-0 left-0 w-full h-1.5 bg-white/20 rounded-full overflow-hidden cursor-pointer"
+                className="absolute top-0 left-0 w-full h-1.5 bg-white/20 rounded-full overflow-hidden"
                 ref={progressBarRef}
-                onClick={handleProgressClick}
-              >
-                <div 
-                  className="h-full bg-white/40 transition-all duration-300"
-                  style={{ width: `${bufferProgress}%` }}
-                />
-              </div>
+              />
               
               {/* Playback progress */}
               <div 
-                className="absolute top-0 left-0 h-1.5 bg-gradient-to-r from-red-600 to-orange-500 rounded-full cursor-pointer transition-all duration-300"
-                style={{ width: `${(currentTime / duration) * 100}%` }}
-                onClick={handleProgressClick}
+                className="absolute top-0 left-0 h-1.5 bg-gradient-to-r from-red-500 to-orange-400 rounded-full cursor-pointer"
+                style={{ width: `${(currentTime / Math.max(duration, 1)) * 100}%` }}
+                onClick={handleProgressInteraction}
+                onMouseDown={(e) => {
+                  e.stopPropagation()
+                  handleProgressInteraction(e)
+                }}
               >
                 <div className="absolute -right-1 -top-0.5 w-3 h-3 bg-white rounded-full shadow-lg" />
               </div>
@@ -913,8 +915,7 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
                 {/* Play/Pause */}
                 <Button
                   onClick={togglePlay}
-                  className="w-10 h-10 bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 flex items-center justify-center hover:scale-105 transition-transform"
-                  aria-label={isPlaying ? 'Pause' : 'Play'}
+                  className="w-10 h-10 bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 flex items-center justify-center"
                 >
                   {isPlaying ? (
                     <Pause className="w-5 h-5" />
@@ -925,18 +926,16 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
                 
                 {/* Skip backward */}
                 <Button
-                  onClick={() => skip(-10)}
-                  className="w-9 h-9 bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 flex items-center justify-center hover:scale-105 transition-transform"
-                  aria-label="Skip back 10 seconds"
+                  onClick={(e) => skip(-10, e)}
+                  className="w-9 h-9 bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 flex items-center justify-center"
                 >
                   <SkipBack className="w-4 h-4" />
                 </Button>
                 
                 {/* Skip forward */}
                 <Button
-                  onClick={() => skip(10)}
-                  className="w-9 h-9 bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 flex items-center justify-center hover:scale-105 transition-transform"
-                  aria-label="Skip forward 10 seconds"
+                  onClick={(e) => skip(10, e)}
+                  className="w-9 h-9 bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 flex items-center justify-center"
                 >
                   <SkipForward className="w-4 h-4" />
                 </Button>
@@ -945,8 +944,7 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
                 <div className="flex items-center gap-2 ml-2">
                   <Button
                     onClick={toggleMute}
-                    className="w-9 h-9 bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 flex items-center justify-center hover:scale-105 transition-transform"
-                    aria-label={isMuted ? 'Unmute' : 'Mute'}
+                    className="w-9 h-9 bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 flex items-center justify-center"
                   >
                     {isMuted || volume === 0 ? (
                       <VolumeX className="w-4 h-4" />
@@ -959,10 +957,14 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
                   <div 
                     className="w-20 h-1.5 bg-white/30 rounded-full cursor-pointer relative"
                     ref={volumeBarRef}
-                    onClick={handleVolumeClick}
+                    onClick={handleVolumeInteraction}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      handleVolumeInteraction(e)
+                    }}
                   >
                     <div 
-                      className="absolute top-0 left-0 h-full bg-gradient-to-r from-red-600 to-orange-500 rounded-full"
+                      className="absolute top-0 left-0 h-full bg-gradient-to-r from-red-500 to-orange-400 rounded-full"
                       style={{ width: `${volume * 100}%` }}
                     >
                       <div className="absolute -right-1 -top-0.5 w-3 h-3 bg-white rounded-full shadow-lg" />
@@ -976,20 +978,25 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
                 {/* Settings */}
                 <div className="relative">
                   <Button
-                    onClick={() => setShowSettings(!showSettings)}
-                    className="w-9 h-9 bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 flex items-center justify-center hover:scale-105 transition-transform"
-                    aria-label="Settings"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setShowSettings(!showSettings)
+                    }}
+                    className="w-9 h-9 bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 flex items-center justify-center"
                   >
                     <Settings className="w-4 h-4" />
                   </Button>
                   
                   {/* Settings dropdown */}
                   {showSettings && (
-                    <div className="absolute bottom-full right-0 mb-2 bg-black/90 backdrop-blur-sm rounded-lg p-3 min-w-[180px] border border-white/10 shadow-2xl z-50">
+                    <div 
+                      className="absolute bottom-full right-0 mb-2 bg-black/95 backdrop-blur-sm rounded-lg p-3 min-w-[180px] border border-white/10 shadow-2xl z-50 settings-panel"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       {/* Playback speed */}
                       <div className="mb-3">
-                        <h4 className="text-xs font-semibold text-white/70 mb-2">PLAYBACK SPEED</h4>
-                        <div className="grid grid-cols-2 gap-1">
+                        <h4 className="text-xs font-semibold text-white/70 mb-2">SPEED</h4>
+                        <div className="grid grid-cols-3 gap-1">
                           {playbackRates.map(rate => (
                             <button
                               key={rate}
@@ -997,35 +1004,35 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
                                 changePlaybackRate(rate)
                                 setShowSettings(false)
                               }}
-                              className={`px-2 py-1.5 rounded text-xs flex items-center justify-center ${
+                              className={`px-2 py-1.5 rounded text-xs ${
                                 playbackRate === rate
-                                  ? 'bg-gradient-to-r from-red-600 to-orange-500 text-white'
+                                  ? 'bg-gradient-to-r from-red-500 to-orange-400 text-white'
                                   : 'bg-white/10 text-white/70 hover:bg-white/20'
                               }`}
                             >
-                              {rate === 1 ? 'Normal' : `${rate}x`}
+                              {rate === 1 ? '1x' : `${rate}x`}
                             </button>
                           ))}
                         </div>
                       </div>
                       
                       {/* Quality selector */}
-                      <div className="mb-3">
+                      <div>
                         <h4 className="text-xs font-semibold text-white/70 mb-2">QUALITY</h4>
                         <div className="space-y-1">
                           {qualities.map(quality => (
                             <button
                               key={quality.id}
                               onClick={() => changeQuality(quality.id)}
-                              className={`w-full text-left px-2 py-1.5 rounded text-xs flex items-center justify-between hover:bg-white/10 ${
+                              className={`w-full text-left px-2 py-1.5 rounded text-xs ${
                                 activeQuality === quality.id
-                                  ? 'bg-gradient-to-r from-red-600/20 to-orange-500/20 text-white'
-                                  : 'text-white/70'
+                                  ? 'bg-gradient-to-r from-red-500/20 to-orange-400/20 text-white'
+                                  : 'text-white/70 hover:bg-white/10'
                               }`}
                             >
-                              <span>{quality.label}</span>
+                              {quality.label}
                               {activeQuality === quality.id && (
-                                <Check className="w-3 h-3" />
+                                <Check className="w-3 h-3 float-right" />
                               )}
                             </button>
                           ))}
@@ -1035,18 +1042,13 @@ const UltraFastVideoPlayer: React.FC<UltraFastVideoPlayerProps> = ({
                   )}
                 </div>
                 
-                {/* Current playback rate indicator */}
-                {playbackRate !== 1 && (
-                  <div className="px-2 py-1 bg-white/10 backdrop-blur-sm rounded text-xs text-white/80">
-                    {playbackRate.toFixed(2)}x
-                  </div>
-                )}
-                
                 {/* Fullscreen */}
                 <Button
-                  onClick={toggleFullscreen}
-                  className="w-9 h-9 bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 flex items-center justify-center hover:scale-105 transition-transform"
-                  aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    toggleFullscreen(e)
+                  }}
+                  className="w-9 h-9 bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 flex items-center justify-center"
                 >
                   {isFullscreen ? (
                     <Minimize className="w-4 h-4" />
