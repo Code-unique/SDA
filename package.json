@@ -39,7 +39,9 @@
     "@tailwindcss/forms": "^0.5.10",
     "@tailwindcss/typography": "^0.5.19",
     "@tanstack/react-query": "^5.90.11",
+    "@types/video.js": "^7.3.58",
     "@uploadthing/react": "^7.3.3",
+    "@videojs/http-streaming": "^3.17.2",
     "class-variance-authority": "^0.7.1",
     "cloudinary": "^2.8.0",
     "clsx": "^2.1.1",
@@ -71,6 +73,9 @@
     "tailwindcss": "^3.4.14",
     "uploadthing": "^7.7.4",
     "uuid": "^13.0.0",
+    "video.js": "^8.23.4",
+    "videojs-contrib-quality-levels": "^4.1.0",
+    "videojs-hls-quality-selector": "^2.0.0",
     "zod": "^4.1.12"
   },
   "devDependencies": {

@@ -131,6 +131,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+// FIXED: Import SmartVideoPlayer
+import SmartVideoPlayer from '@/components/ui/smart-video-player'
 import Image from 'next/image'
 
 // ==================== TYPES ====================
@@ -378,88 +380,89 @@ const PaymentRequestModal = memo(({
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    
-    if (!formData.paymentMethod) {
-      toast({
-        title: "Error",
-        description: "Please select a payment method",
-        variant: "destructive"
-      })
-      return
-    }
-
-    setLoading(true)
-
-    try {
-      let proofUrl = ''
-      let proofFileName = ''
-      
-      if (formData.paymentProof) {
-        const formDataObj = new FormData()
-        formDataObj.append('file', formData.paymentProof)
-        formDataObj.append('courseId', course._id)
-        
-        const uploadResponse = await fetch('/api/upload/payment-proof', {
-          method: 'POST',
-          body: formDataObj
-        })
-        
-        if (!uploadResponse.ok) {
-          const errorText = await uploadResponse.text()
-          throw new Error('Failed to upload payment proof')
-        }
-        
-        const uploadData = await uploadResponse.json()
-        proofUrl = uploadData.fileUrl
-        proofFileName = uploadData.fileName || formData.paymentProof.name
-      }
-
-      const response = await fetch(`/api/courses/${course._id}/payment/initiate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          paymentMethod: formData.paymentMethod,
-          transactionId: formData.transactionId,
-          paymentProof: proofUrl ? {
-            url: proofUrl,
-            fileName: proofFileName || formData.paymentProof?.name || 'payment_proof'
-          } : undefined,
-          notes: formData.notes
-        })
-      })
-
-      const data = await response.json()
-
-      if (response.ok) {
-        toast({
-          title: "Success",
-          description: "Payment request submitted successfully!",
-        })
-        toast({
-          title: "Info",
-          description: "Admin will review your request within 24-48 hours. You'll be notified via email.",
-        })
-        onSuccess(data.requestId || data._id)
-        onClose()
-      } else {
-        toast({
-          title: "Error",
-          description: data.error || 'Failed to submit payment request',
-          variant: "destructive"
-        })
-      }
-    } catch (error) {
-      console.error('Error submitting payment request:', error)
-      toast({
-        title: "Error",
-        description: "An error occurred. Please try again.",
-        variant: "destructive"
-      })
-    } finally {
-      setLoading(false)
-    }
+  e.preventDefault()
+  
+  if (!formData.paymentMethod) {
+    toast({
+      title: "Error",
+      description: "Please select a payment method",
+      variant: "destructive"
+    })
+    return
   }
+
+  setLoading(true)
+
+  try {
+    let proofUrl = ''
+    let proofFileName = ''
+    
+    if (formData.paymentProof) {
+      const formDataObj = new FormData()
+      formDataObj.append('file', formData.paymentProof)
+      formDataObj.append('courseId', course._id)
+      
+      const uploadResponse = await fetch('/api/upload/payment-proof', {
+        method: 'POST',
+        body: formDataObj
+      })
+      
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text()
+        throw new Error('Failed to upload payment proof')
+      }
+      
+      const uploadData = await uploadResponse.json()
+      proofUrl = uploadData.fileUrl
+      proofFileName = uploadData.fileName || formData.paymentProof.name
+    }
+
+    const response = await fetch(`/api/courses/${course._id}/payment/initiate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // FIX: Changed transitionId to transactionId
+      body: JSON.stringify({
+        paymentMethod: formData.paymentMethod,
+        transactionId: formData.transactionId, // FIXED HERE
+        paymentProof: proofUrl ? {
+          url: proofUrl,
+          fileName: proofFileName || formData.paymentProof?.name || 'payment_proof'
+        } : undefined,
+        notes: formData.notes
+      })
+    })
+
+    const data = await response.json()
+
+    if (response.ok) {
+      toast({
+        title: "Success",
+        description: "Payment request submitted successfully!",
+      })
+      toast({
+        title: "Info",
+        description: "Admin will review your request within 24-48 hours. You'll be notified via email.",
+      })
+      onSuccess(data.requestId || data._id)
+      onClose()
+    } else {
+      toast({
+        title: "Error",
+        description: data.error || 'Failed to submit payment request',
+        variant: "destructive"
+      })
+    }
+  } catch (error) {
+    console.error('Error submitting payment request:', error)
+    toast({
+      title: "Error",
+      description: "An error occurred. Please try again.",
+      variant: "destructive"
+    })
+  } finally {
+    setLoading(false)
+  }
+}
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -751,160 +754,152 @@ export default function CourseDetailPage() {
   const slug = params.slug as string
 
   // Fetch course data
-  // Fetch course data
-const fetchCourseData = useCallback(async () => {
-  try {
-    setLoading(true)
-    setError(null)
+  const fetchCourseData = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError(null)
 
-    const [courseResponse, progressResponse] = await Promise.all([
-      fetch(`/api/courses/${slug}`),
-      fetch(`/api/courses/${slug}/progress`)
-    ])
+      const [courseResponse, progressResponse] = await Promise.all([
+        fetch(`/api/courses/${slug}`),
+        fetch(`/api/courses/${slug}/progress`)
+      ])
 
-    if (!courseResponse.ok) {
-      throw new Error(`Failed to load course`)
-    }
+      if (!courseResponse.ok) {
+        throw new Error(`Failed to load course`)
+      }
 
-    const data = await courseResponse.json()
-    
-    // Helper function to extract video from different structures
-    const extractVideoAsset = (videoData: any): S3Asset | undefined => {
-      if (!videoData) return undefined
+      const data = await courseResponse.json()
       
-      // Case 1: Direct S3Asset format
-      if (videoData.key || videoData.url) {
-        return {
-          key: videoData.key || '',
-          url: videoData.url || videoData.secure_url || '',
-          size: videoData.size || videoData.bytes || 0,
-          type: videoData.type || 'video',
-          duration: videoData.duration,
-          width: videoData.width,
-          height: videoData.height
+      // Helper function to extract video from different structures
+      const extractVideoAsset = (videoData: any): S3Asset | undefined => {
+        if (!videoData) return undefined
+        
+        // Case 1: Direct S3Asset format
+        if (videoData.key || videoData.url) {
+          return {
+            key: videoData.key || '',
+            url: videoData.url || videoData.secure_url || '',
+            size: videoData.size || videoData.bytes || 0,
+            type: videoData.type || 'video',
+            duration: videoData.duration,
+            width: videoData.width,
+            height: videoData.height
+          }
+        }
+        
+        // Case 2: videoSource.video format
+        if (videoData.video && (videoData.video.key || videoData.video.url)) {
+          return {
+            key: videoData.video.key || '',
+            url: videoData.video.url || videoData.video.secure_url || '',
+            size: videoData.video.size || videoData.video.bytes || 0,
+            type: videoData.video.type || 'video',
+            duration: videoData.video.duration,
+            width: videoData.video.width,
+            height: videoData.video.height
+          }
+        }
+        
+        // Case 3: Cloudinary format or other variations
+        if (videoData.public_id || videoData.secure_url) {
+          return {
+            key: videoData.public_id || '',
+            url: videoData.secure_url || videoData.url || '',
+            size: videoData.bytes || videoData.size || 0,
+            type: videoData.resource_type || 'video',
+            duration: videoData.duration,
+            width: videoData.width,
+            height: videoData.height
+          }
+        }
+        
+        return undefined
+      }
+
+      const processedCourse: Course = {
+        ...data,
+        thumbnail: data.thumbnail ? {
+          key: data.thumbnail.key || data.thumbnail.public_id || '',
+          url: data.thumbnail.url || data.thumbnail.secure_url || '',
+          size: data.thumbnail.size || data.thumbnail.bytes || 0,
+          type: data.thumbnail.type || 'image',
+          width: data.thumbnail.width,
+          height: data.thumbnail.height
+        } : {
+          key: 'default',
+          url: '/placeholder-course.jpg',
+          size: 0,
+          type: 'image'
+        },
+        previewVideo: extractVideoAsset(data.previewVideo),
+        modules: data.modules?.map((module: any) => ({
+          ...module,
+          chapters: module.chapters?.map((chapter: any) => ({
+            ...chapter,
+            lessons: chapter.lessons?.map((lesson: any) => {
+              // Extract video from lesson - try multiple possible structures
+              const videoAsset = extractVideoAsset(lesson.videoSource || lesson.video)
+              
+              return {
+                ...lesson,
+                video: videoAsset
+              }
+            }) || []
+          })) || []
+        })) || [],
+        manualEnrollments: data.manualEnrollments || 0
+      }
+
+      setCourse(processedCourse)
+
+      if (progressResponse.ok) {
+        const progressData = await progressResponse.json()
+        
+        const userProgressData: UserProgress = {
+          _id: progressData._id || `temp-${processedCourse._id}`,
+          courseId: progressData.courseId || processedCourse._id,
+          userId: progressData.userId || 'current-user',
+          enrolled: true,
+          progress: progressData.progress || 0,
+          completed: progressData.completed || false,
+          completedLessons: progressData.completedLessons || [],
+          currentLesson: progressData.currentLesson || null,
+          timeSpent: progressData.timeSpent || 0,
+          lastAccessed: progressData.lastAccessed ? new Date(progressData.lastAccessed) : new Date()
+        }
+        
+        setUserProgress(userProgressData)
+        setCompletedLessons(new Set(userProgressData.completedLessons))
+        
+        if (userProgressData.currentLesson) {
+          const lesson = findLessonById(processedCourse, userProgressData.currentLesson)
+          if (lesson) {
+            setActiveLesson(lesson)
+          }
+        } else if (processedCourse.modules[0]?.chapters[0]?.lessons[0]) {
+          setActiveLesson(processedCourse.modules[0].chapters[0].lessons[0])
+        }
+      } else {
+        setUserProgress(null)
+        setCompletedLessons(new Set())
+        
+        if (processedCourse.modules[0]?.chapters[0]?.lessons[0]) {
+          setActiveLesson(processedCourse.modules[0].chapters[0].lessons[0])
         }
       }
       
-      // Case 2: videoSource.video format
-      if (videoData.video && (videoData.video.key || videoData.video.url)) {
-        return {
-          key: videoData.video.key || '',
-          url: videoData.video.url || videoData.video.secure_url || '',
-          size: videoData.video.size || videoData.video.bytes || 0,
-          type: videoData.video.type || 'video',
-          duration: videoData.video.duration,
-          width: videoData.video.width,
-          height: videoData.video.height
-        }
-      }
-      
-      // Case 3: Cloudinary format or other variations
-      if (videoData.public_id || videoData.secure_url) {
-        return {
-          key: videoData.public_id || '',
-          url: videoData.secure_url || videoData.url || '',
-          size: videoData.bytes || videoData.size || 0,
-          type: videoData.resource_type || 'video',
-          duration: videoData.duration,
-          width: videoData.width,
-          height: videoData.height
-        }
-      }
-      
-      return undefined
+    } catch (err: any) {
+      console.error('Error fetching course:', err)
+      setError(err.message || 'Failed to load course')
+      toast({
+        title: 'Error',
+        description: 'Failed to load course details',
+        variant: 'destructive',
+      })
+    } finally {
+      setLoading(false)
     }
-
-    const processedCourse: Course = {
-      ...data,
-      thumbnail: data.thumbnail ? {
-        key: data.thumbnail.key || data.thumbnail.public_id || '',
-        url: data.thumbnail.url || data.thumbnail.secure_url || '',
-        size: data.thumbnail.size || data.thumbnail.bytes || 0,
-        type: data.thumbnail.type || 'image',
-        width: data.thumbnail.width,
-        height: data.thumbnail.height
-      } : {
-        key: 'default',
-        url: '/placeholder-course.jpg',
-        size: 0,
-        type: 'image'
-      },
-      previewVideo: extractVideoAsset(data.previewVideo),
-      modules: data.modules?.map((module: any) => ({
-        ...module,
-        chapters: module.chapters?.map((chapter: any) => ({
-          ...chapter,
-          lessons: chapter.lessons?.map((lesson: any) => {
-            // Extract video from lesson - try multiple possible structures
-            const videoAsset = extractVideoAsset(lesson.videoSource || lesson.video)
-            
-            return {
-              ...lesson,
-              video: videoAsset
-            }
-          }) || []
-        })) || []
-      })) || [],
-      manualEnrollments: data.manualEnrollments || 0
-    }
-
-    console.log('Processed course data:', {
-      title: processedCourse.title,
-      modules: processedCourse.modules.length,
-      firstLesson: processedCourse.modules[0]?.chapters[0]?.lessons[0]
-    })
-
-    setCourse(processedCourse)
-
-    // Rest of your progress fetching logic...
-    if (progressResponse.ok) {
-      const progressData = await progressResponse.json()
-      
-      const userProgressData: UserProgress = {
-        _id: progressData._id || `temp-${processedCourse._id}`,
-        courseId: progressData.courseId || processedCourse._id,
-        userId: progressData.userId || 'current-user',
-        enrolled: true,
-        progress: progressData.progress || 0,
-        completed: progressData.completed || false,
-        completedLessons: progressData.completedLessons || [],
-        currentLesson: progressData.currentLesson || null,
-        timeSpent: progressData.timeSpent || 0,
-        lastAccessed: progressData.lastAccessed ? new Date(progressData.lastAccessed) : new Date()
-      }
-      
-      setUserProgress(userProgressData)
-      setCompletedLessons(new Set(userProgressData.completedLessons))
-      
-      if (userProgressData.currentLesson) {
-        const lesson = findLessonById(processedCourse, userProgressData.currentLesson)
-        if (lesson) {
-          setActiveLesson(lesson)
-        }
-      } else if (processedCourse.modules[0]?.chapters[0]?.lessons[0]) {
-        setActiveLesson(processedCourse.modules[0].chapters[0].lessons[0])
-      }
-    } else {
-      setUserProgress(null)
-      setCompletedLessons(new Set())
-      
-      if (processedCourse.modules[0]?.chapters[0]?.lessons[0]) {
-        setActiveLesson(processedCourse.modules[0].chapters[0].lessons[0])
-      }
-    }
-    
-  } catch (err: any) {
-    console.error('Error fetching course:', err)
-    setError(err.message || 'Failed to load course')
-    toast({
-      title: 'Error',
-      description: 'Failed to load course details',
-      variant: 'destructive',
-    })
-  } finally {
-    setLoading(false)
-  }
-}, [slug, toast])
+  }, [slug, toast])
 
   const findLessonById = useCallback((courseData: Course, lessonId: string): Lesson | null => {
     for (const module of courseData.modules) {
@@ -1385,35 +1380,15 @@ const fetchCourseData = useCallback(async () => {
         {/* Main Learning Content */}
         <div className="container px-4 py-6">
           <div className="space-y-6">
-            {/* Video Player */}
-           {/* Video Player */}
-<div className="bg-gradient-to-br from-slate-900 to-black rounded-2xl overflow-hidden shadow-2xl">
-  {activeLesson.video?.url ? (
-    <video
-      src={activeLesson.video.url}
-      controls
-      className="w-full aspect-video"
-      playsInline
-    />
-  ) : (
-    <div className="aspect-video flex items-center justify-center bg-gradient-to-br from-slate-900 to-black">
-      <div className="text-center p-8">
-        <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mx-auto mb-4 backdrop-blur-sm">
-          <AlertTriangle className="w-8 h-8 text-amber-400" />
-        </div>
-        <h3 className="text-white text-lg font-semibold mb-2">Video Not Available</h3>
-        <p className="text-white/60 text-sm mb-4">This lesson video is currently unavailable</p>
-        <div className="text-xs text-white/40">
-          <p>Lesson Title: {activeLesson.title}</p>
-          <p>Lesson ID: {activeLesson._id}</p>
-          {activeLesson.video && (
-            <p>Video Data: {JSON.stringify(activeLesson.video, null, 2)}</p>
-          )}
-        </div>
-      </div>
-    </div>
-  )}
-</div>
+            {/* Video Player - FIXED: Using SmartVideoPlayer */}
+            <div className="bg-gradient-to-br from-slate-900 to-black rounded-2xl overflow-hidden shadow-2xl">
+              <SmartVideoPlayer
+                src={activeLesson.video?.url || ''}
+                poster={course?.thumbnail?.url}
+                autoplay={true}
+                className="w-full aspect-video"
+              />
+            </div>
 
             {/* Lesson Content */}
             <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-200/50 dark:border-slate-700/50 shadow-lg overflow-hidden">
@@ -1733,7 +1708,7 @@ const fetchCourseData = useCallback(async () => {
         <div className="absolute inset-0 bg-gradient-to-r from-red-500/10 via-orange-500/10 to-amber-500/10" />
         
         <div className="relative px-4 pt-6 pb-8">
-          {/* Preview Video */}
+          {/* Preview Video - FIXED: Using SmartVideoPlayer */}
           {course.previewVideo && (
             <div className="mb-6">
               <div className="flex items-center gap-2 mb-3">
@@ -1742,15 +1717,11 @@ const fetchCourseData = useCallback(async () => {
                 </div>
                 <h2 className="text-lg font-bold text-slate-900 dark:text-white">Course Preview</h2>
               </div>
-              <div className="relative rounded-2xl overflow-hidden shadow-2xl bg-black">
-                <video
-                  src={course.previewVideo.url}
-                  className="w-full aspect-video"
-                  controls
-                  playsInline
-                />
-                <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-black/50 to-transparent" />
-              </div>
+              <SmartVideoPlayer
+                src={course.previewVideo.url}
+                poster={course.thumbnail?.url}
+                className="rounded-2xl overflow-hidden shadow-2xl"
+              />
             </div>
           )}
 
