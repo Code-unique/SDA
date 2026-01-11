@@ -173,20 +173,45 @@ const optimizeUrl = (url: string, quality?: string): string => {
   }
 }
 
-// Detect iOS and browser type
-const isIOS = () => {
+// Browser detection functions
+const isIOS = (): boolean => {
   if (typeof navigator === 'undefined') return false
   return /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
 }
 
-const isSafari = () => {
+const isSafari = (): boolean => {
   if (typeof navigator === 'undefined') return false
   return /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
 }
 
-const isChromeIOS = () => {
+const isChromeIOS = (): boolean => {
   if (typeof navigator === 'undefined') return false
-  return /CriOS/.test(navigator.userAgent)
+  return /CriOS/.test(navigator.userAgent) || (/iPhone|iPad|iPod/.test(navigator.userAgent) && /Chrome/.test(navigator.userAgent))
+}
+
+// iOS specific video configuration
+const configureIOSVideo = (video: HTMLVideoElement, autoplay: boolean, muted: boolean): void => {
+  // iOS requires these attributes for proper playback
+  video.setAttribute('playsinline', 'true')
+  video.setAttribute('webkit-playsinline', 'true')
+  video.setAttribute('x5-video-player-type', 'h5')
+  video.setAttribute('x5-video-player-fullscreen', 'false')
+  video.setAttribute('x5-video-orientation', 'portrait')
+  
+  // iOS Chrome specific settings
+  if (isChromeIOS()) {
+    video.setAttribute('controls', 'false')
+    // Chrome on iOS has stricter requirements
+    video.defaultMuted = true
+    video.muted = true
+    video.playsInline = true
+  }
+  
+  // iOS Safari/Chrome both require muted autoplay
+  if (autoplay && isIOS()) {
+    video.muted = true
+    video.autoplay = true
+  }
 }
 
 // Custom hooks
@@ -221,9 +246,9 @@ const useScreenInfo = (): ScreenInfo => {
         pixelRatio,
         width,
         height,
-        isIOS: /iPad|iPhone|iPod/.test(userAgent) && !(window as any).MSStream,
-        isSafari: /^((?!chrome|android).)*safari/i.test(userAgent),
-        isChromeIOS: /CriOS/.test(userAgent)
+        isIOS: isIOS(),
+        isSafari: isSafari(),
+        isChromeIOS: isChromeIOS()
       })
     }
 
@@ -247,9 +272,13 @@ const useFullscreen = () => {
 
   const enter = useCallback(async (element: HTMLElement) => {
     try {
-      if (element.requestFullscreen) await element.requestFullscreen()
-      else if ((element as any).webkitRequestFullscreen) await (element as any).webkitRequestFullscreen()
-      else if ((element as any).msRequestFullscreen) await (element as any).msRequestFullscreen()
+      if (element.requestFullscreen) {
+        await element.requestFullscreen()
+      } else if ((element as any).webkitRequestFullscreen) {
+        await (element as any).webkitRequestFullscreen()
+      } else if ((element as any).msRequestFullscreen) {
+        await (element as any).msRequestFullscreen()
+      }
     } catch (err) {
       console.warn('Fullscreen error:', err)
     }
@@ -257,9 +286,13 @@ const useFullscreen = () => {
 
   const exit = useCallback(async () => {
     try {
-      if (document.exitFullscreen) await document.exitFullscreen()
-      else if ((document as any).webkitExitFullscreen) await (document as any).webkitExitFullscreen()
-      else if ((document as any).msExitFullscreen) await (document as any).msExitFullscreen()
+      if (document.exitFullscreen) {
+        await document.exitFullscreen()
+      } else if ((document as any).webkitExitFullscreen) {
+        await (document as any).webkitExitFullscreen()
+      } else if ((document as any).msExitFullscreen) {
+        await (document as any).msExitFullscreen()
+      }
     } catch (err) {
       console.warn('Fullscreen exit error:', err)
     }
@@ -284,12 +317,15 @@ const useFullscreen = () => {
     }
   }, [])
 
-  return { isFullscreen, enter, exit, toggle: (element: HTMLElement) => 
-    isFullscreen ? exit() : enter(element) 
+  return { 
+    isFullscreen, 
+    enter, 
+    exit, 
+    toggle: (element: HTMLElement) => 
+      isFullscreen ? exit() : enter(element) 
   }
 }
 
-// Update the usePictureInPicture hook definition to accept nullable ref
 const usePictureInPicture = (videoRef: React.RefObject<HTMLVideoElement | null>) => {
   const [isPictureInPicture, setIsPictureInPicture] = useState(false)
 
@@ -758,16 +794,24 @@ const UltraFastVideoPlayer = memo(({
   const [showVolumeSlider, setShowVolumeSlider] = useState(false)
   const [aspectRatio, setAspectRatio] = useState(16/9)
   const [retryCount, setRetryCount] = useState(0)
-  const [isIOS, setIsIOS] = useState(false)
+  const [browserInfo, setBrowserInfo] = useState({
+    isIOS: false,
+    isChromeIOS: false,
+    isSafari: false
+  })
   
   // Hooks
   const screenInfo = useScreenInfo()
   const { isFullscreen: fsState, toggle: toggleFullscreen } = useFullscreen()
   const { isPictureInPicture: pipState, toggle: togglePictureInPicture } = usePictureInPicture(videoRef)
   
-  // Check iOS on mount
+  // Detect browser on mount
   useEffect(() => {
-    setIsIOS(/iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream)
+    setBrowserInfo({
+      isIOS: isIOS(),
+      isChromeIOS: isChromeIOS(),
+      isSafari: isSafari()
+    })
   }, [])
   
   // Derived values
@@ -844,26 +888,61 @@ const UltraFastVideoPlayer = memo(({
   // Event handlers
   const handlePlay = useCallback(async () => {
     try {
-      if (videoRef.current) {
-        // iOS requires user interaction before play()
-        if (isIOS) {
-          videoRef.current.play().catch(err => {
-            console.warn('iOS play failed:', err)
-            setState(prev => ({ ...prev, error: 'Tap to play (iOS restriction)' }))
-          })
-        } else {
-          await videoRef.current.play()
+      if (!videoRef.current) return
+      
+      const video = videoRef.current
+      
+      // iOS Chrome requires specific handling
+      if (browserInfo.isIOS) {
+        // Always mute first for iOS Chrome compatibility
+        if (browserInfo.isChromeIOS) {
+          video.muted = true
+          video.defaultMuted = true
         }
+        
+        // iOS requires user interaction, but we can try to play
+        video.play().then(() => {
+          setState(prev => ({ 
+            ...prev, 
+            isPlaying: true,
+            isBuffering: false,
+            error: null 
+          }))
+          onPlay?.()
+        }).catch(err => {
+          console.warn('iOS play failed:', err)
+          // Don't show error on iOS - just show play button
+          setState(prev => ({ 
+            ...prev, 
+            isPlaying: false,
+            error: null 
+          }))
+        })
+      } else {
+        await video.play()
+        setState(prev => ({ 
+          ...prev, 
+          isPlaying: true,
+          isBuffering: false,
+          error: null 
+        }))
+        onPlay?.()
       }
     } catch (err) {
       console.warn('Play failed:', err)
-      setState(prev => ({ ...prev, error: 'Failed to play video' }))
+      setState(prev => ({ 
+        ...prev, 
+        error: 'Tap to play video',
+        isPlaying: false 
+      }))
     }
-  }, [isIOS])
+  }, [browserInfo.isIOS, browserInfo.isChromeIOS, onPlay])
   
   const handlePause = useCallback(() => {
     videoRef.current?.pause()
-  }, [])
+    setState(prev => ({ ...prev, isPlaying: false }))
+    onPause?.()
+  }, [onPause])
   
   const togglePlay = useCallback(() => {
     if (state.isPlaying) {
@@ -878,7 +957,11 @@ const UltraFastVideoPlayer = memo(({
     const newVolume = Math.max(0, Math.min(1, value))
     videoRef.current.volume = newVolume
     videoRef.current.muted = newVolume === 0
-    setState(prev => ({ ...prev, volume: newVolume, isMuted: newVolume === 0 }))
+    setState(prev => ({ 
+      ...prev, 
+      volume: newVolume, 
+      isMuted: newVolume === 0 
+    }))
     onVolumeChange?.(newVolume)
     setShowVolumeSlider(true)
   }, [onVolumeChange])
@@ -886,7 +969,10 @@ const UltraFastVideoPlayer = memo(({
   const toggleMute = useCallback(() => {
     if (!videoRef.current) return
     videoRef.current.muted = !videoRef.current.muted
-    setState(prev => ({ ...prev, isMuted: videoRef.current!.muted }))
+    setState(prev => ({ 
+      ...prev, 
+      isMuted: videoRef.current!.muted 
+    }))
     setShowVolumeSlider(true)
   }, [])
   
@@ -908,9 +994,9 @@ const UltraFastVideoPlayer = memo(({
     if (!videoRef.current) return
     const newRate = Math.max(0.125, Math.min(8, rate))
     
-    // iOS Safari doesn't support playbackRate change
-    if (isIOS) {
-      console.warn('iOS Safari does not support playbackRate changes')
+    // iOS doesn't support playbackRate change
+    if (browserInfo.isIOS) {
+      console.warn('iOS does not support playbackRate changes')
       return
     }
     
@@ -918,7 +1004,7 @@ const UltraFastVideoPlayer = memo(({
     setState(prev => ({ ...prev, playbackRate: newRate }))
     setShowSettings(false)
     onPlaybackRateChange?.(newRate)
-  }, [onPlaybackRateChange, isIOS])
+  }, [onPlaybackRateChange, browserInfo.isIOS])
   
   const handleQualityChange = useCallback((quality: string) => {
     setState(prev => ({ ...prev, activeQuality: quality }))
@@ -927,16 +1013,21 @@ const UltraFastVideoPlayer = memo(({
   }, [onQualityChange])
   
   const handleRetry = useCallback(() => {
-    setState(prev => ({ ...prev, error: null, isLoading: true }))
+    setState(prev => ({ 
+      ...prev, 
+      error: null, 
+      isLoading: true 
+    }))
     setRetryCount(prev => prev + 1)
     
     if (videoRef.current) {
       videoRef.current.load()
-      if (!isIOS) {
+      // Don't auto-play on iOS retry
+      if (!browserInfo.isIOS) {
         videoRef.current.play().catch(() => {})
       }
     }
-  }, [isIOS])
+  }, [browserInfo.isIOS])
   
   // Video event handlers
   const handleVideoEvents = useCallback(() => {
@@ -944,7 +1035,11 @@ const UltraFastVideoPlayer = memo(({
     if (!video) return
     
     const events = {
-      loadstart: () => setState(prev => ({ ...prev, isLoading: true, error: null })),
+      loadstart: () => setState(prev => ({ 
+        ...prev, 
+        isLoading: true, 
+        error: null 
+      })),
       loadedmetadata: () => {
         const width = video.videoWidth || 1920
         const height = video.videoHeight || 1080
@@ -955,14 +1050,32 @@ const UltraFastVideoPlayer = memo(({
         }))
       },
       canplay: () => {
-        setState(prev => ({ ...prev, isLoading: false, isBuffering: false }))
+        setState(prev => ({ 
+          ...prev, 
+          isLoading: false, 
+          isBuffering: false 
+        }))
         onReady?.()
-        if (autoplay && !isIOS) {
-          handlePlay()
+        // Auto-play only if not iOS or if iOS with muted autoplay
+        if (autoplay) {
+          if (browserInfo.isIOS) {
+            // iOS requires muted autoplay
+            video.muted = true
+            video.play().catch(() => {
+              // Silent fail for iOS autoplay restrictions
+              console.log('iOS autoplay prevented - requires user interaction')
+            })
+          } else {
+            video.play().catch(() => {})
+          }
         }
       },
       playing: () => {
-        setState(prev => ({ ...prev, isPlaying: true, isBuffering: false }))
+        setState(prev => ({ 
+          ...prev, 
+          isPlaying: true, 
+          isBuffering: false 
+        }))
         onPlay?.()
       },
       pause: () => {
@@ -970,7 +1083,10 @@ const UltraFastVideoPlayer = memo(({
         onPause?.()
       },
       timeupdate: () => {
-        setState(prev => ({ ...prev, currentTime: video.currentTime }))
+        setState(prev => ({ 
+          ...prev, 
+          currentTime: video.currentTime 
+        }))
         onTimeUpdate?.(video.currentTime)
       },
       waiting: () => {
@@ -980,7 +1096,10 @@ const UltraFastVideoPlayer = memo(({
         if (video.buffered.length > 0 && state.duration > 0) {
           const bufferedEnd = video.buffered.end(video.buffered.length - 1)
           const bufferedPercent = (bufferedEnd / state.duration) * 100
-          setState(prev => ({ ...prev, bufferProgress: bufferedPercent }))
+          setState(prev => ({ 
+            ...prev, 
+            bufferProgress: bufferedPercent 
+          }))
           onProgress?.(bufferedPercent)
         }
       },
@@ -1001,7 +1120,11 @@ const UltraFastVideoPlayer = memo(({
           }
         }
         
-        setState(prev => ({ ...prev, error: errorMsg, isLoading: false }))
+        setState(prev => ({ 
+          ...prev, 
+          error: errorMsg, 
+          isLoading: false 
+        }))
         onError?.(errorMsg)
       },
       volumechange: () => {
@@ -1024,8 +1147,9 @@ const UltraFastVideoPlayer = memo(({
       })
     }
   }, [
-    autoplay, handlePlay, onReady, onPlay, onPause, 
-    onTimeUpdate, onProgress, onEnded, onError, state.duration, isIOS
+    autoplay, onReady, onPlay, onPause, 
+    onTimeUpdate, onProgress, onEnded, onError, 
+    state.duration, browserInfo.isIOS
   ])
   
   // Initialize video
@@ -1033,28 +1157,25 @@ const UltraFastVideoPlayer = memo(({
     const video = videoRef.current
     if (!video || !optimizedSrc) return
     
-    // Configure video for iOS
-    video.setAttribute('playsinline', 'true')
-    video.setAttribute('webkit-playsinline', 'true')
-    video.setAttribute('x-webkit-airplay', 'allow')
-    video.setAttribute('x5-video-player-type', 'h5-page')
-    video.setAttribute('x5-video-orientation', 'landscape|portrait')
-    video.setAttribute('preload', preload)
-    
-    // iOS specific settings
-    if (isIOS) {
-      video.defaultMuted = true
-      video.muted = true
-      setState(prev => ({ ...prev, isMuted: true }))
+    // Configure video based on browser
+    if (browserInfo.isIOS) {
+      configureIOSVideo(video, autoplay, muted)
     } else {
-      video.muted = state.isMuted
+      video.setAttribute('playsinline', playsInline.toString())
+      video.setAttribute('preload', preload)
+      video.muted = muted
       video.volume = state.volume
     }
     
+    // Set video source
     video.src = optimizedSrc
     video.poster = poster || ''
     video.loop = loop
-    video.playbackRate = state.playbackRate
+    
+    // iOS doesn't support playbackRate
+    if (!browserInfo.isIOS) {
+      video.playbackRate = state.playbackRate
+    }
     
     // Set crossOrigin for external URLs
     try {
@@ -1070,27 +1191,29 @@ const UltraFastVideoPlayer = memo(({
     // Load video
     video.load()
     
-    // iOS autoplay workaround
-    if (autoplay && !isIOS) {
-      const playPromise = video.play()
-      if (playPromise !== undefined) {
-        playPromise.catch(() => {
-          // Auto-play was prevented
-          console.log('Autoplay prevented')
-        })
-      }
+    // Auto-play handling (different for iOS)
+    if (autoplay && !browserInfo.isIOS) {
+      video.play().catch(() => {
+        console.log('Autoplay prevented on non-iOS browser')
+      })
     }
     
     return () => {
       cleanup?.()
-      video.src = ''
+      // Cleanup video source
+      video.pause()
       video.removeAttribute('src')
+      video.load()
     }
-  }, [optimizedSrc, poster, preload, loop, retryCount, handleVideoEvents, autoplay, isIOS])
+  }, [
+    optimizedSrc, poster, preload, loop, muted, 
+    playsInline, autoplay, retryCount, handleVideoEvents, 
+    browserInfo.isIOS, state.volume, state.playbackRate
+  ])
   
-  // Keyboard shortcuts - disable for iOS
+  // Keyboard shortcuts - disable for iOS mobile
   useEffect(() => {
-    if (isIOS) return // iOS doesn't support keyboard events in video
+    if (browserInfo.isIOS && screenInfo.isMobile) return
     
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!containerRef.current?.contains(document.activeElement) && !state.isFullscreen) return
@@ -1157,8 +1280,12 @@ const UltraFastVideoPlayer = memo(({
     
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [togglePlay, toggleMute, toggleFullscreen, handleSkip, handleVolumeChange, 
-      handleSeek, togglePictureInPicture, state.volume, state.isFullscreen, isIOS])
+  }, [
+    togglePlay, toggleMute, toggleFullscreen, handleSkip, 
+    handleVolumeChange, handleSeek, togglePictureInPicture, 
+    state.volume, state.isFullscreen, browserInfo.isIOS, 
+    screenInfo.isMobile
+  ])
   
   // Handle user interaction
   const handleInteraction = useCallback(() => {
@@ -1187,23 +1314,40 @@ const UltraFastVideoPlayer = memo(({
           </div>
           
           <h3 className="text-white text-lg font-bold mb-2">
-            Playback Error
+            {browserInfo.isIOS ? 'Tap to Play' : 'Playback Error'}
           </h3>
           
-          <p className="text-white/70 text-sm mb-4">{state.error}</p>
+          <p className="text-white/70 text-sm mb-4">
+            {browserInfo.isIOS 
+              ? 'iOS requires a tap to play video content' 
+              : state.error}
+          </p>
           
-          <Button
-            onClick={handleRetry}
-            className="bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white"
-          >
-            <RotateCw className="w-4 h-4 mr-2" />
-            Retry
-          </Button>
+          {!browserInfo.isIOS && (
+            <Button
+              onClick={handleRetry}
+              className="bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white"
+            >
+              <RotateCw className="w-4 h-4 mr-2" />
+              Retry
+            </Button>
+          )}
           
-          {isIOS && (
-            <p className="text-white/50 text-xs mt-4">
-              iOS may require user interaction to play video
-            </p>
+          {browserInfo.isIOS && (
+            <div className="space-y-3">
+              <Button
+                onClick={togglePlay}
+                className="bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white w-full"
+              >
+                <Play className="w-4 h-4 mr-2" />
+                Play Video
+              </Button>
+              <p className="text-white/50 text-xs">
+                {browserInfo.isChromeIOS 
+                  ? 'Chrome on iOS has specific video playback requirements' 
+                  : 'Safari on iOS may require user interaction'}
+              </p>
+            </div>
           )}
         </div>
       </div>
@@ -1221,7 +1365,13 @@ const UltraFastVideoPlayer = memo(({
       style={!state.isFullscreen ? { aspectRatio } : undefined}
       onMouseMove={handleInteraction}
       onTouchStart={handleInteraction}
-      onClick={handleInteraction}
+      onClick={(e) => {
+        handleInteraction()
+        // On iOS, toggle play on container click
+        if (browserInfo.isIOS && e.target === containerRef.current) {
+          togglePlay()
+        }
+      }}
       tabIndex={0}
       role="region"
       aria-label="Video player"
@@ -1236,6 +1386,10 @@ const UltraFastVideoPlayer = memo(({
         poster={poster}
         aria-label="Video content"
         muted={state.isMuted}
+        autoPlay={autoplay && !browserInfo.isIOS}
+        webkit-playsinline="true"
+        x5-playsinline="true"
+        x5-video-player-type="h5"
       />
       
       {/* Loading overlay */}
@@ -1255,8 +1409,8 @@ const UltraFastVideoPlayer = memo(({
         </div>
       )}
       
-      {/* Center play button - always show for iOS if not playing */}
-      {(!state.isPlaying || (isIOS && !state.isPlaying)) && !state.isLoading && !state.error && (
+      {/* Center play button - show on iOS when not playing */}
+      {((browserInfo.isIOS && !state.isPlaying) || (!state.isPlaying && !state.isLoading)) && (
         <div 
           className="absolute inset-0 flex items-center justify-center"
           onClick={togglePlay}
@@ -1362,7 +1516,7 @@ const UltraFastVideoPlayer = memo(({
                 {/* Right side */}
                 <div className="flex items-center gap-2">
                   {/* Settings - disable playback rate for iOS */}
-                  {!isIOS && (
+                  {!browserInfo.isIOS && (
                     <div className="relative">
                       <Button
                         onClick={() => setShowSettings(!showSettings)}
@@ -1395,8 +1549,8 @@ const UltraFastVideoPlayer = memo(({
                     </div>
                   )}
                   
-                  {/* Picture in Picture */}
-                  {document.pictureInPictureEnabled && !isIOS && (
+                  {/* Picture in Picture - not supported on iOS Chrome */}
+                  {document.pictureInPictureEnabled && !browserInfo.isIOS && (
                     <Button
                       onClick={togglePictureInPicture}
                       className={cn(
@@ -1476,9 +1630,12 @@ const UltraFastVideoPlayer = memo(({
       )}
       
       {/* iOS specific message */}
-      {isIOS && !state.isPlaying && !state.isLoading && !state.error && (
-        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-sm rounded-lg px-4 py-2">
-          <p className="text-white text-sm text-center">Tap to play</p>
+      {browserInfo.isIOS && !state.isPlaying && !state.isLoading && !state.error && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-sm rounded-lg px-4 py-2 animate-pulse">
+          <p className="text-white text-sm text-center flex items-center justify-center gap-2">
+            <Play className="w-4 h-4" />
+            Tap to play
+          </p>
         </div>
       )}
     </div>
