@@ -131,8 +131,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-// FIXED: Import SmartVideoPlayer
-import SmartVideoPlayer from '@/components/ui/smart-video-player'
+// FIXED: Import UltraFastVideoPlayer
+import UltraFastVideoPlayer from '@/components/ui/ultra-fast-video-player'
 import Image from 'next/image'
 
 // ==================== TYPES ====================
@@ -1380,9 +1380,9 @@ export default function CourseDetailPage() {
         {/* Main Learning Content */}
         <div className="container px-4 py-6">
           <div className="space-y-6">
-            {/* Video Player - FIXED: Using SmartVideoPlayer */}
+            {/* Video Player - FIXED: Using UltraFastVideoPlayer */}
             <div className="bg-gradient-to-br from-slate-900 to-black rounded-2xl overflow-hidden shadow-2xl">
-              <SmartVideoPlayer
+              <UltraFastVideoPlayer
                 src={activeLesson.video?.url || ''}
                 poster={course?.thumbnail?.url}
                 autoplay={true}
@@ -1708,7 +1708,7 @@ export default function CourseDetailPage() {
         <div className="absolute inset-0 bg-gradient-to-r from-red-500/10 via-orange-500/10 to-amber-500/10" />
         
         <div className="relative px-4 pt-6 pb-8">
-          {/* Preview Video - FIXED: Using SmartVideoPlayer */}
+          {/* Preview Video - FIXED: Using UltraFastVideoPlayer */}
           {course.previewVideo && (
             <div className="mb-6">
               <div className="flex items-center gap-2 mb-3">
@@ -1717,7 +1717,7 @@ export default function CourseDetailPage() {
                 </div>
                 <h2 className="text-lg font-bold text-slate-900 dark:text-white">Course Preview</h2>
               </div>
-              <SmartVideoPlayer
+              <UltraFastVideoPlayer
                 src={course.previewVideo.url}
                 poster={course.thumbnail?.url}
                 className="rounded-2xl overflow-hidden shadow-2xl"
