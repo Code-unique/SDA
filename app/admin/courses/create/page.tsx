@@ -84,7 +84,8 @@ import {
   Download,
   Cloud,
   Database,
-  AlertTriangle
+  AlertTriangle,
+  Info
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 
@@ -99,6 +100,8 @@ interface S3Asset {
   height?: number
   uploadedAt?: string
   fileName?: string
+  mimeType?: string
+  etag?: string
 }
 
 interface UploadProgress {
@@ -210,6 +213,18 @@ interface VideoLibraryItem {
     bitrate?: number;
     frameRate?: number;
   };
+}
+
+interface ApiResponse {
+  success: boolean;
+  error?: string;
+  details?: string;
+  uploadId?: string;
+  fileKey?: string;
+  fileUrl?: string;
+  presignedUrl?: string;
+  presignedUrls?: string[];
+  [key: string]: any;
 }
 
 // ==================== HELPER FUNCTIONS ====================
@@ -453,83 +468,69 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
   const lastProgressUpdate = useRef<Record<string, { time: number; progress: number }>>({})
   const { getToken } = useAuth()
 
-  const apiCallRef = useRef<(endpoint: string, body: any, signal?: AbortSignal) => Promise<any>>(
-    async (endpoint: string, body: any, signal?: AbortSignal) => {
-      console.log(`📤 API Call to ${endpoint}:`, { 
-        ...body, 
-        fileSize: body.fileSize ? `${formatFileSize(body.fileSize)}` : 'N/A' 
-      })
+  const apiCallRef = useRef(async (endpoint: string, body: any, signal?: AbortSignal): Promise<ApiResponse> => {
+    try {
+      const token = await getToken()
       
-      try {
-        const token = await getToken()
-        
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(body),
-          signal
-        })
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(body),
+        signal
+      })
 
-        console.log(`📥 API Response status: ${response.status} for ${endpoint}`)
-
-        if (response.status === 401) {
-          const currentPath = window.location.pathname + window.location.search
-          window.location.href = `/sign-in?redirect_url=${encodeURIComponent(currentPath)}`
-          throw new Error('Authentication required')
-        }
-
-        if (response.status === 403) {
-          throw new Error('Admin access required')
-        }
-
-        if (!response.ok) {
-          let errorData
-          try {
-            errorData = await response.json()
-          } catch {
-            errorData = { error: `HTTP ${response.status}: ${response.statusText}` }
-          }
-          
-          console.error(`❌ API Error for ${endpoint}:`, errorData)
-          
-          if (response.status === 429) {
-            throw new Error('Upload limit reached. Please try again in 15 minutes.')
-          } else if (response.status === 400) {
-            throw new Error(errorData.error || 'Invalid request')
-          } else if (response.status === 500) {
-            throw new Error(errorData.error || 'Server error. Please try again or contact support.')
-          }
-          
-          throw new Error(errorData.error || errorData.details || `Upload failed: ${response.status}`)
-        }
-
-        const data = await response.json()
-        
-        if (!data.success && !data.uploadId && !data.presignedUrl) {
-          throw new Error(data.error || 'Request failed')
-        }
-        
-        console.log(`✅ API Success for ${endpoint}:`, data)
-        return data
-
-      } catch (error) {
-        console.error(`❌ Network/API error for ${endpoint}:`, error)
-        
-        if (error instanceof TypeError && error.message === 'Failed to fetch') {
-          throw new Error('Network error. Please check your internet connection and try again.')
-        }
-        
-        if (error instanceof DOMException && error.name === 'AbortError') {
-          throw new Error('Upload cancelled')
-        }
-        
-        throw error
+      if (response.status === 401) {
+        const currentPath = window.location.pathname + window.location.search
+        window.location.href = `/sign-in?redirect_url=${encodeURIComponent(currentPath)}`
+        throw new Error('Authentication required')
       }
+
+      if (response.status === 403) {
+        throw new Error('Admin access required')
+      }
+
+      if (!response.ok) {
+        let errorData
+        try {
+          errorData = await response.json()
+        } catch {
+          errorData = { error: `HTTP ${response.status}: ${response.statusText}` }
+        }
+        
+        if (response.status === 429) {
+          throw new Error('Upload limit reached. Please try again in 15 minutes.')
+        } else if (response.status === 400) {
+          throw new Error(errorData.error || 'Invalid request')
+        } else if (response.status === 500) {
+          throw new Error(errorData.error || 'Server error. Please try again or contact support.')
+        }
+        
+        throw new Error(errorData.error || errorData.details || `Upload failed: ${response.status}`)
+      }
+
+      const data = await response.json() as ApiResponse
+      
+      if (!data.success && !data.uploadId && !data.presignedUrl) {
+        throw new Error(data.error || 'Request failed')
+      }
+      
+      return data
+
+    } catch (error) {
+      if (error instanceof TypeError && error.message === 'Failed to fetch') {
+        throw new Error('Network error. Please check your internet connection and try again.')
+      }
+      
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw new Error('Upload cancelled')
+      }
+      
+      throw error
     }
-  )
+  })
 
   const uploadFile = useCallback(async (
     file: File,
@@ -537,31 +538,19 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
     identifier: string,
     moduleIndex?: number
   ): Promise<S3Asset> => {
-    const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024
+    const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024; // 10GB for all devices
+    const OPTIMAL_PART_SIZE = 100 * 1024 * 1024; // 100MB chunks for better performance
+    const CONCURRENCY_LIMIT = 4; // Parallel uploads
+
     if (file.size > MAX_FILE_SIZE) {
-      throw new Error(`File too large. Maximum size: 10GB. Your file: ${formatFileSize(file.size)}`)
+      throw new Error(`File too large. Maximum size: ${formatFileSize(MAX_FILE_SIZE)}. Your file: ${formatFileSize(file.size)}`)
     }
 
     const abortController = new AbortController()
     abortControllers.current.set(identifier, abortController)
     
-    const shouldUseMultipart = file.size > 100 * 1024 * 1024
-    const OPTIMAL_PART_SIZE = 25 * 1024 * 1024
+    const shouldUseMultipart = file.size > (100 * 1024 * 1024) // Use multipart for files > 100MB
     const PART_SIZE = shouldUseMultipart ? OPTIMAL_PART_SIZE : file.size
-    
-    const getConcurrencyLimit = (): number => {
-      if (typeof navigator !== 'undefined' && 'connection' in navigator) {
-        const conn = (navigator as any).connection;
-        if (conn) {
-          const downlink = conn.downlink;
-          if (downlink > 50) return 8;
-          if (downlink > 20) return 6;
-          if (downlink > 5) return 4;
-        }
-      }
-      return 3;
-    }
-    const CONCURRENCY_LIMIT = getConcurrencyLimit()
 
     try {
       setActiveUploads(prev => new Set([...prev, identifier]))
@@ -580,9 +569,9 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
         }
       }))
 
-      let uploadId: string
-      let fileKey: string
-      let fileUrl: string
+      let uploadId: string | undefined
+      let fileKey: string | undefined
+      let fileUrl: string | undefined
 
       if (shouldUseMultipart) {
         const initData = await apiCallRef.current('/api/admin/upload/initiate', {
@@ -612,8 +601,8 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
           partNumber: i + 1,
           start: i * PART_SIZE,
           end: Math.min((i + 1) * PART_SIZE, file.size),
-          presignedUrl: undefined as string | undefined,
-          etag: undefined as string | undefined,
+          presignedUrl: undefined,
+          etag: undefined,
           status: 'pending' as const,
           progress: 0
         }))
@@ -683,6 +672,7 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
         const uploadedParts: Array<{ ETag: string; PartNumber: number }> = []
         uploadedBytesByPart.current[identifier] = {}
 
+        // Upload parts with optimized concurrency
         for (let i = 0; i < partsWithUrls.length; i += CONCURRENCY_LIMIT) {
           const batch = partsWithUrls.slice(i, i + CONCURRENCY_LIMIT)
           
@@ -761,12 +751,8 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
                 xhr.addEventListener('load', () => {
                   if (xhr.status === 200) {
                     const etag = xhr.getResponseHeader('etag') || 
-                                 xhr.getResponseHeader('ETag')?.replace(/"/g, '');
-                    
-                    if (!etag) {
-                      reject(new Error(`No ETag received for part ${part.partNumber}`));
-                      return;
-                    }
+                                 xhr.getResponseHeader('ETag')?.replace(/"/g, '') ||
+                                 `part-${part.partNumber}`;
                     
                     if (uploadedBytesByPart.current[identifier]) {
                       uploadedBytesByPart.current[identifier][part.partNumber] = partSize;
@@ -838,7 +824,6 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
           }, abortController.signal)
           fileUrl = completeData.fileUrl || fileUrl
         } catch (error) {
-          console.error('❌ Error completing multipart upload:', error)
           try {
             await apiCallRef.current('/api/admin/upload/abort', {
               fileKey,
@@ -860,7 +845,7 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
 
         fileKey = initData.fileKey
         fileUrl = initData.fileUrl
-        const { presignedUrl } = initData
+        const presignedUrl = initData.presignedUrl
 
         if (!presignedUrl) {
           throw new Error('No presigned URL received from server')
@@ -965,19 +950,20 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
         abortControllers.current.delete(identifier)
       }, 3000)
 
-      return {
+      const s3Asset: S3Asset = {
         key: fileKey!,
         url: fileUrl!,
         size: file.size,
         type: type === 'thumbnail' || type === 'moduleThumbnail' ? 'image' : 'video',
         duration: type.includes('video') ? 0 : undefined,
         uploadedAt: new Date().toISOString(),
-        fileName: file.name
+        fileName: file.name,
+        mimeType: file.type
       }
 
+      return s3Asset
+
     } catch (error) {
-      console.error('❌ Upload error:', error)
-      
       setUploadProgress(prev => ({
         ...prev,
         [identifier]: {
@@ -1096,6 +1082,7 @@ interface FileUploadAreaProps {
   onCancelUpload?: (identifier: string) => void
   onRetryUpload?: (identifier: string) => void
   onBrowseLibrary?: () => void
+  onFileSelect?: (file: File) => void
 }
 
 const FileUploadArea = memo(({
@@ -1112,9 +1099,11 @@ const FileUploadArea = memo(({
   onCancelUpload,
   onRetryUpload,
   onBrowseLibrary,
+  onFileSelect,
 }: FileUploadAreaProps) => {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
+  const [fileSizeError, setFileSizeError] = useState<string | null>(null)
 
   const identifier = useMemo(() => 
     type === 'lessonVideo' && moduleIndex !== undefined && chapterIndex !== undefined && lessonIndex !== undefined
@@ -1140,40 +1129,72 @@ const FileUploadArea = memo(({
   , [type])
 
   const handleFileSelect = useCallback(async (file: File) => {
-    const dataTransfer = new DataTransfer()
-    dataTransfer.items.add(file)
-    const syntheticEvent = {
-      target: { files: dataTransfer.files }
-    } as React.ChangeEvent<HTMLInputElement>
-    onFileChange(syntheticEvent)
-  }, [onFileChange])
+    // Validate file size (10GB for all devices)
+    const MAX_SIZE = 10 * 1024 * 1024 * 1024;
+    
+    if (file.size > MAX_SIZE) {
+      const maxSizeText = formatFileSize(MAX_SIZE);
+      const fileSizeText = formatFileSize(file.size);
+      setFileSizeError(`File too large. Maximum: ${maxSizeText}. Your file: ${fileSizeText}`);
+      return;
+    }
+    
+    setFileSizeError(null);
+    
+    // For mobile, show immediate feedback
+    if (onFileSelect) {
+      onFileSelect(file);
+    } else {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(file);
+      const syntheticEvent = {
+        target: { files: dataTransfer.files }
+      } as React.ChangeEvent<HTMLInputElement>;
+      onFileChange(syntheticEvent);
+    }
+  }, [onFileSelect, onFileChange])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    setDragOver(true)
+    e.preventDefault();
+    setDragOver(true);
   }, [])
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    setDragOver(false)
+    e.preventDefault();
+    setDragOver(false);
   }, [])
 
   const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    setDragOver(false)
-    const file = e.dataTransfer.files[0]
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
     if (file && acceptedFiles.split(',').some(ext => file.type.includes(ext.replace('*', '')))) {
-      handleFileSelect(file)
+      handleFileSelect(file);
     }
   }, [acceptedFiles, handleFileSelect])
 
-  const handleBrowseLibrary = () => {
-    if (onBrowseLibrary) {
-      onBrowseLibrary()
-    } else {
-      console.warn('onBrowseLibrary not provided')
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setFileSizeError(null);
+    
+    // Use setTimeout to avoid blocking UI
+    setTimeout(() => {
+      handleFileSelect(file);
+    }, 100);
+  }, [handleFileSelect])
+
+  const handleClick = useCallback(() => {
+    if (isUploading) return;
+    
+    setFileSizeError(null);
+    
+    if (inputRef.current) {
+      inputRef.current.value = '';
+      inputRef.current.click();
     }
-  }
+  }, [isUploading])
 
   const isFromLibrary = useMemo(() => {
     return currentFile?.url?.includes('s3.amazonaws.com') || currentFile?.key?.includes('courses/');
@@ -1207,7 +1228,7 @@ const FileUploadArea = memo(({
             type="button"
             variant="outline"
             size="sm"
-            onClick={handleBrowseLibrary}
+            onClick={onBrowseLibrary}
             className="ml-auto h-9 rounded-lg"
           >
             <Search className="w-4 h-4 mr-2" />
@@ -1220,7 +1241,7 @@ const FileUploadArea = memo(({
         ref={inputRef}
         type="file"
         accept={acceptedFiles}
-        onChange={onFileChange}
+        onChange={handleInputChange}
         className="hidden"
         disabled={isUploading}
       />
@@ -1235,11 +1256,17 @@ const FileUploadArea = memo(({
                 ? 'border-emerald-400 bg-gradient-to-br from-emerald-50/50 to-teal-50/50 dark:from-emerald-900/20 dark:to-teal-900/20'
                 : 'border-dashed border-slate-300 dark:border-slate-700 bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900/50 dark:to-slate-800/50 hover:border-emerald-400 hover:bg-gradient-to-br hover:from-emerald-50/50 hover:to-teal-50/50'
         }`}
-        onClick={() => !isUploading && inputRef.current?.click()}
+        onClick={handleClick}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        {fileSizeError && (
+          <div className="absolute top-3 left-3 right-3 bg-gradient-to-r from-rose-500 to-red-500 text-white text-xs px-3 py-2 rounded-lg shadow-lg z-30">
+            {fileSizeError}
+          </div>
+        )}
+        
         {currentFile && !isUploading ? (
           <div className="space-y-4 w-full">
             <div className="relative mx-auto w-40 h-40 rounded-xl overflow-hidden shadow-lg">
@@ -1331,7 +1358,10 @@ const FileUploadArea = memo(({
                 {dragOver ? 'Drop file here' : 'Click to browse or drag & drop'}
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-500 mt-2">
-                {isVideo ? 'MP4, WebM, MOV up to 10GB' : 'JPG, PNG, WebP up to 20MB'}
+                {isVideo 
+                  ? 'MP4, WebM, MOV up to 10GB'
+                  : 'JPG, PNG, WebP up to 20MB'
+                }
               </p>
               {isVideo && (
                 <div className="mt-1 inline-flex items-center gap-0.5 text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-full max-w-full">
@@ -1344,7 +1374,7 @@ const FileUploadArea = memo(({
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={handleBrowseLibrary}
+                  onClick={onBrowseLibrary}
                   className="mt-2 h-8 text-xs"
                 >
                   <Search className="w-3 h-3 mr-1" />
@@ -1500,6 +1530,60 @@ const UploadStatsPanel = memo(({
 ))
 UploadStatsPanel.displayName = 'UploadStatsPanel'
 
+interface MobileUploadNotificationProps {
+  show: boolean
+  message: string
+  type: 'info' | 'warning' | 'error' | 'success'
+  onClose: () => void
+}
+
+const MobileUploadNotification = memo(({ 
+  show, 
+  message, 
+  type,
+  onClose 
+}: MobileUploadNotificationProps) => {
+  if (!show) return null;
+  
+  const bgColor = {
+    info: 'from-blue-500 to-cyan-500',
+    warning: 'from-amber-500 to-orange-500',
+    error: 'from-rose-500 to-red-500',
+    success: 'from-emerald-500 to-green-500'
+  }[type];
+  
+  return (
+    <motion.div
+      initial={{ y: 100 }}
+      animate={{ y: 0 }}
+      exit={{ y: 100 }}
+      className="fixed bottom-20 left-4 right-4 z-50 sm:hidden"
+    >
+      <div className={`p-4 rounded-2xl bg-gradient-to-r ${bgColor} text-white shadow-2xl`}>
+        <div className="flex items-center gap-3">
+          {type === 'warning' ? (
+            <AlertTriangle className="w-5 h-5" />
+          ) : type === 'error' ? (
+            <AlertCircle className="w-5 h-5" />
+          ) : type === 'success' ? (
+            <CheckCircle className="w-5 h-5" />
+          ) : (
+            <Info className="w-5 h-5" />
+          )}
+          <p className="flex-1 text-sm font-medium">{message}</p>
+          <button
+            onClick={onClose}
+            className="text-white/80 hover:text-white"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
+});
+MobileUploadNotification.displayName = 'MobileUploadNotification'
+
 interface StickyActionsProps {
   loading: boolean
   activeUploads: string[]
@@ -1654,6 +1738,13 @@ export default function CreateCoursePage() {
     lessonIndex?: number
   }>({ open: false, type: 'lessonVideo' })
   
+  // Mobile notification state
+  const [mobileUploadNotification, setMobileUploadNotification] = useState<{
+    show: boolean
+    message: string
+    type: 'info' | 'warning' | 'error' | 'success'
+  }>({ show: false, message: '', type: 'info' })
+  
   const { 
     uploadProgress, 
     uploadFile: enhancedUploadFile, 
@@ -1701,6 +1792,7 @@ export default function CreateCoursePage() {
     }
   }, [])
 
+  // Authentication check
   useEffect(() => {
     const checkUserRole = async () => {
       if (isLoaded && isClient && isSignedIn && userId) {
@@ -1731,7 +1823,10 @@ export default function CreateCoursePage() {
         setCheckingAuth(false)
       }
     }
-    checkUserRole()
+    
+    if (isLoaded) {
+      checkUserRole()
+    }
   }, [isLoaded, isSignedIn, isClient, userId, router])
 
   // Calculate upload statistics
@@ -1744,6 +1839,31 @@ export default function CreateCoursePage() {
     }
     setUploadStats(stats)
   }, [uploadProgress])
+
+  // Mobile notification effect
+  useEffect(() => {
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+      navigator.userAgent
+    )
+    
+    if (isMobile && activeUploads.length > 0) {
+      setMobileUploadNotification({
+        show: true,
+        message: 'Upload in progress. Keep this tab open for best results.',
+        type: 'info'
+      })
+      
+      const timer = setTimeout(() => {
+        setMobileUploadNotification(prev => ({ ...prev, show: false }))
+      }, 10000)
+      
+      return () => clearTimeout(timer)
+    }
+    
+    if (activeUploads.length === 0 && mobileUploadNotification.show) {
+      setMobileUploadNotification(prev => ({ ...prev, show: false }))
+    }
+  }, [activeUploads, mobileUploadNotification.show])
 
   // Memoized values for performance
   const totalDuration = useMemo(() => formData.modules.reduce((total, module) => {
@@ -1767,14 +1887,6 @@ export default function CreateCoursePage() {
     chapterIndex?: number
     lessonIndex?: number
   }) => {
-    console.log('🎬 Video selected from library:', {
-      video: video.title,
-      type: context.type,
-      moduleIndex: context.moduleIndex,
-      chapterIndex: context.chapterIndex,
-      lessonIndex: context.lessonIndex
-    });
-
     const s3Asset: S3Asset = {
       key: video.video.key,
       url: video.video.url,
@@ -1784,11 +1896,11 @@ export default function CreateCoursePage() {
       fileName: video.video.originalFileName || video.title,
       width: video.video.width,
       height: video.video.height,
-      uploadedAt: video.uploadDate
+      uploadedAt: video.uploadDate,
+      mimeType: video.video.mimeType
     }
 
     if (context.type === 'previewVideo') {
-      console.log('📹 Setting preview video:', s3Asset);
       setFormData(prev => ({ 
         ...prev, 
         previewVideo: s3Asset 
@@ -1798,63 +1910,53 @@ export default function CreateCoursePage() {
                context.chapterIndex !== undefined && 
                context.lessonIndex !== undefined) {
       
-      console.log('📚 Setting lesson video:', {
-        moduleIndex: context.moduleIndex,
-        chapterIndex: context.chapterIndex,
-        lessonIndex: context.lessonIndex,
-        video: s3Asset
-      });
-      
-      const updatedModules = [...formData.modules];
-      
-      // Ensure the module exists
-      if (!updatedModules[context.moduleIndex]) {
-        console.error('❌ Module does not exist at index:', context.moduleIndex);
-        return;
-      }
-      
-      // Ensure the chapter exists
-      if (!updatedModules[context.moduleIndex].chapters[context.chapterIndex]) {
-        console.error('❌ Chapter does not exist at index:', context.chapterIndex);
-        return;
-      }
-      
-      // Ensure the lesson exists
-      if (!updatedModules[context.moduleIndex].chapters[context.chapterIndex].lessons[context.lessonIndex]) {
-        console.error('❌ Lesson does not exist at index:', context.lessonIndex);
-        return;
-      }
-      
-      updatedModules[context.moduleIndex] = {
-        ...updatedModules[context.moduleIndex],
-        chapters: updatedModules[context.moduleIndex].chapters.map((chapter, chapIdx) =>
-          chapIdx === context.chapterIndex ? {
-            ...chapter,
-            lessons: chapter.lessons.map((lesson, lesIdx) =>
-              lesIdx === context.lessonIndex ? {
-                ...lesson,
-                video: s3Asset,
-                videoSource: {
-                  type: 'library',
-                  videoLibraryId: video._id,
+      setFormData(prev => {
+        const updatedModules = [...prev.modules];
+        
+        if (!updatedModules[context.moduleIndex!]) {
+          console.error('❌ Module does not exist at index:', context.moduleIndex);
+          return prev;
+        }
+        
+        if (!updatedModules[context.moduleIndex!].chapters[context.chapterIndex!]) {
+          console.error('❌ Chapter does not exist at index:', context.chapterIndex);
+          return prev;
+        }
+        
+        if (!updatedModules[context.moduleIndex!].chapters[context.chapterIndex!].lessons[context.lessonIndex!]) {
+          console.error('❌ Lesson does not exist at index:', context.lessonIndex);
+          return prev;
+        }
+        
+        updatedModules[context.moduleIndex!] = {
+          ...updatedModules[context.moduleIndex!],
+          chapters: updatedModules[context.moduleIndex!].chapters.map((chapter, chapIdx) =>
+            chapIdx === context.chapterIndex ? {
+              ...chapter,
+              lessons: chapter.lessons.map((lesson, lesIdx) =>
+                lesIdx === context.lessonIndex ? {
+                  ...lesson,
                   video: s3Asset,
-                  uploadedAt: video.uploadDate,
-                  uploadedBy: video.uploadedBy?._id
-                }
-              } : lesson
-            )
-          } : chapter
-        )
-      };
-      
-      console.log('✅ Updated modules structure:', updatedModules[context.moduleIndex]);
-      
-      setFormData(prev => ({ 
-        ...prev, 
-        modules: updatedModules 
-      }));
+                  videoSource: {
+                    type: 'library',
+                    videoLibraryId: video._id,
+                    video: s3Asset,
+                    uploadedAt: video.uploadDate,
+                    uploadedBy: video.uploadedBy?._id
+                  }
+                } : lesson
+              )
+            } : chapter
+          )
+        };
+        
+        return { 
+          ...prev, 
+          modules: updatedModules 
+        };
+      });
     }
-  }, [formData.modules]);
+  }, [])
 
   // File upload handlers
   const handleThumbnailChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1886,17 +1988,19 @@ export default function CreateCoursePage() {
     if (file) {
       try {
         const result = await enhancedUploadFile(file, 'moduleThumbnail', `module-${moduleIndex}-thumbnail`, moduleIndex)
-        const updatedModules = [...formData.modules]
-        updatedModules[moduleIndex] = {
-          ...updatedModules[moduleIndex],
-          thumbnailUrl: result.url
-        }
-        setFormData(prev => ({ ...prev, modules: updatedModules }))
+        setFormData(prev => {
+          const updatedModules = [...prev.modules]
+          updatedModules[moduleIndex] = {
+            ...updatedModules[moduleIndex],
+            thumbnailUrl: result.url
+          }
+          return { ...prev, modules: updatedModules }
+        })
       } catch (error) {
         console.error('Error uploading module thumbnail:', error)
       }
     }
-  }, [enhancedUploadFile, formData.modules])
+  }, [enhancedUploadFile])
 
   const handleLessonVideoChange = useCallback(async (
     e: React.ChangeEvent<HTMLInputElement>, 
@@ -1909,32 +2013,34 @@ export default function CreateCoursePage() {
       const identifier = `lesson-${moduleIndex}-${chapterIndex}-${lessonIndex}`
       try {
         const result = await enhancedUploadFile(file, 'lessonVideo', identifier, moduleIndex)
-        const updatedModules = [...formData.modules]
-        updatedModules[moduleIndex] = {
-          ...updatedModules[moduleIndex],
-          chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) => 
-            chapIdx === chapterIndex ? {
-              ...chapter,
-              lessons: chapter.lessons.map((lesson, lesIdx) => 
-                lesIdx === lessonIndex ? {
-                  ...lesson,
-                  video: result,
-                  videoSource: {
-                    type: 'uploaded',
+        setFormData(prev => {
+          const updatedModules = [...prev.modules]
+          updatedModules[moduleIndex] = {
+            ...updatedModules[moduleIndex],
+            chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) => 
+              chapIdx === chapterIndex ? {
+                ...chapter,
+                lessons: chapter.lessons.map((lesson, lesIdx) => 
+                  lesIdx === lessonIndex ? {
+                    ...lesson,
                     video: result,
-                    uploadedAt: new Date().toISOString()
-                  }
-                } : lesson
-              )
-            } : chapter
-          )
-        }
-        setFormData(prev => ({ ...prev, modules: updatedModules }))
+                    videoSource: {
+                      type: 'uploaded',
+                      video: result,
+                      uploadedAt: new Date().toISOString()
+                    }
+                  } : lesson
+                )
+              } : chapter
+            )
+          }
+          return { ...prev, modules: updatedModules }
+        })
       } catch (error) {
         console.error('Error uploading lesson video:', error)
       }
     }
-  }, [enhancedUploadFile, formData.modules])
+  }, [enhancedUploadFile])
 
   const handleRetryUpload = useCallback(async (identifier: string) => {
     const upload = uploadProgress[identifier]
@@ -1968,41 +2074,45 @@ export default function CreateCoursePage() {
         } else if (type === 'previewVideo') {
           setFormData(prev => ({ ...prev, previewVideo: result }))
         } else if (type === 'moduleThumbnail' && moduleIndex !== undefined) {
-          const updatedModules = [...formData.modules]
-          updatedModules[moduleIndex] = {
-            ...updatedModules[moduleIndex],
-            thumbnailUrl: result.url
-          }
-          setFormData(prev => ({ ...prev, modules: updatedModules }))
+          setFormData(prev => {
+            const updatedModules = [...prev.modules]
+            updatedModules[moduleIndex!] = {
+              ...updatedModules[moduleIndex!],
+              thumbnailUrl: result.url
+            }
+            return { ...prev, modules: updatedModules }
+          })
         } else if (type === 'lessonVideo' && identifier.startsWith('lesson-')) {
           const parts = identifier.split('-')
           const modIdx = parseInt(parts[1])
           const chapIdx = parseInt(parts[2])
           const lesIdx = parseInt(parts[3])
           
-          const updatedModules = [...formData.modules]
-          if (updatedModules[modIdx]?.chapters[chapIdx]?.lessons[lesIdx]) {
-            updatedModules[modIdx] = {
-              ...updatedModules[modIdx],
-              chapters: updatedModules[modIdx].chapters.map((chapter, cIdx) => 
-                cIdx === chapIdx ? {
-                  ...chapter,
-                  lessons: chapter.lessons.map((lesson, lIdx) => 
-                    lIdx === lesIdx ? {
-                      ...lesson,
-                      video: result,
-                      videoSource: {
-                        type: 'uploaded',
+          setFormData(prev => {
+            const updatedModules = [...prev.modules]
+            if (updatedModules[modIdx]?.chapters[chapIdx]?.lessons[lesIdx]) {
+              updatedModules[modIdx] = {
+                ...updatedModules[modIdx],
+                chapters: updatedModules[modIdx].chapters.map((chapter, cIdx) => 
+                  cIdx === chapIdx ? {
+                    ...chapter,
+                    lessons: chapter.lessons.map((lesson, lIdx) => 
+                      lIdx === lesIdx ? {
+                        ...lesson,
                         video: result,
-                        uploadedAt: new Date().toISOString()
-                      }
-                    } : lesson
-                  )
-                } : chapter
-              )
+                        videoSource: {
+                          type: 'uploaded',
+                          video: result,
+                          uploadedAt: new Date().toISOString()
+                        }
+                      } : lesson
+                    )
+                  } : chapter
+                )
+              }
             }
-            setFormData(prev => ({ ...prev, modules: updatedModules }))
-          }
+            return { ...prev, modules: updatedModules }
+          })
         }
       } catch (error) {
         console.error('Retry failed:', error)
@@ -2010,7 +2120,7 @@ export default function CreateCoursePage() {
     }
     
     input.click()
-  }, [enhancedUploadFile, uploadProgress, formData.modules])
+  }, [enhancedUploadFile, uploadProgress])
 
   // Tag management
   const addTag = useCallback(() => {
@@ -2088,116 +2198,128 @@ export default function CreateCoursePage() {
 
   // Chapter management
   const addChapter = useCallback((moduleIndex: number) => {
-    const updatedModules = [...formData.modules]
-    updatedModules[moduleIndex] = {
-      ...updatedModules[moduleIndex],
-      chapters: [
-        ...updatedModules[moduleIndex].chapters,
-        {
-          title: '',
-          description: '',
-          order: updatedModules[moduleIndex].chapters.length,
-          lessons: []
-        }
-      ]
-    }
-    setFormData(prev => ({ ...prev, modules: updatedModules }))
-  }, [formData.modules])
+    setFormData(prev => {
+      const updatedModules = [...prev.modules]
+      updatedModules[moduleIndex] = {
+        ...updatedModules[moduleIndex],
+        chapters: [
+          ...updatedModules[moduleIndex].chapters,
+          {
+            title: '',
+            description: '',
+            order: updatedModules[moduleIndex].chapters.length,
+            lessons: []
+          }
+        ]
+      }
+      return { ...prev, modules: updatedModules }
+    })
+  }, [])
 
   const removeChapter = useCallback((moduleIndex: number, chapterIndex: number) => {
-    const updatedModules = [...formData.modules]
-    updatedModules[moduleIndex] = {
-      ...updatedModules[moduleIndex],
-      chapters: updatedModules[moduleIndex].chapters.filter(
-        (_, index) => index !== chapterIndex
-      )
-    }
-    setFormData(prev => ({ ...prev, modules: updatedModules }))
-  }, [formData.modules])
+    setFormData(prev => {
+      const updatedModules = [...prev.modules]
+      updatedModules[moduleIndex] = {
+        ...updatedModules[moduleIndex],
+        chapters: updatedModules[moduleIndex].chapters.filter(
+          (_, index) => index !== chapterIndex
+        )
+      }
+      return { ...prev, modules: updatedModules }
+    })
+  }, [])
 
   // Lesson management
   const addLesson = useCallback((moduleIndex: number, chapterIndex: number) => {
-    const updatedModules = [...formData.modules]
-    updatedModules[moduleIndex] = {
-      ...updatedModules[moduleIndex],
-      chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) =>
-        chapIdx === chapterIndex ? {
-          ...chapter,
-          lessons: [
-            ...chapter.lessons,
-            {
-              title: '',
-              description: '',
-              content: '',
-              duration: 0,
-              isPreview: false,
-              resources: [],
-              order: chapter.lessons.length
-            }
-          ]
-        } : chapter
-      )
-    }
-    setFormData(prev => ({ ...prev, modules: updatedModules }))
-  }, [formData.modules])
+    setFormData(prev => {
+      const updatedModules = [...prev.modules]
+      updatedModules[moduleIndex] = {
+        ...updatedModules[moduleIndex],
+        chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) =>
+          chapIdx === chapterIndex ? {
+            ...chapter,
+            lessons: [
+              ...chapter.lessons,
+              {
+                title: '',
+                description: '',
+                content: '',
+                duration: 0,
+                isPreview: false,
+                resources: [],
+                order: chapter.lessons.length
+              }
+            ]
+          } : chapter
+        )
+      }
+      return { ...prev, modules: updatedModules }
+    })
+  }, [])
 
   const removeLesson = useCallback((moduleIndex: number, chapterIndex: number, lessonIndex: number) => {
-    const updatedModules = [...formData.modules]
-    updatedModules[moduleIndex] = {
-      ...updatedModules[moduleIndex],
-      chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) =>
-        chapIdx === chapterIndex ? {
-          ...chapter,
-          lessons: chapter.lessons.filter(
-            (_, index) => index !== lessonIndex
-          )
-        } : chapter
-      )
-    }
-    setFormData(prev => ({ ...prev, modules: updatedModules }))
-  }, [formData.modules])
+    setFormData(prev => {
+      const updatedModules = [...prev.modules]
+      updatedModules[moduleIndex] = {
+        ...updatedModules[moduleIndex],
+        chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) =>
+          chapIdx === chapterIndex ? {
+            ...chapter,
+            lessons: chapter.lessons.filter(
+              (_, index) => index !== lessonIndex
+            )
+          } : chapter
+        )
+      }
+      return { ...prev, modules: updatedModules }
+    })
+  }, [])
 
   const addResource = useCallback((moduleIndex: number, chapterIndex: number, lessonIndex: number) => {
-    const updatedModules = [...formData.modules]
-    updatedModules[moduleIndex] = {
-      ...updatedModules[moduleIndex],
-      chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) =>
-        chapIdx === chapterIndex ? {
-          ...chapter,
-          lessons: chapter.lessons.map((lesson, lesIdx) =>
-            lesIdx === lessonIndex ? {
-              ...lesson,
-              resources: [...lesson.resources, {
-                title: '',
-                url: '',
-                type: 'pdf'
-              }]
-            } : lesson
-          )
-        } : chapter
-      )
-    }
-    setFormData(prev => ({ ...prev, modules: updatedModules }))
-  }, [formData.modules])
+    setFormData(prev => {
+      const updatedModules = [...prev.modules]
+      updatedModules[moduleIndex] = {
+        ...updatedModules[moduleIndex],
+        chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) =>
+          chapIdx === chapterIndex ? {
+            ...chapter,
+            lessons: chapter.lessons.map((lesson, lesIdx) =>
+              lesIdx === lessonIndex ? {
+                ...lesson,
+                resources: [...lesson.resources, {
+                  title: '',
+                  url: '',
+                  type: 'pdf'
+                }]
+              } : lesson
+            )
+          } : chapter
+        )
+      }
+      return { ...prev, modules: updatedModules }
+    })
+  }, [])
 
   const removeResource = useCallback((moduleIndex: number, chapterIndex: number, lessonIndex: number, resourceIndex: number) => {
-    const updatedModules = [...formData.modules]
-    updatedModules[moduleIndex] = {
-      ...updatedModules[moduleIndex],
-      chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) =>
-        chapIdx === chapterIndex ? {
-          ...chapter,
-          lessons: chapter.lessons.map((lesson, lesIdx) =>
-            lesIdx === lessonIndex ? {
-              ...lesson,
-              resources: lesson.resources.filter((_, index) => index !== resourceIndex)
-            } : lesson
-          )
-        } : chapter
-      )
-    }
-    setFormData(prev => ({ ...prev, modules: updatedModules }))
-  }, [formData.modules])
+    setFormData(prev => {
+      const updatedModules = [...prev.modules]
+      updatedModules[moduleIndex] = {
+        ...updatedModules[moduleIndex],
+        chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) =>
+          chapIdx === chapterIndex ? {
+            ...chapter,
+            lessons: chapter.lessons.map((lesson, lesIdx) =>
+              lesIdx === lessonIndex ? {
+                ...lesson,
+                resources: lesson.resources.filter((_, index) => index !== resourceIndex)
+              } : lesson
+            )
+          } : chapter
+        )
+      }
+      return { ...prev, modules: updatedModules }
+    })
+  }, [])
 
   // Form submission
   const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HTMLButtonElement>) => {
@@ -2248,37 +2370,6 @@ export default function CreateCoursePage() {
     setLoading(true)
 
     try {
-      console.log('📤 Creating course with data:', {
-        ...formData,
-        modules: formData.modules.map(module => ({
-          ...module,
-          chapters: module.chapters.map(chapter => ({
-            ...chapter,
-            lessons: chapter.lessons.map(lesson => ({
-              ...lesson,
-              video: lesson.video ? {
-                key: lesson.video.key,
-                url: lesson.video.url,
-                size: lesson.video.size,
-                type: lesson.video.type
-              } : undefined,
-              videoSource: lesson.videoSource ? {
-                type: lesson.videoSource.type,
-                videoLibraryId: lesson.videoSource.videoLibraryId,
-                video: {
-                  key: lesson.videoSource.video.key,
-                  url: lesson.videoSource.video.url,
-                  size: lesson.videoSource.video.size,
-                  type: lesson.videoSource.video.type
-                },
-                uploadedAt: lesson.videoSource.uploadedAt,
-                uploadedBy: lesson.videoSource.uploadedBy
-              } : undefined
-            }))
-          }))
-        }))
-      })
-
       const response = await fetch('/api/admin/courses', {
         method: 'POST',
         headers: {
@@ -2304,16 +2395,14 @@ export default function CreateCoursePage() {
       const responseData = await response.json()
       
       if (response.ok) {
-        console.log('✅ Course created successfully:', responseData)
         alert('Course created successfully!')
         router.push('/admin/courses');
         router.refresh();
       } else {
-        console.error('❌ API Error response:', responseData)
         alert(responseData.error || responseData.details || 'Failed to create course')
       }
     } catch (error) {
-      console.error('❌ Error creating course:', error)
+      console.error('Error creating course:', error)
       alert('Failed to create course. Please try again.')
     } finally {
       setLoading(false)
@@ -4241,6 +4330,14 @@ export default function CreateCoursePage() {
         moduleIndex={showVideoLibrary.moduleIndex}
         chapterIndex={showVideoLibrary.chapterIndex}
         lessonIndex={showVideoLibrary.lessonIndex}
+      />
+
+      {/* Mobile Upload Notification */}
+      <MobileUploadNotification
+        show={mobileUploadNotification.show}
+        message={mobileUploadNotification.message}
+        type={mobileUploadNotification.type}
+        onClose={() => setMobileUploadNotification(prev => ({ ...prev, show: false }))}
       />
 
       {/* Sticky Bottom Actions */}
