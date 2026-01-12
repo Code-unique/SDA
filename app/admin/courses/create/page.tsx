@@ -1116,7 +1116,6 @@ const FileUploadArea = memo(({
   const [dragOver, setDragOver] = useState(false)
   const [fileSizeError, setFileSizeError] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
-  const [mobileFile, setMobileFile] = useState<File | null>(null)
 
   const identifier = useMemo(() => 
     type === 'lessonVideo' && moduleIndex !== undefined && chapterIndex !== undefined && lessonIndex !== undefined
@@ -1134,27 +1133,6 @@ const FileUploadArea = memo(({
     type === 'previewVideo' || type === 'lessonVideo'
   , [type])
 
-  // Mobile-specific file handling
-  useEffect(() => {
-    const checkIsMobile = isMobile()
-    if (checkIsMobile && upload?.status === 'uploading') {
-      // Keep screen awake on mobile during upload
-      if ('wakeLock' in navigator) {
-        try {
-          navigator.wakeLock.request('screen')
-            .then(wakeLock => {
-              console.log('Screen wake lock acquired')
-            })
-            .catch(err => {
-              console.error('Failed to acquire wake lock:', err)
-            })
-        } catch (err) {
-          console.error('Wake lock not supported:', err)
-        }
-      }
-    }
-  }, [upload?.status])
-
   const handleFileSelect = useCallback(async (file: File) => {
     // Validate file size (10GB for all devices)
     const MAX_SIZE = 10 * 1024 * 1024 * 1024;
@@ -1169,12 +1147,7 @@ const FileUploadArea = memo(({
     setFileSizeError(null);
     setIsUploading(true);
     
-    // Store file reference for mobile
-    if (isMobile()) {
-      setMobileFile(file);
-    }
-    
-    // For mobile, use setTimeout to ensure UI updates before upload starts
+    // Use setTimeout to ensure UI updates before upload starts
     setTimeout(() => {
       if (onFileSelect) {
         onFileSelect(file);
@@ -1187,11 +1160,11 @@ const FileUploadArea = memo(({
         onFileChange(syntheticEvent);
       }
       
-      // Reset uploading state after a delay
+      // Reset uploading state after a short delay
       setTimeout(() => {
         setIsUploading(false);
-      }, 500);
-    }, 300);
+      }, 300);
+    }, 100);
   }, [onFileSelect, onFileChange])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -1219,7 +1192,7 @@ const FileUploadArea = memo(({
     
     setFileSizeError(null);
     
-    // Use setTimeout to ensure proper event handling on mobile
+    // Use setTimeout to ensure proper event handling
     setTimeout(() => {
       handleFileSelect(file);
     }, 100);
@@ -1239,13 +1212,6 @@ const FileUploadArea = memo(({
   const isFromLibrary = useMemo(() => {
     return currentFile?.url?.includes('s3.amazonaws.com') || currentFile?.key?.includes('courses/');
   }, [currentFile])
-
-  // Mobile-specific retry button
-  const handleMobileRetry = useCallback(() => {
-    if (mobileFile && onRetryUpload) {
-      handleFileSelect(mobileFile);
-    }
-  }, [mobileFile, onRetryUpload, handleFileSelect])
 
   return (
     <div className="space-y-4">
@@ -1267,7 +1233,7 @@ const FileUploadArea = memo(({
               ✓ {isFromLibrary ? 'From Library' : 'Uploaded'}
             </span>
           )}
-          {isMobile() && isUploading && !upload && (
+          {isUploading && !upload && (
             <span className="text-xs text-blue-600 dark:text-blue-400 ml-2">
               Processing...
             </span>
@@ -1296,8 +1262,7 @@ const FileUploadArea = memo(({
         onChange={handleInputChange}
         className="hidden"
         disabled={upload?.status === 'uploading' || isUploading}
-        // Mobile-specific attributes
-        capture={isMobile() && isVideo ? "environment" : undefined}
+        // REMOVED: capture={isMobile() && isVideo ? "environment" : undefined}
       />
       
       <div 
@@ -1423,12 +1388,6 @@ const FileUploadArea = memo(({
                   <span className="truncate">10GB multipart upload supported</span>
                 </div>
               )}
-              {isMobile() && (
-                <div className="mt-1 inline-flex items-center gap-0.5 text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded-full max-w-full">
-                  <Info className="w-3 h-3 flex-shrink-0" />
-                  <span className="truncate">Mobile: Keep screen on for best results</span>
-                </div>
-              )}
               {isVideo && onBrowseLibrary && !upload && !isUploading && (
                 <Button
                   type="button"
@@ -1453,25 +1412,6 @@ const FileUploadArea = memo(({
           onCancel={() => onCancelUpload?.(identifier)}
           onRetry={onRetryUpload && (() => onRetryUpload(identifier))}
         />
-      )}
-      
-      {/* Mobile-specific retry button for failed file selection */}
-      {isMobile() && !upload && mobileFile && !currentFile && (
-        <div className="flex items-center justify-between p-3 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-xl">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-amber-600" />
-            <span className="text-sm font-medium">File selected but not uploaded</span>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleMobileRetry}
-            className="h-8 text-xs"
-          >
-            Retry
-          </Button>
-        </div>
       )}
     </div>
   )
