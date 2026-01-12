@@ -126,6 +126,8 @@ const ULTRAWIDE_BREAKPOINT = 2560
 
 // Helper functions
 const formatTime = (seconds: number): string => {
+  if (isNaN(seconds)) return '0:00'
+  
   const hrs = Math.floor(seconds / 3600)
   const mins = Math.floor((seconds % 3600) / 60)
   const secs = Math.floor(seconds % 60)
@@ -146,7 +148,10 @@ const getMimeType = (url: string): string => {
     'm3u8': 'application/x-mpegURL',
     'mpd': 'application/dash+xml',
     'mov': 'video/quicktime',
-    'avi': 'video/x-msvideo'
+    'avi': 'video/x-msvideo',
+    'mkv': 'video/x-matroska',
+    'flv': 'video/x-flv',
+    'wmv': 'video/x-ms-wmv'
   }
   
   return mimeMap[ext] || 'video/mp4'
@@ -267,30 +272,45 @@ const useScreenInfo = (): ScreenInfo => {
   return screenInfo
 }
 
-const useFullscreen = () => {
+const useFullscreen = (containerRef: React.RefObject<HTMLDivElement | null>, onFullscreenChange?: (isFullscreen: boolean) => void) => {
   const [isFullscreen, setIsFullscreen] = useState(false)
 
-  const enter = useCallback(async (element: HTMLElement) => {
+  const enter = useCallback(async () => {
     try {
-      if (element.requestFullscreen) {
-        await element.requestFullscreen()
-      } else if ((element as any).webkitRequestFullscreen) {
+      const element = containerRef.current
+      if (!element) return
+
+      // iOS Safari requires webkit specific APIs
+      if ((element as any).webkitRequestFullscreen) {
         await (element as any).webkitRequestFullscreen()
-      } else if ((element as any).msRequestFullscreen) {
+      } 
+      // iOS Chrome requires video element fullscreen
+      else if (isIOS() && element.querySelector('video')) {
+        const video = element.querySelector('video')
+        if ((video as any).webkitEnterFullscreen) {
+          await (video as any).webkitEnterFullscreen()
+        }
+      }
+      else if (element.requestFullscreen) {
+        await element.requestFullscreen()
+      } 
+      else if ((element as any).msRequestFullscreen) {
         await (element as any).msRequestFullscreen()
       }
     } catch (err) {
       console.warn('Fullscreen error:', err)
     }
-  }, [])
+  }, [containerRef])
 
   const exit = useCallback(async () => {
     try {
-      if (document.exitFullscreen) {
-        await document.exitFullscreen()
-      } else if ((document as any).webkitExitFullscreen) {
+      if ((document as any).webkitExitFullscreen) {
         await (document as any).webkitExitFullscreen()
-      } else if ((document as any).msExitFullscreen) {
+      } 
+      else if (document.exitFullscreen) {
+        await document.exitFullscreen()
+      } 
+      else if ((document as any).msExitFullscreen) {
         await (document as any).msExitFullscreen()
       }
     } catch (err) {
@@ -298,12 +318,22 @@ const useFullscreen = () => {
     }
   }, [])
 
+  const toggle = useCallback(async () => {
+    if (isFullscreen) {
+      await exit()
+    } else {
+      await enter()
+    }
+  }, [isFullscreen, enter, exit])
+
   useEffect(() => {
     const handleChange = () => {
       const isFs = !!(document.fullscreenElement || 
                      (document as any).webkitFullscreenElement ||
+                     (document as any).webkitCurrentFullScreenElement ||
                      (document as any).msFullscreenElement)
       setIsFullscreen(isFs)
+      onFullscreenChange?.(isFs)
     }
 
     document.addEventListener('fullscreenchange', handleChange)
@@ -315,14 +345,13 @@ const useFullscreen = () => {
       document.removeEventListener('webkitfullscreenchange', handleChange)
       document.removeEventListener('MSFullscreenChange', handleChange)
     }
-  }, [])
+  }, [onFullscreenChange])
 
   return { 
     isFullscreen, 
     enter, 
     exit, 
-    toggle: (element: HTMLElement) => 
-      isFullscreen ? exit() : enter(element) 
+    toggle
   }
 }
 
@@ -802,7 +831,7 @@ const UltraFastVideoPlayer = memo(({
   
   // Hooks
   const screenInfo = useScreenInfo()
-  const { isFullscreen: fsState, toggle: toggleFullscreen } = useFullscreen()
+  const { isFullscreen: fsState, toggle: toggleFullscreen } = useFullscreen(containerRef, onFullscreenChange)
   const { isPictureInPicture: pipState, toggle: togglePictureInPicture } = usePictureInPicture(videoRef)
   
   // Detect browser on mount
@@ -901,23 +930,26 @@ const UltraFastVideoPlayer = memo(({
         }
         
         // iOS requires user interaction, but we can try to play
-        video.play().then(() => {
-          setState(prev => ({ 
-            ...prev, 
-            isPlaying: true,
-            isBuffering: false,
-            error: null 
-          }))
-          onPlay?.()
-        }).catch(err => {
-          console.warn('iOS play failed:', err)
-          // Don't show error on iOS - just show play button
-          setState(prev => ({ 
-            ...prev, 
-            isPlaying: false,
-            error: null 
-          }))
-        })
+        const playPromise = video.play()
+        if (playPromise !== undefined) {
+          playPromise.then(() => {
+            setState(prev => ({ 
+              ...prev, 
+              isPlaying: true,
+              isBuffering: false,
+              error: null 
+            }))
+            onPlay?.()
+          }).catch(err => {
+            console.warn('iOS play failed:', err)
+            // Don't show error on iOS - just show play button
+            setState(prev => ({ 
+              ...prev, 
+              isPlaying: false,
+              error: null 
+            }))
+          })
+        }
       } else {
         await video.play()
         setState(prev => ({ 
@@ -1028,6 +1060,48 @@ const UltraFastVideoPlayer = memo(({
       }
     }
   }, [browserInfo.isIOS])
+  
+  // iOS specific fullscreen handler
+  const handleIOSFullscreen = useCallback(() => {
+    if (!browserInfo.isIOS || !videoRef.current) return
+    
+    try {
+      const video = videoRef.current
+      
+      // iOS Safari webkitEnterFullscreen
+      if ((video as any).webkitEnterFullscreen) {
+        (video as any).webkitEnterFullscreen()
+        return true
+      }
+      
+      // iOS Chrome may use webkitRequestFullscreen on video
+      if ((video as any).webkitRequestFullscreen) {
+        (video as any).webkitRequestFullscreen()
+        return true
+      }
+      
+      return false
+    } catch (err) {
+      console.warn('iOS fullscreen error:', err)
+      return false
+    }
+  }, [browserInfo.isIOS])
+  
+  // Main fullscreen toggle handler
+  const handleFullscreenToggle = useCallback(async () => {
+    // iOS specific handling
+    if (browserInfo.isIOS) {
+      const iosSuccess = handleIOSFullscreen()
+      if (iosSuccess) return
+    }
+    
+    // Standard fullscreen handling
+    try {
+      await toggleFullscreen()
+    } catch (err) {
+      console.warn('Fullscreen toggle error:', err)
+    }
+  }, [browserInfo.isIOS, handleIOSFullscreen, toggleFullscreen])
   
   // Video event handlers
   const handleVideoEvents = useCallback(() => {
@@ -1230,7 +1304,7 @@ const UltraFastVideoPlayer = memo(({
           break
         case 'f':
           e.preventDefault()
-          if (containerRef.current) toggleFullscreen(containerRef.current)
+          handleFullscreenToggle()
           break
         case 'arrowleft':
           e.preventDefault()
@@ -1281,7 +1355,7 @@ const UltraFastVideoPlayer = memo(({
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [
-    togglePlay, toggleMute, toggleFullscreen, handleSkip, 
+    togglePlay, toggleMute, handleFullscreenToggle, handleSkip, 
     handleVolumeChange, handleSeek, togglePictureInPicture, 
     state.volume, state.isFullscreen, browserInfo.isIOS, 
     screenInfo.isMobile
@@ -1571,7 +1645,7 @@ const UltraFastVideoPlayer = memo(({
                   
                   {/* Fullscreen */}
                   <Button
-                    onClick={() => containerRef.current && toggleFullscreen(containerRef.current)}
+                    onClick={handleFullscreenToggle}
                     className={cn(
                       "bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 transition-all hover:scale-110 active:scale-95",
                       uiConfig.buttonSize === 'sm' ? 'h-9 w-9' :
