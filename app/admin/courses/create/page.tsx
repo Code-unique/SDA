@@ -269,6 +269,11 @@ const formatTimeRemaining = (seconds: number): string => {
   return `${secs}s remaining`
 }
 
+const isMobile = () => {
+  if (typeof window === 'undefined') return false
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+}
+
 // ==================== MEMOIZED COMPONENTS ====================
 interface UploadOptimizationTipsProps {
   fileSize: number
@@ -321,6 +326,12 @@ const UploadOptimizationTips = memo(({ fileSize, uploadStatus }: UploadOptimizat
                 <div className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-0.5 flex-shrink-0"></div>
                 <span className="truncate">Use stable connection</span>
               </li>
+              {isMobile() && (
+                <li className="flex items-start gap-1.5">
+                  <div className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-0.5 flex-shrink-0"></div>
+                  <span className="truncate">Mobile: Keep screen on during upload</span>
+                </li>
+              )}
             </ul>
           </div>
         </div>
@@ -1104,6 +1115,8 @@ const FileUploadArea = memo(({
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
   const [fileSizeError, setFileSizeError] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
+  const [mobileFile, setMobileFile] = useState<File | null>(null)
 
   const identifier = useMemo(() => 
     type === 'lessonVideo' && moduleIndex !== undefined && chapterIndex !== undefined && lessonIndex !== undefined
@@ -1117,16 +1130,30 @@ const FileUploadArea = memo(({
     uploadProgress?.[identifier]
   , [uploadProgress, identifier])
 
-  const isUploading = useMemo(() => 
-    upload?.status === 'initiating' || 
-    upload?.status === 'generating-urls' || 
-    upload?.status === 'uploading' || 
-    upload?.status === 'processing'
-  , [upload])
-
   const isVideo = useMemo(() => 
     type === 'previewVideo' || type === 'lessonVideo'
   , [type])
+
+  // Mobile-specific file handling
+  useEffect(() => {
+    const checkIsMobile = isMobile()
+    if (checkIsMobile && upload?.status === 'uploading') {
+      // Keep screen awake on mobile during upload
+      if ('wakeLock' in navigator) {
+        try {
+          navigator.wakeLock.request('screen')
+            .then(wakeLock => {
+              console.log('Screen wake lock acquired')
+            })
+            .catch(err => {
+              console.error('Failed to acquire wake lock:', err)
+            })
+        } catch (err) {
+          console.error('Wake lock not supported:', err)
+        }
+      }
+    }
+  }, [upload?.status])
 
   const handleFileSelect = useCallback(async (file: File) => {
     // Validate file size (10GB for all devices)
@@ -1140,18 +1167,31 @@ const FileUploadArea = memo(({
     }
     
     setFileSizeError(null);
+    setIsUploading(true);
     
-    // For mobile, show immediate feedback
-    if (onFileSelect) {
-      onFileSelect(file);
-    } else {
-      const dataTransfer = new DataTransfer();
-      dataTransfer.items.add(file);
-      const syntheticEvent = {
-        target: { files: dataTransfer.files }
-      } as React.ChangeEvent<HTMLInputElement>;
-      onFileChange(syntheticEvent);
+    // Store file reference for mobile
+    if (isMobile()) {
+      setMobileFile(file);
     }
+    
+    // For mobile, use setTimeout to ensure UI updates before upload starts
+    setTimeout(() => {
+      if (onFileSelect) {
+        onFileSelect(file);
+      } else {
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        const syntheticEvent = {
+          target: { files: dataTransfer.files }
+        } as React.ChangeEvent<HTMLInputElement>;
+        onFileChange(syntheticEvent);
+      }
+      
+      // Reset uploading state after a delay
+      setTimeout(() => {
+        setIsUploading(false);
+      }, 500);
+    }, 300);
   }, [onFileSelect, onFileChange])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -1179,14 +1219,14 @@ const FileUploadArea = memo(({
     
     setFileSizeError(null);
     
-    // Use setTimeout to avoid blocking UI
+    // Use setTimeout to ensure proper event handling on mobile
     setTimeout(() => {
       handleFileSelect(file);
     }, 100);
   }, [handleFileSelect])
 
   const handleClick = useCallback(() => {
-    if (isUploading) return;
+    if (upload?.status === 'uploading' || isUploading) return;
     
     setFileSizeError(null);
     
@@ -1194,11 +1234,18 @@ const FileUploadArea = memo(({
       inputRef.current.value = '';
       inputRef.current.click();
     }
-  }, [isUploading])
+  }, [upload?.status, isUploading])
 
   const isFromLibrary = useMemo(() => {
     return currentFile?.url?.includes('s3.amazonaws.com') || currentFile?.key?.includes('courses/');
   }, [currentFile])
+
+  // Mobile-specific retry button
+  const handleMobileRetry = useCallback(() => {
+    if (mobileFile && onRetryUpload) {
+      handleFileSelect(mobileFile);
+    }
+  }, [mobileFile, onRetryUpload, handleFileSelect])
 
   return (
     <div className="space-y-4">
@@ -1215,15 +1262,20 @@ const FileUploadArea = memo(({
         <div>
           <span className="font-semibold text-slate-900 dark:text-white">{label}</span>
           <span className="text-sm text-slate-500 dark:text-slate-400 ml-2">({maxSize})</span>
-          {currentFile && !isUploading && (
+          {currentFile && !upload && (
             <span className="text-xs text-emerald-600 dark:text-emerald-400 ml-2">
               ✓ {isFromLibrary ? 'From Library' : 'Uploaded'}
+            </span>
+          )}
+          {isMobile() && isUploading && !upload && (
+            <span className="text-xs text-blue-600 dark:text-blue-400 ml-2">
+              Processing...
             </span>
           )}
         </div>
         
         {/* Library Button */}
-        {isVideo && !isUploading && onBrowseLibrary && (
+        {isVideo && !upload && !isUploading && onBrowseLibrary && (
           <Button
             type="button"
             variant="outline"
@@ -1243,14 +1295,16 @@ const FileUploadArea = memo(({
         accept={acceptedFiles}
         onChange={handleInputChange}
         className="hidden"
-        disabled={isUploading}
+        disabled={upload?.status === 'uploading' || isUploading}
+        // Mobile-specific attributes
+        capture={isMobile() && isVideo ? "environment" : undefined}
       />
       
       <div 
         className={`relative rounded-2xl p-6 text-center cursor-pointer transition-all duration-300 min-h-[180px] flex flex-col items-center justify-center border-2 ${
           dragOver 
             ? 'border-emerald-400 bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20' 
-            : isUploading
+            : upload || isUploading
               ? 'border-blue-300 bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 cursor-not-allowed' 
               : currentFile
                 ? 'border-emerald-400 bg-gradient-to-br from-emerald-50/50 to-teal-50/50 dark:from-emerald-900/20 dark:to-teal-900/20'
@@ -1267,7 +1321,7 @@ const FileUploadArea = memo(({
           </div>
         )}
         
-        {currentFile && !isUploading ? (
+        {currentFile && !upload && !isUploading ? (
           <div className="space-y-4 w-full">
             <div className="relative mx-auto w-40 h-40 rounded-xl overflow-hidden shadow-lg">
               {isVideo ? (
@@ -1329,8 +1383,8 @@ const FileUploadArea = memo(({
         ) : (
           <div className="space-y-4 px-4">
             <div className="relative mx-auto">
-              <div className={`p-4 rounded-2xl shadow-lg ${isUploading ? 'bg-gradient-to-r from-blue-500 to-cyan-500' : 'bg-gradient-to-r from-emerald-500 to-teal-500'}`}>
-                {isUploading ? (
+              <div className={`p-4 rounded-2xl shadow-lg ${upload || isUploading ? 'bg-gradient-to-r from-blue-500 to-cyan-500' : 'bg-gradient-to-r from-emerald-500 to-teal-500'}`}>
+                {upload || isUploading ? (
                   <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 ) : isVideo ? (
                   <Film className="w-8 h-8 text-white" />
@@ -1341,9 +1395,9 @@ const FileUploadArea = memo(({
             </div>
             <div className="space-y-2">
               <p className="font-semibold text-slate-900 dark:text-white">
-                {isUploading ? (
+                {upload || isUploading ? (
                   <span className="inline-flex items-center gap-2">
-                    <span>Uploading...</span>
+                    <span>{isUploading && !upload ? 'Processing...' : 'Uploading...'}</span>
                     {upload?.progress && (
                       <span className="text-sm font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
                         {Math.round(upload.progress)}%
@@ -1369,7 +1423,13 @@ const FileUploadArea = memo(({
                   <span className="truncate">10GB multipart upload supported</span>
                 </div>
               )}
-              {isVideo && onBrowseLibrary && (
+              {isMobile() && (
+                <div className="mt-1 inline-flex items-center gap-0.5 text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded-full max-w-full">
+                  <Info className="w-3 h-3 flex-shrink-0" />
+                  <span className="truncate">Mobile: Keep screen on for best results</span>
+                </div>
+              )}
+              {isVideo && onBrowseLibrary && !upload && !isUploading && (
                 <Button
                   type="button"
                   variant="outline"
@@ -1393,6 +1453,25 @@ const FileUploadArea = memo(({
           onCancel={() => onCancelUpload?.(identifier)}
           onRetry={onRetryUpload && (() => onRetryUpload(identifier))}
         />
+      )}
+      
+      {/* Mobile-specific retry button for failed file selection */}
+      {isMobile() && !upload && mobileFile && !currentFile && (
+        <div className="flex items-center justify-between p-3 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-xl">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600" />
+            <span className="text-sm font-medium">File selected but not uploaded</span>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleMobileRetry}
+            className="h-8 text-xs"
+          >
+            Retry
+          </Button>
+        </div>
       )}
     </div>
   )
@@ -1842,14 +1921,12 @@ export default function CreateCoursePage() {
 
   // Mobile notification effect
   useEffect(() => {
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-      navigator.userAgent
-    )
+    const isMobileDevice = isMobile()
     
-    if (isMobile && activeUploads.length > 0) {
+    if (isMobileDevice && activeUploads.length > 0) {
       setMobileUploadNotification({
         show: true,
-        message: 'Upload in progress. Keep this tab open for best results.',
+        message: 'Upload in progress. Keep screen on and app open for best results.',
         type: 'info'
       })
       
@@ -1958,7 +2035,7 @@ export default function CreateCoursePage() {
     }
   }, [])
 
-  // File upload handlers
+  // File upload handlers - FIXED FOR MOBILE
   const handleThumbnailChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
@@ -2041,6 +2118,73 @@ export default function CreateCoursePage() {
       }
     }
   }, [enhancedUploadFile])
+
+  // Mobile-specific file selection handler
+  const handleMobileFileSelect = useCallback(async (
+    file: File,
+    type: 'thumbnail' | 'previewVideo' | 'lessonVideo' | 'moduleThumbnail',
+    moduleIndex?: number,
+    chapterIndex?: number,
+    lessonIndex?: number
+  ) => {
+    if (!file) return;
+
+    try {
+      let result: S3Asset;
+      
+      if (type === 'thumbnail') {
+        result = await enhancedUploadFile(file, type, 'thumbnail');
+        setFormData(prev => ({ ...prev, thumbnail: result }));
+      } else if (type === 'previewVideo') {
+        result = await enhancedUploadFile(file, type, 'previewVideo');
+        setFormData(prev => ({ ...prev, previewVideo: result }));
+      } else if (type === 'moduleThumbnail' && moduleIndex !== undefined) {
+        result = await enhancedUploadFile(file, type, `module-${moduleIndex}-thumbnail`, moduleIndex);
+        setFormData(prev => {
+          const updatedModules = [...prev.modules];
+          updatedModules[moduleIndex] = {
+            ...updatedModules[moduleIndex],
+            thumbnailUrl: result.url
+          };
+          return { ...prev, modules: updatedModules };
+        });
+      } else if (type === 'lessonVideo' && moduleIndex !== undefined && chapterIndex !== undefined && lessonIndex !== undefined) {
+        const identifier = `lesson-${moduleIndex}-${chapterIndex}-${lessonIndex}`;
+        result = await enhancedUploadFile(file, type, identifier, moduleIndex);
+        setFormData(prev => {
+          const updatedModules = [...prev.modules];
+          updatedModules[moduleIndex] = {
+            ...updatedModules[moduleIndex],
+            chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) => 
+              chapIdx === chapterIndex ? {
+                ...chapter,
+                lessons: chapter.lessons.map((lesson, lesIdx) => 
+                  lesIdx === lessonIndex ? {
+                    ...lesson,
+                    video: result,
+                    videoSource: {
+                      type: 'uploaded',
+                      video: result,
+                      uploadedAt: new Date().toISOString()
+                    }
+                  } : lesson
+                )
+              } : chapter
+            )
+          };
+          return { ...prev, modules: updatedModules };
+        });
+      }
+    } catch (error) {
+      console.error('Mobile upload failed:', error);
+      // Show mobile notification
+      setMobileUploadNotification({
+        show: true,
+        message: 'Upload failed. Please try again.',
+        type: 'error'
+      });
+    }
+  }, [enhancedUploadFile]);
 
   const handleRetryUpload = useCallback(async (identifier: string) => {
     const upload = uploadProgress[identifier]
@@ -2479,6 +2623,7 @@ export default function CreateCoursePage() {
                     </AlertTitle>
                     <AlertDescription className="text-sm text-blue-700 dark:text-blue-400">
                       Files are uploading to AWS S3. You can continue filling out the form while uploads are in progress.
+                      {isMobile() && " Keep screen on for best results."}
                     </AlertDescription>
                   </div>
                 </div>
@@ -2638,6 +2783,7 @@ export default function CreateCoursePage() {
                       uploadProgress={uploadProgress}
                       onCancelUpload={cancelUpload}
                       onRetryUpload={handleRetryUpload}
+                      onFileSelect={(file) => handleMobileFileSelect(file, 'thumbnail')}
                     />
 
                     <FileUploadArea
@@ -2654,6 +2800,7 @@ export default function CreateCoursePage() {
                         open: true,
                         type: 'previewVideo'
                       })}
+                      onFileSelect={(file) => handleMobileFileSelect(file, 'previewVideo')}
                     />
                   </CardContent>
                 </FormCard>
@@ -2825,6 +2972,7 @@ export default function CreateCoursePage() {
                                 uploadProgress={uploadProgress}
                                 onCancelUpload={cancelUpload}
                                 onRetryUpload={handleRetryUpload}
+                                onFileSelect={(file) => handleMobileFileSelect(file, 'moduleThumbnail', moduleIndex)}
                               />
 
                               {/* Chapters */}
@@ -3012,6 +3160,7 @@ export default function CreateCoursePage() {
                                                     chapterIndex,
                                                     lessonIndex
                                                   })}
+                                                  onFileSelect={(file) => handleMobileFileSelect(file, 'lessonVideo', moduleIndex, chapterIndex, lessonIndex)}
                                                 />
 
                                                 <FormGroup label="Duration (minutes)" icon={Clock}>
@@ -3535,6 +3684,7 @@ export default function CreateCoursePage() {
                       uploadProgress={uploadProgress}
                       onCancelUpload={cancelUpload}
                       onRetryUpload={handleRetryUpload}
+                      onFileSelect={(file) => handleMobileFileSelect(file, 'thumbnail')}
                     />
 
                     <FileUploadArea
@@ -3551,6 +3701,7 @@ export default function CreateCoursePage() {
                         open: true,
                         type: 'previewVideo'
                       })}
+                      onFileSelect={(file) => handleMobileFileSelect(file, 'previewVideo')}
                     />
                   </div>
                 </CardContent>
@@ -3721,6 +3872,7 @@ export default function CreateCoursePage() {
                               uploadProgress={uploadProgress}
                               onCancelUpload={cancelUpload}
                               onRetryUpload={handleRetryUpload}
+                              onFileSelect={(file) => handleMobileFileSelect(file, 'moduleThumbnail', moduleIndex)}
                             />
 
                             {/* Chapters */}
@@ -3908,6 +4060,7 @@ export default function CreateCoursePage() {
                                                   chapterIndex,
                                                   lessonIndex
                                                 })}
+                                                onFileSelect={(file) => handleMobileFileSelect(file, 'lessonVideo', moduleIndex, chapterIndex, lessonIndex)}
                                               />
 
                                               <FormGroup label="Duration (minutes)" icon={Clock}>
