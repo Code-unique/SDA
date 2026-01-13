@@ -7,8 +7,7 @@ import React, {
   useEffect, 
   useCallback, 
   useMemo,
-  memo,
-  useId
+  memo
 } from 'react'
 import { 
   Play, 
@@ -27,18 +26,8 @@ import {
   X,
   Expand,
   Minimize2,
-  FastForward,
-  Rewind,
-  Home,
-  Clock,
-  Zap,
-  Captions,
-  Airplay,
   PictureInPicture,
-  Gauge,
-  FileVideo2,
-  ChevronUp,
-  ChevronDown
+  Clock
 } from 'lucide-react'
 import { Button } from './button'
 import { cn } from '@/lib/utils'
@@ -68,29 +57,6 @@ interface UltraFastVideoPlayerProps {
   onPlaybackRateChange?: (rate: number) => void
 }
 
-interface VideoQuality {
-  id: string
-  label: string
-  src: string
-  width: number
-  height: number
-  bitrate?: number
-}
-
-interface ScreenInfo {
-  isMobile: boolean
-  isTablet: boolean
-  isDesktop: boolean
-  isLargeDesktop: boolean
-  isUltrawide: boolean
-  pixelRatio: number
-  width: number
-  height: number
-  isIOS: boolean
-  isSafari: boolean
-  isChromeIOS: boolean
-}
-
 interface PlayerState {
   isLoading: boolean
   isPlaying: boolean
@@ -103,30 +69,17 @@ interface PlayerState {
   volume: number
   playbackRate: number
   bufferProgress: number
-  activeQuality: string
   error: string | null
 }
 
 // Constants
-const QUALITIES: VideoQuality[] = [
-  { id: 'auto', label: 'Auto', src: '', width: 0, height: 0 },
-  { id: '2160p', label: '4K (2160p)', src: '', width: 3840, height: 2160 },
-  { id: '1440p', label: 'QHD (1440p)', src: '', width: 2560, height: 1440 },
-  { id: '1080p', label: 'FHD (1080p)', src: '', width: 1920, height: 1080 },
-  { id: '720p', label: 'HD (720p)', src: '', width: 1280, height: 720 },
-  { id: '480p', label: 'SD (480p)', src: '', width: 854, height: 480 }
-]
-
-const PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 3, 4]
+const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
 const MOBILE_BREAKPOINT = 768
-const TABLET_BREAKPOINT = 1024
-const LARGE_DESKTOP_BREAKPOINT = 1920
-const ULTRAWIDE_BREAKPOINT = 2560
 
 // Helper functions
 const formatTime = (seconds: number): string => {
-  if (isNaN(seconds)) return '0:00'
+  if (isNaN(seconds) || !isFinite(seconds)) return '0:00'
   
   const hrs = Math.floor(seconds / 3600)
   const mins = Math.floor((seconds % 3600) / 60)
@@ -138,47 +91,7 @@ const formatTime = (seconds: number): string => {
   return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
-const getMimeType = (url: string): string => {
-  const ext = url.split('.').pop()?.toLowerCase().split(/[?#]/)[0] || ''
-  
-  const mimeMap: Record<string, string> = {
-    'webm': 'video/webm',
-    'ogg': 'video/ogg',
-    'ogv': 'video/ogg',
-    'm3u8': 'application/x-mpegURL',
-    'mpd': 'application/dash+xml',
-    'mov': 'video/quicktime',
-    'avi': 'video/x-msvideo',
-    'mkv': 'video/x-matroska',
-    'flv': 'video/x-flv',
-    'wmv': 'video/x-ms-wmv'
-  }
-  
-  return mimeMap[ext] || 'video/mp4'
-}
-
-const optimizeUrl = (url: string, quality?: string): string => {
-  if (!url) return url
-  
-  try {
-    const urlObj = new URL(url)
-    
-    // Add optimization params
-    if (url.includes('amazonaws.com') || url.includes('cloudfront') || url.includes('cdn')) {
-      urlObj.searchParams.set('_', Date.now().toString().slice(-6))
-    }
-    
-    if (quality && quality !== 'auto') {
-      urlObj.searchParams.set('q', quality)
-    }
-    
-    return urlObj.toString()
-  } catch {
-    return url
-  }
-}
-
-// Browser detection functions
+// Browser detection
 const isIOS = (): boolean => {
   if (typeof navigator === 'undefined') return false
   return /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
@@ -191,127 +104,68 @@ const isSafari = (): boolean => {
 
 const isChromeIOS = (): boolean => {
   if (typeof navigator === 'undefined') return false
-  return /CriOS/.test(navigator.userAgent) || (/iPhone|iPad|iPod/.test(navigator.userAgent) && /Chrome/.test(navigator.userAgent))
-}
-
-// iOS specific video configuration
-const configureIOSVideo = (video: HTMLVideoElement, autoplay: boolean, muted: boolean): void => {
-  // iOS requires these attributes for proper playback
-  video.setAttribute('playsinline', 'true')
-  video.setAttribute('webkit-playsinline', 'true')
-  video.setAttribute('x5-video-player-type', 'h5')
-  video.setAttribute('x5-video-player-fullscreen', 'false')
-  video.setAttribute('x5-video-orientation', 'portrait')
-  
-  // iOS Chrome specific settings
-  if (isChromeIOS()) {
-    video.setAttribute('controls', 'false')
-    // Chrome on iOS has stricter requirements
-    video.defaultMuted = true
-    video.muted = true
-    video.playsInline = true
-  }
-  
-  // iOS Safari/Chrome both require muted autoplay
-  if (autoplay && isIOS()) {
-    video.muted = true
-    video.autoplay = true
-  }
+  return /CriOS/.test(navigator.userAgent)
 }
 
 // Custom hooks
-const useScreenInfo = (): ScreenInfo => {
-  const [screenInfo, setScreenInfo] = useState<ScreenInfo>({
+const useScreenInfo = () => {
+  const [screenInfo, setScreenInfo] = useState({
     isMobile: false,
-    isTablet: false,
-    isDesktop: false,
-    isLargeDesktop: false,
-    isUltrawide: false,
-    pixelRatio: 1,
-    width: 1920,
-    height: 1080,
     isIOS: false,
     isSafari: false,
-    isChromeIOS: false
+    isChromeIOS: false,
+    width: typeof window !== 'undefined' ? window.innerWidth : 1920
   })
 
   useEffect(() => {
     const updateScreenInfo = () => {
-      const width = window.innerWidth
-      const height = window.innerHeight
-      const pixelRatio = window.devicePixelRatio || 1
-      const userAgent = navigator.userAgent
-      
       setScreenInfo({
-        isMobile: width < MOBILE_BREAKPOINT,
-        isTablet: width >= MOBILE_BREAKPOINT && width < TABLET_BREAKPOINT,
-        isDesktop: width >= TABLET_BREAKPOINT && width < LARGE_DESKTOP_BREAKPOINT,
-        isLargeDesktop: width >= LARGE_DESKTOP_BREAKPOINT && width < ULTRAWIDE_BREAKPOINT,
-        isUltrawide: width >= ULTRAWIDE_BREAKPOINT,
-        pixelRatio,
-        width,
-        height,
+        isMobile: window.innerWidth < MOBILE_BREAKPOINT,
         isIOS: isIOS(),
         isSafari: isSafari(),
-        isChromeIOS: isChromeIOS()
+        isChromeIOS: isChromeIOS(),
+        width: window.innerWidth
       })
     }
 
     updateScreenInfo()
-    
-    const debouncedUpdate = debounce(updateScreenInfo, 100)
-    window.addEventListener('resize', debouncedUpdate)
-    window.addEventListener('orientationchange', debouncedUpdate)
-
-    return () => {
-      window.removeEventListener('resize', debouncedUpdate)
-      window.removeEventListener('orientationchange', debouncedUpdate)
-    }
+    window.addEventListener('resize', updateScreenInfo)
+    return () => window.removeEventListener('resize', updateScreenInfo)
   }, [])
 
   return screenInfo
 }
 
-const useFullscreen = (containerRef: React.RefObject<HTMLDivElement | null>, onFullscreenChange?: (isFullscreen: boolean) => void) => {
+const useFullscreen = (
+  containerRef: React.RefObject<HTMLDivElement | null>, 
+  onFullscreenChange?: (isFullscreen: boolean) => void
+) => {
   const [isFullscreen, setIsFullscreen] = useState(false)
 
   const enter = useCallback(async () => {
-    try {
-      const element = containerRef.current
-      if (!element) return
+    const element = containerRef.current
+    if (!element) return false
 
-      // iOS Safari requires webkit specific APIs
+    try {
       if ((element as any).webkitRequestFullscreen) {
         await (element as any).webkitRequestFullscreen()
-      } 
-      // iOS Chrome requires video element fullscreen
-      else if (isIOS() && element.querySelector('video')) {
-        const video = element.querySelector('video')
-        if ((video as any).webkitEnterFullscreen) {
-          await (video as any).webkitEnterFullscreen()
-        }
-      }
-      else if (element.requestFullscreen) {
+        return true
+      } else if (element.requestFullscreen) {
         await element.requestFullscreen()
-      } 
-      else if ((element as any).msRequestFullscreen) {
-        await (element as any).msRequestFullscreen()
+        return true
       }
     } catch (err) {
       console.warn('Fullscreen error:', err)
     }
+    return false
   }, [containerRef])
 
   const exit = useCallback(async () => {
     try {
       if ((document as any).webkitExitFullscreen) {
         await (document as any).webkitExitFullscreen()
-      } 
-      else if (document.exitFullscreen) {
+      } else if (document.exitFullscreen) {
         await document.exitFullscreen()
-      } 
-      else if ((document as any).msExitFullscreen) {
-        await (document as any).msExitFullscreen()
       }
     } catch (err) {
       console.warn('Fullscreen exit error:', err)
@@ -329,39 +183,31 @@ const useFullscreen = (containerRef: React.RefObject<HTMLDivElement | null>, onF
   useEffect(() => {
     const handleChange = () => {
       const isFs = !!(document.fullscreenElement || 
-                     (document as any).webkitFullscreenElement ||
-                     (document as any).webkitCurrentFullScreenElement ||
-                     (document as any).msFullscreenElement)
+                     (document as any).webkitFullscreenElement)
       setIsFullscreen(isFs)
       onFullscreenChange?.(isFs)
     }
 
     document.addEventListener('fullscreenchange', handleChange)
     document.addEventListener('webkitfullscreenchange', handleChange)
-    document.addEventListener('MSFullscreenChange', handleChange)
 
     return () => {
       document.removeEventListener('fullscreenchange', handleChange)
       document.removeEventListener('webkitfullscreenchange', handleChange)
-      document.removeEventListener('MSFullscreenChange', handleChange)
     }
   }, [onFullscreenChange])
 
-  return { 
-    isFullscreen, 
-    enter, 
-    exit, 
-    toggle
-  }
+  return { isFullscreen, enter, exit, toggle }
 }
 
 const usePictureInPicture = (videoRef: React.RefObject<HTMLVideoElement | null>) => {
   const [isPictureInPicture, setIsPictureInPicture] = useState(false)
 
   const enter = useCallback(async () => {
-    if (videoRef.current && document.pictureInPictureEnabled) {
+    const video = videoRef.current
+    if (video && 'pictureInPictureEnabled' in document && document.pictureInPictureEnabled) {
       try {
-        await videoRef.current.requestPictureInPicture()
+        await video.requestPictureInPicture()
       } catch (err) {
         console.warn('PiP error:', err)
       }
@@ -379,7 +225,11 @@ const usePictureInPicture = (videoRef: React.RefObject<HTMLVideoElement | null>)
   }, [])
 
   const toggle = useCallback(() => {
-    isPictureInPicture ? exit() : enter()
+    if (isPictureInPicture) {
+      exit()
+    } else {
+      enter()
+    }
   }, [isPictureInPicture, enter, exit])
 
   useEffect(() => {
@@ -395,19 +245,7 @@ const usePictureInPicture = (videoRef: React.RefObject<HTMLVideoElement | null>)
     }
   }, [])
 
-  return { isPictureInPicture, enter, exit, toggle }
-}
-
-const debounce = <T extends (...args: any[]) => any>(
-  func: T,
-  wait: number
-): ((...args: Parameters<T>) => void) => {
-  let timeout: NodeJS.Timeout | null = null
-  
-  return (...args: Parameters<T>) => {
-    if (timeout) clearTimeout(timeout)
-    timeout = setTimeout(() => func(...args), wait)
-  }
+  return { isPictureInPicture, toggle }
 }
 
 // Memoized Components
@@ -418,27 +256,25 @@ const PlayPauseButton = memo(({
 }: {
   isPlaying: boolean
   onClick: () => void
-  size?: 'sm' | 'md' | 'lg' | 'xl'
+  size?: 'sm' | 'md' | 'lg'
 }) => {
   const sizes = {
-    sm: 'h-10 w-10',
-    md: 'h-12 w-12',
-    lg: 'h-14 w-14',
-    xl: 'h-16 w-16'
+    sm: 'h-8 w-8',
+    md: 'h-10 w-10',
+    lg: 'h-12 w-12'
   }
   
   const iconSizes = {
-    sm: 'h-5 w-5',
-    md: 'h-6 w-6',
-    lg: 'h-7 w-7',
-    xl: 'h-8 w-8'
+    sm: 'h-4 w-4',
+    md: 'h-5 w-5',
+    lg: 'h-6 w-6'
   }
 
   return (
     <Button
       onClick={onClick}
       className={cn(
-        "bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 transition-all hover:scale-110 active:scale-95",
+        "bg-black/60 hover:bg-black/80 text-white rounded-full p-0 transition-all active:scale-95",
         sizes[size]
       )}
       aria-label={isPlaying ? "Pause" : "Play"}
@@ -459,34 +295,29 @@ const VolumeControl = memo(({
   isMuted,
   onVolumeChange,
   onToggleMute,
-  showSlider,
   size = 'md'
 }: {
   volume: number
   isMuted: boolean
   onVolumeChange: (value: number) => void
   onToggleMute: () => void
-  showSlider: boolean
-  size?: 'sm' | 'md' | 'lg' | 'xl'
+  size?: 'sm' | 'md' | 'lg'
 }) => {
   const sliderRef = useRef<HTMLDivElement>(null)
-  const [isDragging, setIsDragging] = useState(false)
   
   const sizes = {
-    sm: 'h-9 w-9',
-    md: 'h-10 w-10',
-    lg: 'h-12 w-12',
-    xl: 'h-14 w-14'
+    sm: 'h-8 w-8',
+    md: 'h-9 w-9',
+    lg: 'h-10 w-10'
   }
   
   const iconSizes = {
     sm: 'h-4 w-4',
-    md: 'h-5 w-5',
-    lg: 'h-6 w-6',
-    xl: 'h-7 w-7'
+    md: 'h-4 w-4',
+    lg: 'h-5 w-5'
   }
 
-  const handleSliderClick = useCallback((e: React.MouseEvent) => {
+  const handleClick = useCallback((e: React.MouseEvent) => {
     const rect = sliderRef.current?.getBoundingClientRect()
     if (!rect) return
     
@@ -494,32 +325,12 @@ const VolumeControl = memo(({
     onVolumeChange(percentage)
   }, [onVolumeChange])
 
-  const handleMouseDown = useCallback(() => {
-    setIsDragging(true)
-    
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging || !sliderRef.current) return
-      const rect = sliderRef.current.getBoundingClientRect()
-      const percentage = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-      onVolumeChange(percentage)
-    }
-    
-    const handleMouseUp = () => {
-      setIsDragging(false)
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-    }
-    
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-  }, [isDragging, onVolumeChange])
-
   return (
-    <div className="flex items-center gap-2 relative group/volume">
+    <div className="flex items-center gap-2 group/volume">
       <Button
         onClick={onToggleMute}
         className={cn(
-          "bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 transition-all hover:scale-110 active:scale-95",
+          "bg-black/60 hover:bg-black/80 text-white rounded-full p-0 transition-all active:scale-95",
           sizes[size]
         )}
         aria-label={isMuted ? "Unmute" : "Mute"}
@@ -531,21 +342,18 @@ const VolumeControl = memo(({
         )}
       </Button>
       
-      {showSlider && (
+      <div 
+        ref={sliderRef}
+        className="w-20 h-1.5 bg-white/30 rounded-full cursor-pointer relative hidden group-hover/volume:block"
+        onClick={handleClick}
+      >
         <div 
-          ref={sliderRef}
-          className="w-32 h-1.5 bg-white/30 rounded-full cursor-pointer relative"
-          onClick={handleSliderClick}
-          onMouseDown={handleMouseDown}
+          className="absolute top-0 left-0 h-full bg-gradient-to-r from-blue-500 to-cyan-400 rounded-full transition-all"
+          style={{ width: `${isMuted ? 0 : volume * 100}%` }}
         >
-          <div 
-            className="absolute top-0 left-0 h-full bg-gradient-to-r from-red-500 to-orange-400 rounded-full transition-all"
-            style={{ width: `${isMuted ? 0 : volume * 100}%` }}
-          >
-            <div className="absolute -right-1.5 -top-0.5 w-3 h-3 bg-white rounded-full shadow-lg hover:scale-125 transition-transform" />
-          </div>
+          <div className="absolute -right-1 -top-0.5 w-3 h-3 bg-white rounded-full shadow" />
         </div>
-      )}
+      </div>
     </div>
   )
 })
@@ -566,9 +374,6 @@ const ProgressBar = memo(({
   height?: 'sm' | 'md' | 'lg'
 }) => {
   const barRef = useRef<HTMLDivElement>(null)
-  const [isDragging, setIsDragging] = useState(false)
-  const [previewTime, setPreviewTime] = useState<number | null>(null)
-  const [previewPosition, setPreviewPosition] = useState(0)
 
   const heights = {
     sm: 'h-1',
@@ -578,85 +383,37 @@ const ProgressBar = memo(({
 
   const percentage = duration > 0 ? (currentTime / duration) * 100 : 0
 
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragging(true)
-    
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!barRef.current || !duration) return
-      const rect = barRef.current.getBoundingClientRect()
-      const percentage = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-      setPreviewTime(duration * percentage)
-      setPreviewPosition(e.clientX - rect.left)
-    }
-    
-    const handleMouseUp = (e: MouseEvent) => {
-      if (!barRef.current || !duration) return
-      const rect = barRef.current.getBoundingClientRect()
-      const percentage = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-      onSeek(percentage)
-      setIsDragging(false)
-      setPreviewTime(null)
-      
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-    }
-    
-    handleMouseMove(e.nativeEvent)
-    
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    if (!barRef.current || !duration) return
+    const rect = barRef.current.getBoundingClientRect()
+    const clickX = e.clientX - rect.left
+    const percentage = Math.max(0, Math.min(1, clickX / rect.width))
+    onSeek(percentage)
   }, [duration, onSeek])
 
   return (
-    <div className="relative mb-2">
-      {/* Preview tooltip */}
-      {previewTime !== null && (
-        <div 
-          className="absolute bottom-full mb-2 -translate-x-1/2 bg-black/90 backdrop-blur-sm rounded px-2 py-1 border border-white/20 shadow-lg z-50"
-          style={{ left: `${previewPosition}px` }}
-        >
-          <div className="text-white text-xs font-medium whitespace-nowrap">
-            {formatTime(previewTime)}
-          </div>
-        </div>
-      )}
-      
-      {/* Buffer progress */}
+    <div className="relative mb-1">
       <div 
         ref={barRef}
         className={cn(
-          "relative w-full rounded-full overflow-hidden cursor-pointer group",
+          "relative w-full rounded-full overflow-hidden cursor-pointer",
           heights[height]
         )}
-        onMouseDown={handleMouseDown}
+        onClick={handleClick}
       >
         <div className="absolute inset-0 bg-white/20" />
         <div 
-          className="absolute inset-0 bg-white/40 transition-all"
+          className="absolute inset-0 bg-white/40 transition-all duration-300"
           style={{ width: `${bufferProgress}%` }}
         />
         
-        {/* Playback progress */}
         <div 
-          className="absolute inset-0 bg-gradient-to-r from-red-500 via-orange-500 to-yellow-500 transition-all"
+          className="absolute inset-0 bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-150"
           style={{ width: `${percentage}%` }}
-        >
-          <div className="absolute -right-1.5 -top-0.5 w-3 h-3 bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity" />
-        </div>
-        
-        {/* Dragging indicator */}
-        {isDragging && (
-          <div 
-            className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-lg"
-            style={{ left: `${previewPosition}px` }}
-          />
-        )}
+        />
       </div>
       
-      {/* Time labels */}
-      <div className="flex justify-between text-xs text-white/70 mt-1">
+      <div className="flex justify-between text-xs text-white/70 mt-0.5">
         <span>{formatTime(currentTime)}</span>
         <span>{formatTime(duration)}</span>
       </div>
@@ -668,103 +425,44 @@ ProgressBar.displayName = 'ProgressBar'
 
 const SettingsMenu = memo(({
   playbackRate,
-  activeQuality,
-  qualities,
   playbackRates,
   onPlaybackRateChange,
-  onQualityChange,
   onClose
 }: {
   playbackRate: number
-  activeQuality: string
-  qualities: VideoQuality[]
   playbackRates: number[]
   onPlaybackRateChange: (rate: number) => void
-  onQualityChange: (quality: string) => void
   onClose: () => void
 }) => {
-  const [activeTab, setActiveTab] = useState<'speed' | 'quality' | 'more'>('speed')
-
   return (
-    <div className="absolute bottom-full right-0 mb-2 bg-black/95 backdrop-blur-md rounded-lg p-3 w-64 border border-white/20 shadow-xl z-50">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex gap-1">
-          <button
-            onClick={() => setActiveTab('speed')}
-            className={cn(
-              "px-2 py-1 text-xs rounded transition-colors",
-              activeTab === 'speed' 
-                ? 'bg-white/20 text-white' 
-                : 'text-white/70 hover:text-white hover:bg-white/10'
-            )}
-          >
-            Speed
-          </button>
-          <button
-            onClick={() => setActiveTab('quality')}
-            className={cn(
-              "px-2 py-1 text-xs rounded transition-colors",
-              activeTab === 'quality' 
-                ? 'bg-white/20 text-white' 
-                : 'text-white/70 hover:text-white hover:bg-white/10'
-            )}
-          >
-            Quality
-          </button>
-        </div>
+    <div className="absolute bottom-full right-0 mb-2 bg-black/95 backdrop-blur-md rounded-lg p-3 w-48 border border-white/20 shadow-xl z-50">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs text-white/70">Playback Speed</div>
         <button
           onClick={onClose}
           className="p-1 hover:bg-white/10 rounded transition-colors"
           aria-label="Close settings"
         >
-          <X className="w-4 h-4 text-white/70" />
+          <X className="w-3 h-3 text-white/70" />
         </button>
       </div>
 
-      {/* Content */}
-      <div className="max-h-60 overflow-y-auto">
-        {activeTab === 'speed' && (
-          <div className="space-y-2">
-            <div className="text-xs text-white/70 mb-1">Playback Speed</div>
-            {playbackRates.map(rate => (
-              <button
-                key={rate}
-                onClick={() => onPlaybackRateChange(rate)}
-                className={cn(
-                  "w-full text-left px-3 py-2 rounded text-sm transition-colors flex items-center justify-between",
-                  playbackRate === rate
-                    ? 'bg-gradient-to-r from-red-500/20 to-orange-400/20 text-white'
-                    : 'text-white/70 hover:text-white hover:bg-white/10'
-                )}
-              >
-                <span>{rate === 1 ? 'Normal' : `${rate}x`}</span>
-                {playbackRate === rate && <Check className="w-4 h-4" />}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {activeTab === 'quality' && (
-          <div className="space-y-2">
-            <div className="text-xs text-white/70 mb-1">Quality</div>
-            {qualities.map(quality => (
-              <button
-                key={quality.id}
-                onClick={() => onQualityChange(quality.id)}
-                className={cn(
-                  "w-full text-left px-3 py-2 rounded text-sm transition-colors flex items-center justify-between",
-                  activeQuality === quality.id
-                    ? 'bg-gradient-to-r from-red-500/20 to-orange-400/20 text-white'
-                    : 'text-white/70 hover:text-white hover:bg-white/10'
-                )}
-              >
-                <span>{quality.label}</span>
-                {activeQuality === quality.id && <Check className="w-4 h-4" />}
-              </button>
-            ))}
-          </div>
-        )}
+      <div className="space-y-1">
+        {playbackRates.map(rate => (
+          <button
+            key={rate}
+            onClick={() => onPlaybackRateChange(rate)}
+            className={cn(
+              "w-full text-left px-3 py-2 rounded text-sm transition-colors flex items-center justify-between",
+              playbackRate === rate
+                ? 'bg-gradient-to-r from-blue-500/20 to-cyan-400/20 text-white'
+                : 'text-white/70 hover:text-white hover:bg-white/10'
+            )}
+          >
+            <span>{rate === 1 ? 'Normal' : `${rate}x`}</span>
+            {playbackRate === rate && <Check className="w-4 h-4" />}
+          </button>
+        ))}
       </div>
     </div>
   )
@@ -772,18 +470,17 @@ const SettingsMenu = memo(({
 
 SettingsMenu.displayName = 'SettingsMenu'
 
-// Main Component
+// Main Component - SIMPLIFIED AND WORKING
 const UltraFastVideoPlayer = memo(({
   src,
   poster,
   className = '',
   autoplay = false,
-  preload = 'auto',
+  preload = 'metadata',
   loop = false,
   muted = false,
   playsInline = true,
   controls = true,
-  defaultQuality = 'auto',
   onReady,
   onError,
   onPlay,
@@ -793,13 +490,11 @@ const UltraFastVideoPlayer = memo(({
   onProgress,
   onFullscreenChange,
   onVolumeChange,
-  onQualityChange,
   onPlaybackRateChange,
 }: UltraFastVideoPlayerProps) => {
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const playerId = useId()
   
   // State
   const [state, setState] = useState<PlayerState>({
@@ -811,43 +506,25 @@ const UltraFastVideoPlayer = memo(({
     isMuted: muted,
     currentTime: 0,
     duration: 0,
-    volume: 1,
+    volume: 0.7,
     playbackRate: 1,
     bufferProgress: 0,
-    activeQuality: defaultQuality,
     error: null
   })
   
   const [showControls, setShowControls] = useState(true)
   const [showSettings, setShowSettings] = useState(false)
-  const [showVolumeSlider, setShowVolumeSlider] = useState(false)
-  const [aspectRatio, setAspectRatio] = useState(16/9)
-  const [retryCount, setRetryCount] = useState(0)
-  const [browserInfo, setBrowserInfo] = useState({
-    isIOS: false,
-    isChromeIOS: false,
-    isSafari: false
-  })
   
   // Hooks
   const screenInfo = useScreenInfo()
   const { isFullscreen: fsState, toggle: toggleFullscreen } = useFullscreen(containerRef, onFullscreenChange)
   const { isPictureInPicture: pipState, toggle: togglePictureInPicture } = usePictureInPicture(videoRef)
   
-  // Detect browser on mount
-  useEffect(() => {
-    setBrowserInfo({
-      isIOS: isIOS(),
-      isChromeIOS: isChromeIOS(),
-      isSafari: isSafari()
-    })
-  }, [])
-  
-  // Derived values
-  const optimizedSrc = useMemo(() => {
-    const srcString = Array.isArray(src) ? src[0] : src
-    return optimizeUrl(srcString, state.activeQuality)
-  }, [src, state.activeQuality])
+  // Get the video source
+  const videoSrc = useMemo(() => {
+    if (Array.isArray(src)) return src[0]
+    return src
+  }, [src])
   
   const uiConfig = useMemo(() => {
     if (screenInfo.isMobile) {
@@ -856,119 +533,63 @@ const UltraFastVideoPlayer = memo(({
         progressHeight: 'sm' as const,
         controlPadding: 'p-3',
         fontSize: 'text-xs',
-        centerPlaySize: 'h-16 w-16'
+        centerPlaySize: 'h-14 w-14'
       }
-    } else if (screenInfo.isTablet) {
+    } else {
       return {
         buttonSize: 'md' as const,
         progressHeight: 'md' as const,
         controlPadding: 'p-4',
         fontSize: 'text-sm',
-        centerPlaySize: 'h-20 w-20'
-      }
-    } else if (screenInfo.isLargeDesktop) {
-      return {
-        buttonSize: 'lg' as const,
-        progressHeight: 'lg' as const,
-        controlPadding: 'p-5',
-        fontSize: 'text-base',
-        centerPlaySize: 'h-24 w-24'
-      }
-    } else if (screenInfo.isUltrawide) {
-      return {
-        buttonSize: 'xl' as const,
-        progressHeight: 'lg' as const,
-        controlPadding: 'p-6',
-        fontSize: 'text-lg',
-        centerPlaySize: 'h-28 w-28'
-      }
-    } else {
-      return {
-        buttonSize: 'lg' as const,
-        progressHeight: 'md' as const,
-        controlPadding: 'p-5',
-        fontSize: 'text-sm',
-        centerPlaySize: 'h-22 w-22'
+        centerPlaySize: 'h-16 w-16'
       }
     }
-  }, [screenInfo])
+  }, [screenInfo.isMobile])
   
   // Auto-hide controls
   useEffect(() => {
-    if (!showControls || 
-        state.isLoading || 
-        state.error || 
-        !state.isPlaying || 
-        showSettings || 
-        state.isBuffering) return
+    if (!showControls || state.isLoading || state.error || !state.isPlaying || showSettings) return
     
     const timer = setTimeout(() => {
       setShowControls(false)
-    }, screenInfo.isMobile ? 1500 : 2000)
+    }, 2000)
     
     return () => clearTimeout(timer)
-  }, [showControls, state.isLoading, state.error, state.isPlaying, showSettings, state.isBuffering, screenInfo.isMobile])
+  }, [showControls, state.isLoading, state.error, state.isPlaying, showSettings])
   
-  // Sync state with hooks
+  // Sync state
   useEffect(() => {
-    setState(prev => ({ ...prev, isFullscreen: fsState, isPictureInPicture: pipState }))
+    setState(prev => ({ 
+      ...prev, 
+      isFullscreen: fsState, 
+      isPictureInPicture: pipState 
+    }))
   }, [fsState, pipState])
   
   // Event handlers
   const handlePlay = useCallback(async () => {
     try {
-      if (!videoRef.current) return
-      
       const video = videoRef.current
+      if (!video) return
       
-      // iOS Chrome requires specific handling
-      if (browserInfo.isIOS) {
-        // Always mute first for iOS Chrome compatibility
-        if (browserInfo.isChromeIOS) {
-          video.muted = true
-          video.defaultMuted = true
-        }
-        
-        // iOS requires user interaction, but we can try to play
-        const playPromise = video.play()
-        if (playPromise !== undefined) {
-          playPromise.then(() => {
-            setState(prev => ({ 
-              ...prev, 
-              isPlaying: true,
-              isBuffering: false,
-              error: null 
-            }))
-            onPlay?.()
-          }).catch(err => {
-            console.warn('iOS play failed:', err)
-            // Don't show error on iOS - just show play button
-            setState(prev => ({ 
-              ...prev, 
-              isPlaying: false,
-              error: null 
-            }))
-          })
-        }
-      } else {
-        await video.play()
-        setState(prev => ({ 
-          ...prev, 
-          isPlaying: true,
-          isBuffering: false,
-          error: null 
-        }))
-        onPlay?.()
-      }
-    } catch (err) {
-      console.warn('Play failed:', err)
+      await video.play()
+      
       setState(prev => ({ 
         ...prev, 
-        error: 'Tap to play video',
+        isPlaying: true,
+        isBuffering: false,
+        error: null 
+      }))
+      onPlay?.()
+    } catch (err) {
+      console.error('Play failed:', err)
+      setState(prev => ({ 
+        ...prev, 
+        error: 'Playback failed. Tap to retry.',
         isPlaying: false 
       }))
     }
-  }, [browserInfo.isIOS, browserInfo.isChromeIOS, onPlay])
+  }, [onPlay])
   
   const handlePause = useCallback(() => {
     videoRef.current?.pause()
@@ -985,310 +606,274 @@ const UltraFastVideoPlayer = memo(({
   }, [state.isPlaying, handlePause, handlePlay])
   
   const handleVolumeChange = useCallback((value: number) => {
-    if (!videoRef.current) return
+    const video = videoRef.current
+    if (!video) return
+    
     const newVolume = Math.max(0, Math.min(1, value))
-    videoRef.current.volume = newVolume
-    videoRef.current.muted = newVolume === 0
+    video.volume = newVolume
+    video.muted = newVolume === 0
+    
     setState(prev => ({ 
       ...prev, 
       volume: newVolume, 
       isMuted: newVolume === 0 
     }))
     onVolumeChange?.(newVolume)
-    setShowVolumeSlider(true)
   }, [onVolumeChange])
   
   const toggleMute = useCallback(() => {
-    if (!videoRef.current) return
-    videoRef.current.muted = !videoRef.current.muted
+    const video = videoRef.current
+    if (!video) return
+    
+    video.muted = !video.muted
     setState(prev => ({ 
       ...prev, 
-      isMuted: videoRef.current!.muted 
+      isMuted: video.muted 
     }))
-    setShowVolumeSlider(true)
   }, [])
   
   const handleSeek = useCallback((percentage: number) => {
-    if (!videoRef.current || !state.duration) return
+    const video = videoRef.current
+    if (!video || !state.duration) return
+    
     const time = state.duration * Math.max(0, Math.min(1, percentage))
-    videoRef.current.currentTime = time
+    video.currentTime = time
     setState(prev => ({ ...prev, currentTime: time }))
   }, [state.duration])
   
   const handleSkip = useCallback((seconds: number) => {
-    if (!videoRef.current) return
-    const newTime = Math.max(0, Math.min(state.duration, videoRef.current.currentTime + seconds))
-    videoRef.current.currentTime = newTime
+    const video = videoRef.current
+    if (!video) return
+    
+    const newTime = Math.max(0, Math.min(state.duration, video.currentTime + seconds))
+    video.currentTime = newTime
     setState(prev => ({ ...prev, currentTime: newTime }))
   }, [state.duration])
   
   const handlePlaybackRateChange = useCallback((rate: number) => {
-    if (!videoRef.current) return
-    const newRate = Math.max(0.125, Math.min(8, rate))
+    const video = videoRef.current
+    if (!video) return
     
-    // iOS doesn't support playbackRate change
-    if (browserInfo.isIOS) {
-      console.warn('iOS does not support playbackRate changes')
+    const newRate = Math.max(0.5, Math.min(2, rate))
+    
+    // iOS Chrome doesn't support playbackRate
+    if (screenInfo.isChromeIOS) {
+      console.warn('iOS Chrome does not support playbackRate changes')
       return
     }
     
-    videoRef.current.playbackRate = newRate
+    video.playbackRate = newRate
     setState(prev => ({ ...prev, playbackRate: newRate }))
     setShowSettings(false)
     onPlaybackRateChange?.(newRate)
-  }, [onPlaybackRateChange, browserInfo.isIOS])
-  
-  const handleQualityChange = useCallback((quality: string) => {
-    setState(prev => ({ ...prev, activeQuality: quality }))
-    setShowSettings(false)
-    onQualityChange?.(quality)
-  }, [onQualityChange])
+  }, [onPlaybackRateChange, screenInfo.isChromeIOS])
   
   const handleRetry = useCallback(() => {
+    const video = videoRef.current
+    if (!video) return
+    
     setState(prev => ({ 
       ...prev, 
       error: null, 
       isLoading: true 
     }))
-    setRetryCount(prev => prev + 1)
     
-    if (videoRef.current) {
-      videoRef.current.load()
-      // Don't auto-play on iOS retry
-      if (!browserInfo.isIOS) {
-        videoRef.current.play().catch(() => {})
-      }
-    }
-  }, [browserInfo.isIOS])
+    video.load()
+    video.play().catch(() => {})
+  }, [])
   
-  // iOS specific fullscreen handler
-  const handleIOSFullscreen = useCallback(() => {
-    if (!browserInfo.isIOS || !videoRef.current) return
-    
-    try {
-      const video = videoRef.current
-      
-      // iOS Safari webkitEnterFullscreen
-      if ((video as any).webkitEnterFullscreen) {
-        (video as any).webkitEnterFullscreen()
-        return true
-      }
-      
-      // iOS Chrome may use webkitRequestFullscreen on video
-      if ((video as any).webkitRequestFullscreen) {
-        (video as any).webkitRequestFullscreen()
-        return true
-      }
-      
-      return false
-    } catch (err) {
-      console.warn('iOS fullscreen error:', err)
-      return false
-    }
-  }, [browserInfo.isIOS])
-  
-  // Main fullscreen toggle handler
-  const handleFullscreenToggle = useCallback(async () => {
-    // iOS specific handling
-    if (browserInfo.isIOS) {
-      const iosSuccess = handleIOSFullscreen()
-      if (iosSuccess) return
-    }
-    
-    // Standard fullscreen handling
-    try {
-      await toggleFullscreen()
-    } catch (err) {
-      console.warn('Fullscreen toggle error:', err)
-    }
-  }, [browserInfo.isIOS, handleIOSFullscreen, toggleFullscreen])
-  
-  // Video event handlers
-  const handleVideoEvents = useCallback(() => {
+  // Setup video element
+  useEffect(() => {
     const video = videoRef.current
-    if (!video) return
+    if (!video || !videoSrc) return
     
-    const events = {
-      loadstart: () => setState(prev => ({ 
+    // Basic video setup
+    video.preload = preload
+    video.playsInline = playsInline
+    video.loop = loop
+    video.muted = state.isMuted
+    video.volume = state.volume
+    video.playbackRate = state.playbackRate
+    
+    // iOS specific
+    if (screenInfo.isIOS) {
+      video.setAttribute('webkit-playsinline', 'true')
+      video.setAttribute('playsinline', 'true')
+    }
+    
+    // Android specific
+    if (/Android/.test(navigator.userAgent)) {
+      video.setAttribute('x5-video-player-type', 'h5')
+      video.setAttribute('x5-video-orientation', 'portrait')
+    }
+    
+    // Event handlers
+    const handleLoadStart = () => {
+      setState(prev => ({ 
         ...prev, 
         isLoading: true, 
         error: null 
-      })),
-      loadedmetadata: () => {
-        const width = video.videoWidth || 1920
-        const height = video.videoHeight || 1080
-        setAspectRatio(width / height)
-        setState(prev => ({ 
-          ...prev, 
-          duration: video.duration || 0 
-        }))
-      },
-      canplay: () => {
-        setState(prev => ({ 
-          ...prev, 
-          isLoading: false, 
-          isBuffering: false 
-        }))
-        onReady?.()
-        // Auto-play only if not iOS or if iOS with muted autoplay
-        if (autoplay) {
-          if (browserInfo.isIOS) {
-            // iOS requires muted autoplay
-            video.muted = true
-            video.play().catch(() => {
-              // Silent fail for iOS autoplay restrictions
-              console.log('iOS autoplay prevented - requires user interaction')
-            })
-          } else {
-            video.play().catch(() => {})
-          }
+      }))
+    }
+    
+    const handleLoadedMetadata = () => {
+      setState(prev => ({ 
+        ...prev, 
+        duration: video.duration || 0 
+      }))
+    }
+    
+    const handleCanPlay = () => {
+      setState(prev => ({ 
+        ...prev, 
+        isLoading: false, 
+        isBuffering: false 
+      }))
+      onReady?.()
+      
+      // Auto-play if requested
+      if (autoplay) {
+        // iOS requires muted autoplay
+        if (screenInfo.isIOS) {
+          video.muted = true
+          video.play().catch(() => {
+            // Silent fail for iOS autoplay restrictions
+          })
+        } else {
+          video.play().catch(() => {})
         }
-      },
-      playing: () => {
-        setState(prev => ({ 
-          ...prev, 
-          isPlaying: true, 
-          isBuffering: false 
-        }))
-        onPlay?.()
-      },
-      pause: () => {
-        setState(prev => ({ ...prev, isPlaying: false }))
-        onPause?.()
-      },
-      timeupdate: () => {
-        setState(prev => ({ 
-          ...prev, 
-          currentTime: video.currentTime 
-        }))
-        onTimeUpdate?.(video.currentTime)
-      },
-      waiting: () => {
-        setState(prev => ({ ...prev, isBuffering: true }))
-      },
-      progress: () => {
-        if (video.buffered.length > 0 && state.duration > 0) {
-          const bufferedEnd = video.buffered.end(video.buffered.length - 1)
-          const bufferedPercent = (bufferedEnd / state.duration) * 100
-          setState(prev => ({ 
-            ...prev, 
-            bufferProgress: bufferedPercent 
-          }))
-          onProgress?.(bufferedPercent)
-        }
-      },
-      ended: () => {
-        setState(prev => ({ ...prev, isPlaying: false }))
-        onEnded?.()
-      },
-      error: () => {
-        const error = video.error
-        let errorMsg = 'Failed to load video'
-        
-        if (error) {
-          switch (error.code) {
-            case 1: errorMsg = 'Video loading aborted'; break
-            case 2: errorMsg = 'Network error'; break
-            case 3: errorMsg = 'Decoding error'; break
-            case 4: errorMsg = 'Unsupported format'; break
-          }
-        }
-        
-        setState(prev => ({ 
-          ...prev, 
-          error: errorMsg, 
-          isLoading: false 
-        }))
-        onError?.(errorMsg)
-      },
-      volumechange: () => {
-        setState(prev => ({ 
-          ...prev, 
-          volume: video.volume,
-          isMuted: video.muted 
-        }))
       }
+    }
+    
+    const handlePlaying = () => {
+      setState(prev => ({ 
+        ...prev, 
+        isPlaying: true, 
+        isBuffering: false 
+      }))
+      onPlay?.()
+    }
+    
+    const handlePauseEvent = () => {
+      setState(prev => ({ ...prev, isPlaying: false }))
+      onPause?.()
+    }
+    
+    const handleTimeUpdate = () => {
+      setState(prev => ({ 
+        ...prev, 
+        currentTime: video.currentTime 
+      }))
+      onTimeUpdate?.(video.currentTime)
+    }
+    
+    const handleWaiting = () => {
+      setState(prev => ({ ...prev, isBuffering: true }))
+    }
+    
+    const handleProgress = () => {
+      if (video.buffered.length > 0 && state.duration > 0) {
+        const bufferedEnd = video.buffered.end(video.buffered.length - 1)
+        const bufferedPercent = (bufferedEnd / state.duration) * 100
+        setState(prev => ({ 
+          ...prev, 
+          bufferProgress: bufferedPercent 
+        }))
+        onProgress?.(bufferedPercent)
+      }
+    }
+    
+    const handleEnded = () => {
+      setState(prev => ({ ...prev, isPlaying: false }))
+      onEnded?.()
+    }
+    
+    const handleErrorEvent = () => {
+      const error = video.error
+      let errorMsg = 'Failed to load video'
+      
+      if (error) {
+        switch (error.code) {
+          case 1: errorMsg = 'Video loading aborted'; break
+          case 2: errorMsg = 'Network error'; break
+          case 3: errorMsg = 'Decoding error'; break
+          case 4: errorMsg = 'Unsupported format'; break
+        }
+      }
+      
+      // Check for .mov format on non-Safari browsers
+      if (!screenInfo.isSafari && videoSrc.includes('.mov')) {
+        errorMsg = 'MOV format may require conversion for optimal playback'
+      }
+      
+      setState(prev => ({ 
+        ...prev, 
+        error: errorMsg, 
+        isLoading: false 
+      }))
+      onError?.(errorMsg)
+    }
+    
+    const handleVolumeChangeEvent = () => {
+      setState(prev => ({ 
+        ...prev, 
+        volume: video.volume,
+        isMuted: video.muted 
+      }))
     }
     
     // Add event listeners
-    Object.entries(events).forEach(([event, handler]) => {
-      video.addEventListener(event, handler as EventListener)
-    })
+    video.addEventListener('loadstart', handleLoadStart)
+    video.addEventListener('loadedmetadata', handleLoadedMetadata)
+    video.addEventListener('canplay', handleCanPlay)
+    video.addEventListener('playing', handlePlaying)
+    video.addEventListener('pause', handlePauseEvent)
+    video.addEventListener('timeupdate', handleTimeUpdate)
+    video.addEventListener('waiting', handleWaiting)
+    video.addEventListener('progress', handleProgress)
+    video.addEventListener('ended', handleEnded)
+    video.addEventListener('error', handleErrorEvent)
+    video.addEventListener('volumechange', handleVolumeChangeEvent)
     
-    return () => {
-      Object.entries(events).forEach(([event, handler]) => {
-        video.removeEventListener(event, handler as EventListener)
-      })
-    }
-  }, [
-    autoplay, onReady, onPlay, onPause, 
-    onTimeUpdate, onProgress, onEnded, onError, 
-    state.duration, browserInfo.isIOS
-  ])
-  
-  // Initialize video
-  useEffect(() => {
-    const video = videoRef.current
-    if (!video || !optimizedSrc) return
+    // Set source AFTER adding event listeners
+    video.src = videoSrc
+    if (poster) video.poster = poster
     
-    // Configure video based on browser
-    if (browserInfo.isIOS) {
-      configureIOSVideo(video, autoplay, muted)
-    } else {
-      video.setAttribute('playsinline', playsInline.toString())
-      video.setAttribute('preload', preload)
-      video.muted = muted
-      video.volume = state.volume
-    }
-    
-    // Set video source
-    video.src = optimizedSrc
-    video.poster = poster || ''
-    video.loop = loop
-    
-    // iOS doesn't support playbackRate
-    if (!browserInfo.isIOS) {
-      video.playbackRate = state.playbackRate
-    }
-    
-    // Set crossOrigin for external URLs
-    try {
-      const url = new URL(optimizedSrc)
-      if (url.hostname !== window.location.hostname) {
-        video.crossOrigin = 'anonymous'
-      }
-    } catch {}
-    
-    // Setup event listeners
-    const cleanup = handleVideoEvents()
-    
-    // Load video
+    // Load the video
     video.load()
     
-    // Auto-play handling (different for iOS)
-    if (autoplay && !browserInfo.isIOS) {
-      video.play().catch(() => {
-        console.log('Autoplay prevented on non-iOS browser')
-      })
-    }
-    
     return () => {
-      cleanup?.()
-      // Cleanup video source
+      // Cleanup
+      video.removeEventListener('loadstart', handleLoadStart)
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata)
+      video.removeEventListener('canplay', handleCanPlay)
+      video.removeEventListener('playing', handlePlaying)
+      video.removeEventListener('pause', handlePauseEvent)
+      video.removeEventListener('timeupdate', handleTimeUpdate)
+      video.removeEventListener('waiting', handleWaiting)
+      video.removeEventListener('progress', handleProgress)
+      video.removeEventListener('ended', handleEnded)
+      video.removeEventListener('error', handleErrorEvent)
+      video.removeEventListener('volumechange', handleVolumeChangeEvent)
+      
       video.pause()
       video.removeAttribute('src')
       video.load()
     }
   }, [
-    optimizedSrc, poster, preload, loop, muted, 
-    playsInline, autoplay, retryCount, handleVideoEvents, 
-    browserInfo.isIOS, state.volume, state.playbackRate
+    videoSrc, poster, preload, loop, autoplay, playsInline,
+    onReady, onPlay, onPause, onTimeUpdate, onProgress, 
+    onEnded, onError, screenInfo.isIOS, screenInfo.isSafari,
+    state.duration, state.isMuted, state.volume, state.playbackRate
   ])
   
-  // Keyboard shortcuts - disable for iOS mobile
+  // Handle user interaction
+  const handleInteraction = useCallback(() => {
+    setShowControls(true)
+  }, [])
+  
+  // Keyboard shortcuts
   useEffect(() => {
-    if (browserInfo.isIOS && screenInfo.isMobile) return
-    
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!containerRef.current?.contains(document.activeElement) && !state.isFullscreen) return
       
@@ -1304,7 +889,7 @@ const UltraFastVideoPlayer = memo(({
           break
         case 'f':
           e.preventDefault()
-          handleFullscreenToggle()
+          toggleFullscreen()
           break
         case 'arrowleft':
           e.preventDefault()
@@ -1314,61 +899,15 @@ const UltraFastVideoPlayer = memo(({
           e.preventDefault()
           handleSkip(5)
           break
-        case 'arrowup':
-          e.preventDefault()
-          handleVolumeChange(state.volume + 0.1)
-          break
-        case 'arrowdown':
-          e.preventDefault()
-          handleVolumeChange(state.volume - 0.1)
-          break
-        case '>':
-        case '.':
-          e.preventDefault()
-          handleSkip(10)
-          break
-        case '<':
-        case ',':
-          e.preventDefault()
-          handleSkip(-10)
-          break
-        case 't':
-          e.preventDefault()
-          togglePictureInPicture()
-          break
-        case '0':
-        case '1':
-        case '2':
-        case '3':
-        case '4':
-        case '5':
-        case '6':
-        case '7':
-        case '8':
-        case '9':
-          e.preventDefault()
-          handleSeek(parseInt(e.key) / 10)
-          break
       }
     }
     
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [
-    togglePlay, toggleMute, handleFullscreenToggle, handleSkip, 
-    handleVolumeChange, handleSeek, togglePictureInPicture, 
-    state.volume, state.isFullscreen, browserInfo.isIOS, 
-    screenInfo.isMobile
+    togglePlay, toggleMute, toggleFullscreen, 
+    handleSkip, state.isFullscreen
   ])
-  
-  // Handle user interaction
-  const handleInteraction = useCallback(() => {
-    setShowControls(true)
-    if (showVolumeSlider) {
-      const timer = setTimeout(() => setShowVolumeSlider(false), 2000)
-      return () => clearTimeout(timer)
-    }
-  }, [showVolumeSlider])
   
   // Error state
   if (state.error) {
@@ -1376,53 +915,34 @@ const UltraFastVideoPlayer = memo(({
       <div 
         ref={containerRef}
         className={cn(
-          "relative bg-black rounded-2xl overflow-hidden flex items-center justify-center",
-          state.isFullscreen && "fixed inset-0 z-50 rounded-none",
+          "relative bg-black rounded-xl overflow-hidden flex items-center justify-center",
+          state.isFullscreen && "fixed inset-0 z-50",
           className
         )}
-        style={!state.isFullscreen ? { aspectRatio } : undefined}
+        style={{ aspectRatio: 16/9 }}
       >
-        <div className="text-center p-6 max-w-md">
-          <div className="w-16 h-16 bg-gradient-to-br from-red-500/20 to-orange-500/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <AlertTriangle className="w-8 h-8 text-amber-400" />
+        <div className="text-center p-4 max-w-md">
+          <div className="w-12 h-12 bg-black/50 rounded-xl flex items-center justify-center mx-auto mb-3">
+            <AlertTriangle className="w-6 h-6 text-amber-400" />
           </div>
           
-          <h3 className="text-white text-lg font-bold mb-2">
-            {browserInfo.isIOS ? 'Tap to Play' : 'Playback Error'}
+          <h3 className="text-white text-base font-bold mb-2">
+            {state.error.includes('MOV') ? 'Format Notice' : 'Playback Error'}
           </h3>
           
-          <p className="text-white/70 text-sm mb-4">
-            {browserInfo.isIOS 
-              ? 'iOS requires a tap to play video content' 
-              : state.error}
+          <p className="text-white/70 text-xs mb-4">
+            {state.error}
           </p>
           
-          {!browserInfo.isIOS && (
+          <div className="space-y-2">
             <Button
               onClick={handleRetry}
-              className="bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white"
+              className="bg-blue-600 hover:bg-blue-700 text-white text-sm w-full"
             >
-              <RotateCw className="w-4 h-4 mr-2" />
-              Retry
+              <RotateCw className="w-3 h-3 mr-2" />
+              Retry Playback
             </Button>
-          )}
-          
-          {browserInfo.isIOS && (
-            <div className="space-y-3">
-              <Button
-                onClick={togglePlay}
-                className="bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white w-full"
-              >
-                <Play className="w-4 h-4 mr-2" />
-                Play Video
-              </Button>
-              <p className="text-white/50 text-xs">
-                {browserInfo.isChromeIOS 
-                  ? 'Chrome on iOS has specific video playback requirements' 
-                  : 'Safari on iOS may require user interaction'}
-              </p>
-            </div>
-          )}
+          </div>
         </div>
       </div>
     )
@@ -1432,25 +952,17 @@ const UltraFastVideoPlayer = memo(({
     <div 
       ref={containerRef}
       className={cn(
-        "relative bg-black rounded-2xl overflow-hidden group focus:outline-none",
-        state.isFullscreen && "fixed inset-0 z-50 rounded-none",
+        "relative bg-black rounded-xl overflow-hidden group focus:outline-none",
+        state.isFullscreen && "fixed inset-0 z-50",
         className
       )}
-      style={!state.isFullscreen ? { aspectRatio } : undefined}
+      style={{ aspectRatio: 16/9 }}
       onMouseMove={handleInteraction}
       onTouchStart={handleInteraction}
-      onClick={(e) => {
-        handleInteraction()
-        // On iOS, toggle play on container click
-        if (browserInfo.isIOS && e.target === containerRef.current) {
-          togglePlay()
-        }
-      }}
+      onClick={handleInteraction}
       tabIndex={0}
-      role="region"
-      aria-label="Video player"
     >
-      {/* Video element */}
+      {/* Video element - SIMPLE */}
       <video
         ref={videoRef}
         className="w-full h-full object-contain"
@@ -1458,45 +970,29 @@ const UltraFastVideoPlayer = memo(({
         controls={false}
         preload={preload}
         poster={poster}
-        aria-label="Video content"
         muted={state.isMuted}
-        autoPlay={autoplay && !browserInfo.isIOS}
-        webkit-playsinline="true"
-        x5-playsinline="true"
-        x5-video-player-type="h5"
+        autoPlay={autoplay}
       />
       
       {/* Loading overlay */}
       {state.isLoading && (
         <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center">
-          <Loader2 className="w-12 h-12 text-white animate-spin" />
-          {state.bufferProgress > 0 && (
-            <div className="w-48 mt-4">
-              <div className="w-full h-1.5 bg-white/20 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all"
-                  style={{ width: `${state.bufferProgress}%` }}
-                />
-              </div>
-            </div>
-          )}
+          <Loader2 className="w-8 h-8 text-white animate-spin" />
+          <div className="text-white text-xs mt-3">Loading video...</div>
         </div>
       )}
       
-      {/* Center play button - show on iOS when not playing */}
-      {((browserInfo.isIOS && !state.isPlaying) || (!state.isPlaying && !state.isLoading)) && (
+      {/* Center play button */}
+      {!state.isPlaying && !state.isLoading && !state.error && (
         <div 
           className="absolute inset-0 flex items-center justify-center"
           onClick={togglePlay}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => e.key === 'Enter' && togglePlay()}
         >
           <div className={cn(
-            "bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center transition-all hover:scale-110 cursor-pointer",
+            "bg-black/60 backdrop-blur-sm rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-95 cursor-pointer",
             uiConfig.centerPlaySize
           )}>
-            <Play className="w-8 h-8 text-white ml-1" />
+            <Play className="w-6 h-6 text-white ml-1" />
           </div>
         </div>
       )}
@@ -1511,7 +1007,7 @@ const UltraFastVideoPlayer = memo(({
           )}
         >
           {/* Top gradient */}
-          <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-black/80 to-transparent" />
+          <div className="absolute top-0 left-0 right-0 h-20 bg-gradient-to-b from-black/80 to-transparent" />
           
           {/* Bottom controls */}
           <div 
@@ -1541,34 +1037,34 @@ const UltraFastVideoPlayer = memo(({
                   <Button
                     onClick={() => handleSkip(-10)}
                     className={cn(
-                      "bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 transition-all hover:scale-110 active:scale-95",
-                      uiConfig.buttonSize === 'sm' ? 'h-9 w-9' :
-                      uiConfig.buttonSize === 'md' ? 'h-10 w-10' :
-                      uiConfig.buttonSize === 'lg' ? 'h-12 w-12' : 'h-14 w-14'
+                      "bg-black/60 hover:bg-black/80 text-white rounded-full p-0 transition-all active:scale-95",
+                      uiConfig.buttonSize === 'sm' ? 'h-8 w-8' :
+                      uiConfig.buttonSize === 'md' ? 'h-9 w-9' :
+                      'h-10 w-10'
                     )}
                     aria-label="Skip back 10 seconds"
                   >
                     <SkipBack className={
-                      uiConfig.buttonSize === 'sm' ? 'h-4 w-4' :
-                      uiConfig.buttonSize === 'md' ? 'h-5 w-5' :
-                      uiConfig.buttonSize === 'lg' ? 'h-6 w-6' : 'h-7 w-7'
+                      uiConfig.buttonSize === 'sm' ? 'h-3 w-3' :
+                      uiConfig.buttonSize === 'md' ? 'h-4 w-4' :
+                      'h-4 w-4'
                     } />
                   </Button>
                   
                   <Button
                     onClick={() => handleSkip(10)}
                     className={cn(
-                      "bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 transition-all hover:scale-110 active:scale-95",
-                      uiConfig.buttonSize === 'sm' ? 'h-9 w-9' :
-                      uiConfig.buttonSize === 'md' ? 'h-10 w-10' :
-                      uiConfig.buttonSize === 'lg' ? 'h-12 w-12' : 'h-14 w-14'
+                      "bg-black/60 hover:bg-black/80 text-white rounded-full p-0 transition-all active:scale-95",
+                      uiConfig.buttonSize === 'sm' ? 'h-8 w-8' :
+                      uiConfig.buttonSize === 'md' ? 'h-9 w-9' :
+                      'h-10 w-10'
                     )}
                     aria-label="Skip forward 10 seconds"
                   >
                     <SkipForward className={
-                      uiConfig.buttonSize === 'sm' ? 'h-4 w-4' :
-                      uiConfig.buttonSize === 'md' ? 'h-5 w-5' :
-                      uiConfig.buttonSize === 'lg' ? 'h-6 w-6' : 'h-7 w-7'
+                      uiConfig.buttonSize === 'sm' ? 'h-3 w-3' :
+                      uiConfig.buttonSize === 'md' ? 'h-4 w-4' :
+                      'h-4 w-4'
                     } />
                   </Button>
                   
@@ -1577,7 +1073,6 @@ const UltraFastVideoPlayer = memo(({
                     isMuted={state.isMuted}
                     onVolumeChange={handleVolumeChange}
                     onToggleMute={toggleMute}
-                    showSlider={showVolumeSlider && !screenInfo.isMobile}
                     size={uiConfig.buttonSize}
                   />
                   
@@ -1589,82 +1084,79 @@ const UltraFastVideoPlayer = memo(({
                 
                 {/* Right side */}
                 <div className="flex items-center gap-2">
-                  {/* Settings - disable playback rate for iOS */}
-                  {!browserInfo.isIOS && (
+                  {/* Settings */}
+                  {!screenInfo.isChromeIOS && (
                     <div className="relative">
                       <Button
                         onClick={() => setShowSettings(!showSettings)}
                         className={cn(
-                          "bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 transition-all hover:scale-110 active:scale-95",
-                          uiConfig.buttonSize === 'sm' ? 'h-9 w-9' :
-                          uiConfig.buttonSize === 'md' ? 'h-10 w-10' :
-                          uiConfig.buttonSize === 'lg' ? 'h-12 w-12' : 'h-14 w-14'
+                          "bg-black/60 hover:bg-black/80 text-white rounded-full p-0 transition-all active:scale-95",
+                          uiConfig.buttonSize === 'sm' ? 'h-8 w-8' :
+                          uiConfig.buttonSize === 'md' ? 'h-9 w-9' :
+                          'h-10 w-10'
                         )}
                         aria-label="Settings"
                       >
                         <Settings className={
-                          uiConfig.buttonSize === 'sm' ? 'h-4 w-4' :
-                          uiConfig.buttonSize === 'md' ? 'h-5 w-5' :
-                          uiConfig.buttonSize === 'lg' ? 'h-6 w-6' : 'h-7 w-7'
+                          uiConfig.buttonSize === 'sm' ? 'h-3 w-3' :
+                          uiConfig.buttonSize === 'md' ? 'h-4 w-4' :
+                          'h-4 w-4'
                         } />
                       </Button>
                       
                       {showSettings && (
                         <SettingsMenu
                           playbackRate={state.playbackRate}
-                          activeQuality={state.activeQuality}
-                          qualities={QUALITIES}
                           playbackRates={PLAYBACK_RATES}
                           onPlaybackRateChange={handlePlaybackRateChange}
-                          onQualityChange={handleQualityChange}
                           onClose={() => setShowSettings(false)}
                         />
                       )}
                     </div>
                   )}
                   
-                  {/* Picture in Picture - not supported on iOS Chrome */}
-                  {document.pictureInPictureEnabled && !browserInfo.isIOS && (
+                  {/* Picture in Picture */}
+                  {'pictureInPictureEnabled' in document && document.pictureInPictureEnabled && (
                     <Button
                       onClick={togglePictureInPicture}
                       className={cn(
-                        "bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 transition-all hover:scale-110 active:scale-95",
-                        uiConfig.buttonSize === 'sm' ? 'h-9 w-9' :
-                        uiConfig.buttonSize === 'md' ? 'h-10 w-10' :
-                        uiConfig.buttonSize === 'lg' ? 'h-12 w-12' : 'h-14 w-14'
+                        "bg-black/60 hover:bg-black/80 text-white rounded-full p-0 transition-all active:scale-95",
+                        uiConfig.buttonSize === 'sm' ? 'h-8 w-8' :
+                        uiConfig.buttonSize === 'md' ? 'h-9 w-9' :
+                        'h-10 w-10'
                       )}
                       aria-label="Picture in Picture"
                     >
                       <PictureInPicture className={
-                        uiConfig.buttonSize === 'sm' ? 'h-4 w-4' :
-                        uiConfig.buttonSize === 'md' ? 'h-5 w-5' :
-                        uiConfig.buttonSize === 'lg' ? 'h-6 w-6' : 'h-7 w-7'
+                        uiConfig.buttonSize === 'sm' ? 'h-3 w-3' :
+                        uiConfig.buttonSize === 'md' ? 'h-4 w-4' :
+                        'h-4 w-4'
                       } />
                     </Button>
                   )}
                   
                   {/* Fullscreen */}
                   <Button
-                    onClick={handleFullscreenToggle}
+                    onClick={toggleFullscreen}
                     className={cn(
-                      "bg-white/10 backdrop-blur-sm hover:bg-white/20 text-white rounded-full p-0 transition-all hover:scale-110 active:scale-95",
-                      uiConfig.buttonSize === 'sm' ? 'h-9 w-9' :
-                      uiConfig.buttonSize === 'md' ? 'h-10 w-10' :
-                      uiConfig.buttonSize === 'lg' ? 'h-12 w-12' : 'h-14 w-14'
+                      "bg-black/60 hover:bg-black/80 text-white rounded-full p-0 transition-all active:scale-95",
+                      uiConfig.buttonSize === 'sm' ? 'h-8 w-8' :
+                      uiConfig.buttonSize === 'md' ? 'h-9 w-9' :
+                      'h-10 w-10'
                     )}
                     aria-label={state.isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
                   >
                     {state.isFullscreen ? (
                       <Minimize2 className={
-                        uiConfig.buttonSize === 'sm' ? 'h-4 w-4' :
-                        uiConfig.buttonSize === 'md' ? 'h-5 w-5' :
-                        uiConfig.buttonSize === 'lg' ? 'h-6 w-6' : 'h-7 w-7'
+                        uiConfig.buttonSize === 'sm' ? 'h-3 w-3' :
+                        uiConfig.buttonSize === 'md' ? 'h-4 w-4' :
+                        'h-4 w-4'
                       } />
                     ) : (
                       <Expand className={
-                        uiConfig.buttonSize === 'sm' ? 'h-4 w-4' :
-                        uiConfig.buttonSize === 'md' ? 'h-5 w-5' :
-                        uiConfig.buttonSize === 'lg' ? 'h-6 w-6' : 'h-7 w-7'
+                        uiConfig.buttonSize === 'sm' ? 'h-3 w-3' :
+                        uiConfig.buttonSize === 'md' ? 'h-4 w-4' :
+                        'h-4 w-4'
                       } />
                     )}
                   </Button>
@@ -1675,39 +1167,21 @@ const UltraFastVideoPlayer = memo(({
         </div>
       )}
       
-      {/* Mobile volume slider */}
-      {screenInfo.isMobile && showVolumeSlider && (
-        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 bg-black/90 backdrop-blur-sm rounded-lg p-3 w-48">
-          <div className="flex items-center gap-3">
-            {state.isMuted || state.volume === 0 ? (
-              <VolumeX className="w-5 h-5 text-white/70" />
-            ) : (
-              <Volume2 className="w-5 h-5 text-white/70" />
-            )}
-            <div 
-              className="flex-1 h-2 bg-white/30 rounded-full cursor-pointer relative"
-              onClick={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect()
-                const percentage = (e.clientX - rect.left) / rect.width
-                handleVolumeChange(percentage)
-              }}
-            >
-              <div 
-                className="absolute top-0 left-0 h-full bg-gradient-to-r from-red-500 to-orange-400 rounded-full"
-                style={{ width: `${state.isMuted ? 0 : state.volume * 100}%` }}
-              >
-                <div className="absolute -right-1 -top-0.5 w-4 h-4 bg-white rounded-full shadow-lg" />
-              </div>
-            </div>
+      {/* Buffer indicator */}
+      {state.isBuffering && (
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-sm rounded-lg px-3 py-2">
+          <div className="flex items-center gap-2">
+            <Loader2 className="w-4 h-4 text-white animate-spin" />
+            <span className="text-white text-sm">Buffering...</span>
           </div>
         </div>
       )}
       
-      {/* iOS specific message */}
-      {browserInfo.isIOS && !state.isPlaying && !state.isLoading && !state.error && (
-        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-sm rounded-lg px-4 py-2 animate-pulse">
-          <p className="text-white text-sm text-center flex items-center justify-center gap-2">
-            <Play className="w-4 h-4" />
+      {/* Mobile tap hint */}
+      {screenInfo.isMobile && !state.isPlaying && !state.isLoading && !state.error && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-sm rounded-full px-3 py-1">
+          <p className="text-white text-xs flex items-center gap-1">
+            <Play className="w-3 h-3" />
             Tap to play
           </p>
         </div>
