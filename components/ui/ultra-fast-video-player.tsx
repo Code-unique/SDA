@@ -24,10 +24,7 @@ import {
   X,
   Expand,
   Minimize2,
-  PictureInPicture,
-  Clock,
-  Maximize,
-  Minimize
+  PictureInPicture
 } from 'lucide-react'
 import { Button } from './button'
 import { cn } from '@/lib/utils'
@@ -277,11 +274,11 @@ const usePictureInPicture = (videoRef: React.RefObject<HTMLVideoElement | null>)
     }
   }, [])
 
-  const toggle = useCallback((): void => {
+  const toggle = useCallback(async (): Promise<void> => {
     if (isPictureInPicture) {
-      exit()
+      await exit()
     } else {
-      enter()
+      await enter()
     }
   }, [isPictureInPicture, enter, exit])
 
@@ -289,14 +286,19 @@ const usePictureInPicture = (videoRef: React.RefObject<HTMLVideoElement | null>)
     const handleEnter = () => setIsPictureInPicture(true)
     const handleLeave = () => setIsPictureInPicture(false)
 
-    document.addEventListener('enterpictureinpicture', handleEnter)
-    document.addEventListener('leavepictureinpicture', handleLeave)
+    const video = videoRef.current
+    if (video) {
+      video.addEventListener('enterpictureinpicture', handleEnter)
+      video.addEventListener('leavepictureinpicture', handleLeave)
+    }
 
     return () => {
-      document.removeEventListener('enterpictureinpicture', handleEnter)
-      document.removeEventListener('leavepictureinpicture', handleLeave)
+      if (video) {
+        video.removeEventListener('enterpictureinpicture', handleEnter)
+        video.removeEventListener('leavepictureinpicture', handleLeave)
+      }
     }
-  }, [])
+  }, [videoRef])
 
   return { isPictureInPicture, toggle }
 }
@@ -585,7 +587,7 @@ const UltraFastVideoPlayer = memo(({
     isMuted: muted,
     currentTime: 0,
     duration: 0,
-    volume: 0.7,
+    volume: muted ? 0 : 0.7,
     playbackRate: 1,
     bufferProgress: 0,
     error: null
@@ -645,14 +647,21 @@ const UltraFastVideoPlayer = memo(({
     }
   }, [showControls, state.isLoading, state.error, state.isPlaying, showSettings])
   
-  // Sync state
+  // Sync fullscreen state
   useEffect(() => {
     setState(prev => ({ 
       ...prev, 
-      isFullscreen: fsState, 
-      isPictureInPicture: pipState 
+      isFullscreen: fsState
     }))
-  }, [fsState, pipState])
+  }, [fsState])
+  
+  // Sync PiP state
+  useEffect(() => {
+    setState(prev => ({
+      ...prev,
+      isPictureInPicture: pipState
+    }))
+  }, [pipState])
   
   // Event handlers
   const handlePlay = useCallback(async (): Promise<void> => {
@@ -681,7 +690,10 @@ const UltraFastVideoPlayer = memo(({
   }, [onPlay])
   
   const handlePause = useCallback((): void => {
-    videoRef.current?.pause()
+    const video = videoRef.current
+    if (!video) return
+    
+    video.pause()
     setState(prev => ({ ...prev, isPlaying: false }))
     onPause?.()
   }, [onPause])
@@ -714,12 +726,26 @@ const UltraFastVideoPlayer = memo(({
     const video = videoRef.current
     if (!video) return
     
-    video.muted = !video.muted
-    setState(prev => ({ 
-      ...prev, 
-      isMuted: video.muted 
-    }))
-  }, [])
+    const newMutedState = !video.muted
+    video.muted = newMutedState
+    
+    // If unmuting and volume is 0, set to default volume
+    if (newMutedState === false && video.volume === 0) {
+      video.volume = 0.7
+      setState(prev => ({ 
+        ...prev, 
+        isMuted: false,
+        volume: 0.7
+      }))
+    } else {
+      setState(prev => ({ 
+        ...prev, 
+        isMuted: newMutedState 
+      }))
+    }
+    
+    onVolumeChange?.(video.volume)
+  }, [onVolumeChange])
   
   const handleSeek = useCallback((percentage: number): void => {
     const video = videoRef.current
@@ -773,12 +799,16 @@ const UltraFastVideoPlayer = memo(({
     })
   }, [])
   
-  // Setup video element
+  // Setup video element - ONE TIME SETUP
   useEffect(() => {
     const video = videoRef.current
     if (!video || !videoSrc) return
     
-    // Basic video setup
+    // Set source and poster (only once)
+    video.src = videoSrc
+    if (poster) video.poster = poster
+    
+    // Basic video setup (only once)
     video.preload = preload
     video.playsInline = playsInline
     video.loop = loop
@@ -810,7 +840,8 @@ const UltraFastVideoPlayer = memo(({
     const handleLoadedMetadata = (): void => {
       setState(prev => ({ 
         ...prev, 
-        duration: video.duration || 0 
+        duration: video.duration || 0,
+        isLoading: false
       }))
     }
     
@@ -844,7 +875,6 @@ const UltraFastVideoPlayer = memo(({
         isPlaying: true, 
         isBuffering: false 
       }))
-      onPlay?.()
     }
     
     const handlePauseEvent = (): void => {
@@ -913,6 +943,7 @@ const UltraFastVideoPlayer = memo(({
         volume: video.volume,
         isMuted: video.muted 
       }))
+      onVolumeChange?.(video.volume)
     }
     
     // Add event listeners
@@ -927,10 +958,6 @@ const UltraFastVideoPlayer = memo(({
     video.addEventListener('ended', handleEnded)
     video.addEventListener('error', handleErrorEvent)
     video.addEventListener('volumechange', handleVolumeChangeEvent)
-    
-    // Set source AFTER adding event listeners
-    video.src = videoSrc
-    if (poster) video.poster = poster
     
     // Load the video
     video.load()
@@ -948,32 +975,18 @@ const UltraFastVideoPlayer = memo(({
       video.removeEventListener('ended', handleEnded)
       video.removeEventListener('error', handleErrorEvent)
       video.removeEventListener('volumechange', handleVolumeChangeEvent)
-      
-      video.pause()
-      video.removeAttribute('src')
-      video.load()
     }
-  }, [
-    videoSrc, 
-    poster, 
-    preload, 
-    loop, 
-    autoplay, 
-    playsInline,
-    onReady, 
-    onPlay, 
-    onPause, 
-    onTimeUpdate, 
-    onProgress, 
-    onEnded, 
-    onError, 
-    screenInfo.isIOS, 
-    screenInfo.isSafari,
-    state.duration, 
-    state.isMuted, 
-    state.volume, 
-    state.playbackRate
-  ])
+  }, [videoSrc]) // Only depend on videoSrc to prevent re-creation
+  
+  // Update video properties when state changes (without reloading)
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    
+    video.muted = state.isMuted
+    video.volume = state.volume
+    video.playbackRate = state.playbackRate
+  }, [state.isMuted, state.volume, state.playbackRate])
   
   // Handle user interaction
   const handleInteraction = useCallback((): void => {
@@ -1077,7 +1090,12 @@ const UltraFastVideoPlayer = memo(({
       }}
       onMouseMove={handleInteraction}
       onTouchStart={handleInteraction}
-      onClick={handleInteraction}
+      onClick={(e) => {
+        handleInteraction()
+        // Prevent play/pause when clicking on controls
+        if ((e.target as HTMLElement).closest('[data-controls]')) return
+        togglePlay()
+      }}
       tabIndex={0}
       role="region"
       aria-label="Video player"
@@ -1141,6 +1159,7 @@ const UltraFastVideoPlayer = memo(({
           
           {/* Bottom controls */}
           <div 
+            data-controls="true"
             className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 via-black/70 to-transparent pointer-events-auto"
             onClick={(e) => e.stopPropagation()}
           >
