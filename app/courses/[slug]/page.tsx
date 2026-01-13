@@ -131,7 +131,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-// FIXED: Import UltraFastVideoPlayer
 import UltraFastVideoPlayer from '@/components/ui/ultra-fast-video-player'
 import Image from 'next/image'
 
@@ -753,6 +752,72 @@ export default function CourseDetailPage() {
 
   const slug = params.slug as string
 
+  // Updated extractVideoAsset function
+  const extractVideoAsset = useCallback((videoData: any): S3Asset | undefined => {
+    if (!videoData) return undefined
+    
+    console.log('Video data structure:', videoData) // Debug log
+    
+    // Case 1: Direct S3Asset format
+    if (videoData.key || videoData.url) {
+      const url = videoData.url || videoData.secure_url || ''
+      console.log('Extracted video URL:', url) // Debug log
+      return {
+        key: videoData.key || '',
+        url: url,
+        size: videoData.size || videoData.bytes || 0,
+        type: videoData.type || 'video',
+        duration: videoData.duration,
+        width: videoData.width,
+        height: videoData.height
+      }
+    }
+    
+    // Case 2: videoSource.video format
+    if (videoData.video && (videoData.video.key || videoData.video.url)) {
+      const url = videoData.video.url || videoData.video.secure_url || ''
+      console.log('Extracted video URL from videoSource:', url) // Debug log
+      return {
+        key: videoData.video.key || '',
+        url: url,
+        size: videoData.video.size || videoData.video.bytes || 0,
+        type: videoData.video.type || 'video',
+        duration: videoData.video.duration,
+        width: videoData.video.width,
+        height: videoData.video.height
+      }
+    }
+    
+    // Case 3: Cloudinary format
+    if (videoData.public_id || videoData.secure_url) {
+      const url = videoData.secure_url || videoData.url || ''
+      console.log('Extracted Cloudinary video URL:', url) // Debug log
+      return {
+        key: videoData.public_id || '',
+        url: url,
+        size: videoData.bytes || videoData.size || 0,
+        type: videoData.resource_type || 'video',
+        duration: videoData.duration,
+        width: videoData.width,
+        height: videoData.height
+      }
+    }
+    
+    // Case 4: Simple string URL
+    if (typeof videoData === 'string') {
+      console.log('Simple video URL:', videoData) // Debug log
+      return {
+        key: 'video',
+        url: videoData,
+        size: 0,
+        type: 'video'
+      }
+    }
+    
+    console.warn('Could not extract video asset from:', videoData)
+    return undefined
+  }, [])
+
   // Fetch course data
   const fetchCourseData = useCallback(async () => {
     try {
@@ -770,52 +835,6 @@ export default function CourseDetailPage() {
 
       const data = await courseResponse.json()
       
-      // Helper function to extract video from different structures
-      const extractVideoAsset = (videoData: any): S3Asset | undefined => {
-        if (!videoData) return undefined
-        
-        // Case 1: Direct S3Asset format
-        if (videoData.key || videoData.url) {
-          return {
-            key: videoData.key || '',
-            url: videoData.url || videoData.secure_url || '',
-            size: videoData.size || videoData.bytes || 0,
-            type: videoData.type || 'video',
-            duration: videoData.duration,
-            width: videoData.width,
-            height: videoData.height
-          }
-        }
-        
-        // Case 2: videoSource.video format
-        if (videoData.video && (videoData.video.key || videoData.video.url)) {
-          return {
-            key: videoData.video.key || '',
-            url: videoData.video.url || videoData.video.secure_url || '',
-            size: videoData.video.size || videoData.video.bytes || 0,
-            type: videoData.video.type || 'video',
-            duration: videoData.video.duration,
-            width: videoData.video.width,
-            height: videoData.video.height
-          }
-        }
-        
-        // Case 3: Cloudinary format or other variations
-        if (videoData.public_id || videoData.secure_url) {
-          return {
-            key: videoData.public_id || '',
-            url: videoData.secure_url || videoData.url || '',
-            size: videoData.bytes || videoData.size || 0,
-            type: videoData.resource_type || 'video',
-            duration: videoData.duration,
-            width: videoData.width,
-            height: videoData.height
-          }
-        }
-        
-        return undefined
-      }
-
       const processedCourse: Course = {
         ...data,
         thumbnail: data.thumbnail ? {
@@ -899,7 +918,7 @@ export default function CourseDetailPage() {
     } finally {
       setLoading(false)
     }
-  }, [slug, toast])
+  }, [slug, toast, extractVideoAsset])
 
   const findLessonById = useCallback((courseData: Course, lessonId: string): Lesson | null => {
     for (const module of courseData.modules) {
@@ -1380,8 +1399,9 @@ export default function CourseDetailPage() {
         {/* Main Learning Content */}
         <div className="container px-4 py-6">
           <div className="space-y-6">
-            {/* Video Player - FIXED: Using UltraFastVideoPlayer */}
+            {/* Video Player - USING SIMPLIFIED UltraFastVideoPlayer */}
             <div className="bg-gradient-to-br from-slate-900 to-black rounded-2xl overflow-hidden shadow-2xl">
+              
               <UltraFastVideoPlayer
                 src={activeLesson.video?.url || ''}
                 poster={course?.thumbnail?.url}
@@ -1708,7 +1728,7 @@ export default function CourseDetailPage() {
         <div className="absolute inset-0 bg-gradient-to-r from-red-500/10 via-orange-500/10 to-amber-500/10" />
         
         <div className="relative px-4 pt-6 pb-8">
-          {/* Preview Video - FIXED: Using UltraFastVideoPlayer */}
+          {/* Preview Video - USING SIMPLIFIED UltraFastVideoPlayer */}
           {course.previewVideo && (
             <div className="mb-6">
               <div className="flex items-center gap-2 mb-3">
@@ -1717,6 +1737,7 @@ export default function CourseDetailPage() {
                 </div>
                 <h2 className="text-lg font-bold text-slate-900 dark:text-white">Course Preview</h2>
               </div>
+
               <UltraFastVideoPlayer
                 src={course.previewVideo.url}
                 poster={course.thumbnail?.url}
