@@ -54,7 +54,8 @@ export interface VideoPlayerProps {
   onFullscreenChange?: (isFullscreen: boolean) => void
   onVolumeChange?: (volume: number) => void
   onPlaybackRateChange?: (rate: number) => void
-  aspectRatio?: number
+  onAspectRatioChange?: (ratio: number) => void
+  aspectRatio?: 'auto' | number
   style?: CSSProperties
 }
 
@@ -71,11 +72,29 @@ interface PlayerState {
   playbackRate: number
   bufferProgress: number
   error: string | null
+  naturalAspectRatio: number
+  videoDimensions: { width: number; height: number }
+}
+
+// Safari-specific type extensions
+interface SafariVideoElement extends HTMLVideoElement {
+  webkitEnterFullscreen?: () => Promise<void>;
+  webkitRequestFullscreen?: () => Promise<void>;
+  webkitSupportsFullscreen?: boolean;
+  webkitDisplayingFullscreen?: boolean;
+  webkitExitFullscreen?: () => Promise<void>;
+}
+
+interface SafariDocument extends Document {
+  webkitExitFullscreen?: () => Promise<void>;
+  webkitFullscreenElement?: Element | null;
+  webkitFullscreenEnabled?: boolean;
 }
 
 const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2] as const
 const MOBILE_BREAKPOINT = 768
 const DEFAULT_ASPECT_RATIO = 16 / 9
+const ASPECT_RATIO_THRESHOLD = 0.1
 
 const formatTime = (seconds: number): string => {
   if (isNaN(seconds) || !isFinite(seconds)) return '0:00'
@@ -89,6 +108,14 @@ const formatTime = (seconds: number): string => {
   }
   return `${mins}:${secs.toString().padStart(2, '0')}`
 }
+
+// Browser detection
+const isSafari = typeof window !== 'undefined' && 
+  /^((?!chrome|android).)*safari/i.test(navigator.userAgent) &&
+  !/iPad|iPhone|iPod/.test(navigator.userAgent)
+
+const isIOS = typeof window !== 'undefined' && 
+  /iPad|iPhone|iPod/.test(navigator.userAgent)
 
 // ==================== MAIN COMPONENT ====================
 const UltraFastVideoPlayer = memo(({
@@ -111,7 +138,8 @@ const UltraFastVideoPlayer = memo(({
   onFullscreenChange,
   onVolumeChange,
   onPlaybackRateChange,
-  aspectRatio = DEFAULT_ASPECT_RATIO,
+  onAspectRatioChange,
+  aspectRatio = 'auto',
   style
 }: VideoPlayerProps) => {
   // Refs
@@ -122,6 +150,10 @@ const UltraFastVideoPlayer = memo(({
   const isMountedRef = useRef(true)
   const controlsTimerRef = useRef<NodeJS.Timeout | null>(null)
   const lastInteractionRef = useRef<number>(Date.now())
+  const resizeObserverRef = useRef<ResizeObserver | null>(null)
+  const rafRef = useRef<number | null>(null)
+  const videoDimensionsRef = useRef({ width: 0, height: 0 })
+  const smoothTimeUpdateRef = useRef<number>(0)
   
   // State
   const [state, setState] = useState<PlayerState>({
@@ -136,12 +168,17 @@ const UltraFastVideoPlayer = memo(({
     volume: muted ? 0 : 0.7,
     playbackRate: 1,
     bufferProgress: 0,
-    error: null
+    error: null,
+    naturalAspectRatio: DEFAULT_ASPECT_RATIO,
+    videoDimensions: { width: 0, height: 0 }
   })
   
   const [showControls, setShowControls] = useState(true)
   const [showSettings, setShowSettings] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
+  const [calculatedAspectRatio, setCalculatedAspectRatio] = useState<number>(
+    typeof aspectRatio === 'number' ? aspectRatio : DEFAULT_ASPECT_RATIO
+  )
 
   // Get the video source
   const videoSrc = useMemo(() => {
@@ -155,6 +192,39 @@ const UltraFastVideoPlayer = memo(({
     return videoSrc.includes('.m3u8') || videoSrc.includes('.m3u')
   }, [videoSrc])
 
+  // Calculate optimal aspect ratio
+  const calculateOptimalAspectRatio = useCallback(() => {
+    if (aspectRatio !== 'auto' && typeof aspectRatio === 'number') {
+      return aspectRatio
+    }
+    
+    const { naturalAspectRatio } = state
+    const containerWidth = containerRef.current?.clientWidth || window.innerWidth
+    const containerHeight = containerRef.current?.clientHeight || window.innerHeight
+    const containerRatio = containerWidth / containerHeight
+    
+    // For portrait videos (9:16), use container's full height
+    if (naturalAspectRatio < 1) {
+      // Portrait video
+      if (containerRatio > 1) {
+        // Landscape container
+        return Math.min(naturalAspectRatio, containerRatio)
+      } else {
+        // Portrait container
+        return naturalAspectRatio
+      }
+    } else {
+      // Landscape video
+      if (containerRatio < 1) {
+        // Portrait container
+        return Math.max(naturalAspectRatio, containerRatio)
+      } else {
+        // Landscape container
+        return naturalAspectRatio
+      }
+    }
+  }, [aspectRatio, state.naturalAspectRatio])
+
   // Initialize HLS if needed
   const initHLS = useCallback(() => {
     if (!videoRef.current || !isHLS || !Hls.isSupported()) return
@@ -162,9 +232,23 @@ const UltraFastVideoPlayer = memo(({
     const hls = new Hls({
       enableWorker: true,
       lowLatencyMode: true,
+      backBufferLength: 60,
+      maxBufferLength: 30,
+      maxMaxBufferLength: 60,
+      maxBufferSize: 60 * 1000 * 1000,
+      maxLoadingDelay: 4,
       manifestLoadingTimeOut: 10000,
       manifestLoadingMaxRetry: 3,
       manifestLoadingRetryDelay: 500,
+      levelLoadingTimeOut: 10000,
+      levelLoadingMaxRetry: 3,
+      levelLoadingRetryDelay: 500,
+      fragLoadingTimeOut: 20000,
+      fragLoadingMaxRetry: 6,
+      fragLoadingRetryDelay: 500,
+      startFragPrefetch: true,
+      testBandwidth: true,
+      progressive: true,
     })
     
     hlsRef.current = hls
@@ -197,6 +281,25 @@ const UltraFastVideoPlayer = memo(({
     
     return hls
   }, [videoSrc, isHLS])
+
+  // Smooth time update using requestAnimationFrame
+  const updateSmoothTime = useCallback(() => {
+    if (!isMountedRef.current || !state.isPlaying || !videoRef.current) return
+    
+    const video = videoRef.current
+    const currentTime = video.currentTime
+    
+    // Smooth interpolation
+    smoothTimeUpdateRef.current += (currentTime - smoothTimeUpdateRef.current) * 0.3
+    
+    setState(prev => ({ 
+      ...prev, 
+      currentTime: smoothTimeUpdateRef.current 
+    }))
+    onTimeUpdate?.(smoothTimeUpdateRef.current)
+    
+    rafRef.current = requestAnimationFrame(updateSmoothTime)
+  }, [state.isPlaying, onTimeUpdate])
 
   // Handle play function with better error handling
   const handlePlay = useCallback(async (): Promise<void> => {
@@ -234,10 +337,7 @@ const UltraFastVideoPlayer = memo(({
       }
       
       // For iOS Safari, we need to handle muted autoplay
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
-      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
-      
-      if (isIOS && isSafari && video.muted === false) {
+      if (isIOS && video.muted === false) {
         video.muted = true
         setState(prev => ({ ...prev, isMuted: true, volume: 0 }))
       }
@@ -255,6 +355,11 @@ const UltraFastVideoPlayer = memo(({
             error: null 
           }))
           onPlay?.()
+          
+          // Start smooth time update
+          smoothTimeUpdateRef.current = video.currentTime
+          if (rafRef.current) cancelAnimationFrame(rafRef.current)
+          rafRef.current = requestAnimationFrame(updateSmoothTime)
         }
       }
       
@@ -283,7 +388,7 @@ const UltraFastVideoPlayer = memo(({
         onError?.(errorMsg)
       }
     }
-  }, [onPlay, onError])
+  }, [onPlay, onError, updateSmoothTime])
 
   const handlePause = useCallback((): void => {
     const video = videoRef.current
@@ -294,6 +399,12 @@ const UltraFastVideoPlayer = memo(({
     if (isMountedRef.current) {
       setState(prev => ({ ...prev, isPlaying: false }))
       onPause?.()
+      
+      // Stop smooth time update
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
     }
   }, [onPause])
 
@@ -351,6 +462,7 @@ const UltraFastVideoPlayer = memo(({
     
     const time = state.duration * Math.max(0, Math.min(1, percentage))
     video.currentTime = time
+    smoothTimeUpdateRef.current = time
     
     if (isMountedRef.current) {
       setState(prev => ({ ...prev, currentTime: time }))
@@ -364,11 +476,63 @@ const UltraFastVideoPlayer = memo(({
     
     const newTime = Math.max(0, Math.min(state.duration, video.currentTime + seconds))
     video.currentTime = newTime
+    smoothTimeUpdateRef.current = newTime
     
     if (isMountedRef.current) {
       setState(prev => ({ ...prev, currentTime: newTime }))
     }
   }, [state.duration])
+
+  // Fullscreen handling with Safari support
+  const toggleFullscreen = useCallback(async (): Promise<void> => {
+    if (!isMountedRef.current || !containerRef.current) return
+    
+    try {
+      if (isSafari) {
+        // Safari uses webkit prefixed API with type assertions
+        const video = videoRef.current as SafariVideoElement | null
+        if (!video) return
+        
+        const safariDoc = document as SafariDocument
+        
+        if (!state.isFullscreen) {
+          // Enter fullscreen
+          if (video.webkitEnterFullscreen) {
+            await video.webkitEnterFullscreen()
+          } else if (video.webkitRequestFullscreen) {
+            await video.webkitRequestFullscreen()
+          } else if (video.requestFullscreen) {
+            await video.requestFullscreen()
+          }
+        } else {
+          // Exit fullscreen
+          if (safariDoc.webkitExitFullscreen) {
+            await safariDoc.webkitExitFullscreen()
+          } else if (document.exitFullscreen) {
+            await document.exitFullscreen()
+          }
+        }
+      } else {
+        // Standard fullscreen API
+        if (!document.fullscreenElement) {
+          await containerRef.current.requestFullscreen()
+        } else {
+          await document.exitFullscreen()
+        }
+      }
+    } catch (err) {
+      console.error('Fullscreen error:', err)
+    }
+  }, [state.isFullscreen])
+
+  // Check if element is in fullscreen mode
+  const checkFullscreenElement = useCallback((): Element | null => {
+    const doc = document as SafariDocument
+    return document.fullscreenElement || 
+           doc.webkitFullscreenElement || 
+           (document as any).mozFullScreenElement ||
+           (document as any).msFullscreenElement
+  }, [])
 
   // Setup video element
   useEffect(() => {
@@ -392,6 +556,12 @@ const UltraFastVideoPlayer = memo(({
     video.volume = muted ? 0 : 0.7
     video.poster = poster || ''
     
+    // Add CSS for smooth playback
+    video.style.transform = 'translateZ(0)'
+    video.style.backfaceVisibility = 'hidden'
+    video.style.perspective = '1000px'
+    video.style.willChange = 'transform'
+    
     // Event handlers
     const handleLoadStart = () => {
       if (isMountedRef.current) {
@@ -404,12 +574,25 @@ const UltraFastVideoPlayer = memo(({
     }
     
     const handleLoadedMetadata = () => {
+      if (!video.videoWidth || !video.videoHeight) return
+      
+      const naturalAspectRatio = video.videoWidth / video.videoHeight
+      const newAspectRatio = calculateOptimalAspectRatio()
+      
       if (isMountedRef.current) {
         setState(prev => ({ 
           ...prev, 
           duration: video.duration || 0,
-          isLoading: false
+          isLoading: false,
+          naturalAspectRatio,
+          videoDimensions: {
+            width: video.videoWidth,
+            height: video.videoHeight
+          }
         }))
+        
+        setCalculatedAspectRatio(newAspectRatio)
+        onAspectRatioChange?.(newAspectRatio)
       }
     }
     
@@ -431,6 +614,11 @@ const UltraFastVideoPlayer = memo(({
           isPlaying: true, 
           isBuffering: false 
         }))
+        
+        // Start smooth time update
+        if (rafRef.current) cancelAnimationFrame(rafRef.current)
+        smoothTimeUpdateRef.current = video.currentTime
+        rafRef.current = requestAnimationFrame(updateSmoothTime)
       }
     }
     
@@ -438,16 +626,22 @@ const UltraFastVideoPlayer = memo(({
       if (isMountedRef.current) {
         setState(prev => ({ ...prev, isPlaying: false }))
         onPause?.()
+        
+        // Stop smooth time update
+        if (rafRef.current) {
+          cancelAnimationFrame(rafRef.current)
+          rafRef.current = null
+        }
       }
     }
     
     const handleTimeUpdate = () => {
-      if (isMountedRef.current) {
+      // Using smoothTimeUpdateRef for smoother updates
+      if (!rafRef.current && isMountedRef.current) {
         setState(prev => ({ 
           ...prev, 
           currentTime: video.currentTime 
         }))
-        onTimeUpdate?.(video.currentTime)
       }
     }
     
@@ -475,6 +669,12 @@ const UltraFastVideoPlayer = memo(({
       if (isMountedRef.current) {
         setState(prev => ({ ...prev, isPlaying: false }))
         onEnded?.()
+        
+        // Stop smooth time update
+        if (rafRef.current) {
+          cancelAnimationFrame(rafRef.current)
+          rafRef.current = null
+        }
       }
     }
     
@@ -501,6 +701,25 @@ const UltraFastVideoPlayer = memo(({
       }
     }
     
+    const handleResize = () => {
+      if (video.videoWidth && video.videoHeight) {
+        const newAspectRatio = calculateOptimalAspectRatio()
+        if (Math.abs(newAspectRatio - calculatedAspectRatio) > ASPECT_RATIO_THRESHOLD) {
+          setCalculatedAspectRatio(newAspectRatio)
+          onAspectRatioChange?.(newAspectRatio)
+        }
+      }
+    }
+    
+    const handleFullscreenChange = () => {
+      const isFullscreen = !!checkFullscreenElement()
+      
+      if (isMountedRef.current) {
+        setState(prev => ({ ...prev, isFullscreen }))
+        onFullscreenChange?.(isFullscreen)
+      }
+    }
+    
     // Add event listeners
     video.addEventListener('loadstart', handleLoadStart)
     video.addEventListener('loadedmetadata', handleLoadedMetadata)
@@ -512,12 +731,25 @@ const UltraFastVideoPlayer = memo(({
     video.addEventListener('progress', handleProgress)
     video.addEventListener('ended', handleEnded)
     video.addEventListener('error', handleError)
+    video.addEventListener('resize', handleResize)
+    
+    // Fullscreen change handlers
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange)
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange)
     
     // Initialize HLS if needed, otherwise set src directly
     if (isHLS && Hls.isSupported()) {
       initHLS()
     } else {
       video.src = videoSrc
+    }
+    
+    // Set up resize observer
+    resizeObserverRef.current = new ResizeObserver(handleResize)
+    if (containerRef.current) {
+      resizeObserverRef.current.observe(containerRef.current)
     }
     
     // Handle autoplay
@@ -547,6 +779,7 @@ const UltraFastVideoPlayer = memo(({
         video.removeEventListener('progress', handleProgress)
         video.removeEventListener('ended', handleEnded)
         video.removeEventListener('error', handleError)
+        video.removeEventListener('resize', handleResize)
         
         // Pause and cleanup
         video.pause()
@@ -554,15 +787,30 @@ const UltraFastVideoPlayer = memo(({
         video.load()
       }
       
+      // Clean up fullscreen listeners
+      document.removeEventListener('fullscreenchange', handleFullscreenChange)
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange)
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange)
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange)
+      
       // Clean up HLS
       if (hlsRef.current) {
         hlsRef.current.destroy()
         hlsRef.current = null
       }
       
-      // Clean up timer
+      // Clean up resize observer
+      if (resizeObserverRef.current) {
+        resizeObserverRef.current.disconnect()
+      }
+      
+      // Clean up timer and RAF
       if (controlsTimerRef.current) {
         clearTimeout(controlsTimerRef.current)
+      }
+      
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current)
       }
     }
   }, [
@@ -580,7 +828,12 @@ const UltraFastVideoPlayer = memo(({
     onTimeUpdate,
     onProgress,
     onEnded,
-    onError
+    onError,
+    onFullscreenChange,
+    onAspectRatioChange,
+    calculateOptimalAspectRatio,
+    calculatedAspectRatio,
+    checkFullscreenElement
   ])
 
   // Handle screen size changes
@@ -620,6 +873,14 @@ const UltraFastVideoPlayer = memo(({
     }
   }, [showControls, state.isLoading, state.error, state.isPlaying, showSettings])
 
+  // Calculate video object fit based on aspect ratio
+  const getVideoObjectFit = useMemo(() => {
+    if (aspectRatio === 'auto') {
+      return state.naturalAspectRatio < 1 ? 'contain' : 'cover'
+    }
+    return typeof aspectRatio === 'number' && aspectRatio < 1 ? 'contain' : 'cover'
+  }, [aspectRatio, state.naturalAspectRatio])
+
   // Error state
   if (state.error) {
     return (
@@ -630,7 +891,7 @@ const UltraFastVideoPlayer = memo(({
           className
         )}
         style={{
-          aspectRatio,
+          aspectRatio: calculatedAspectRatio,
           ...style
         }}
       >
@@ -678,7 +939,7 @@ const UltraFastVideoPlayer = memo(({
         className
       )}
       style={{
-        aspectRatio,
+        aspectRatio: calculatedAspectRatio,
         ...style
       }}
       onMouseMove={() => {
@@ -697,7 +958,10 @@ const UltraFastVideoPlayer = memo(({
       {/* Video element */}
       <video
         ref={videoRef}
-        className="w-full h-full object-contain"
+        className={cn(
+          "w-full h-full",
+          getVideoObjectFit === 'contain' ? 'object-contain' : 'object-cover'
+        )}
         playsInline={playsInline}
         controls={false}
         preload={preload}
@@ -924,13 +1188,7 @@ const UltraFastVideoPlayer = memo(({
                   
                   {/* Fullscreen */}
                   <Button
-                    onClick={() => {
-                      if (!document.fullscreenElement) {
-                        containerRef.current?.requestFullscreen?.()
-                      } else {
-                        document.exitFullscreen?.()
-                      }
-                    }}
+                    onClick={toggleFullscreen}
                     className={cn(
                       "bg-black/70 hover:bg-black/90 text-white rounded-full p-0 transition-all active:scale-95",
                       isMobile ? "h-8 w-8" : "h-9 w-9"
