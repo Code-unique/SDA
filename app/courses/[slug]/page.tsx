@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback, memo } from 'react'
+import { useState, useEffect, useMemo, useCallback, memo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
@@ -90,7 +90,8 @@ import {
   Building,
   MapPin,
   Phone,
-  User
+  User,
+  Maximize2
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -246,14 +247,6 @@ interface UserProgress {
   completedAt?: Date
 }
 
-interface PaymentRequest {
-  _id: string
-  status: 'pending' | 'approved' | 'rejected' | 'cancelled'
-  createdAt: string
-  paymentMethod: string
-  transactionId?: string
-}
-
 // ==================== MEMOIZED COMPONENTS ====================
 const SectionHeader = memo(({ 
   title, 
@@ -379,89 +372,88 @@ const PaymentRequestModal = memo(({
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault()
-  
-  if (!formData.paymentMethod) {
-    toast({
-      title: "Error",
-      description: "Please select a payment method",
-      variant: "destructive"
-    })
-    return
-  }
-
-  setLoading(true)
-
-  try {
-    let proofUrl = ''
-    let proofFileName = ''
+    e.preventDefault()
     
-    if (formData.paymentProof) {
-      const formDataObj = new FormData()
-      formDataObj.append('file', formData.paymentProof)
-      formDataObj.append('courseId', course._id)
-      
-      const uploadResponse = await fetch('/api/upload/payment-proof', {
-        method: 'POST',
-        body: formDataObj
-      })
-      
-      if (!uploadResponse.ok) {
-        const errorText = await uploadResponse.text()
-        throw new Error('Failed to upload payment proof')
-      }
-      
-      const uploadData = await uploadResponse.json()
-      proofUrl = uploadData.fileUrl
-      proofFileName = uploadData.fileName || formData.paymentProof.name
-    }
-
-    const response = await fetch(`/api/courses/${course._id}/payment/initiate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      // FIX: Changed transitionId to transactionId
-      body: JSON.stringify({
-        paymentMethod: formData.paymentMethod,
-        transactionId: formData.transactionId, // FIXED HERE
-        paymentProof: proofUrl ? {
-          url: proofUrl,
-          fileName: proofFileName || formData.paymentProof?.name || 'payment_proof'
-        } : undefined,
-        notes: formData.notes
-      })
-    })
-
-    const data = await response.json()
-
-    if (response.ok) {
-      toast({
-        title: "Success",
-        description: "Payment request submitted successfully!",
-      })
-      toast({
-        title: "Info",
-        description: "Admin will review your request within 24-48 hours. You'll be notified via email.",
-      })
-      onSuccess(data.requestId || data._id)
-      onClose()
-    } else {
+    if (!formData.paymentMethod) {
       toast({
         title: "Error",
-        description: data.error || 'Failed to submit payment request',
+        description: "Please select a payment method",
         variant: "destructive"
       })
+      return
     }
-  } catch (error) {
-    console.error('Error submitting payment request:', error)
-    toast({
-      title: "Error",
-      description: "An error occurred. Please try again.",
-      variant: "destructive"
-    })
-  } finally {
-    setLoading(false)
+
+    setLoading(true)
+
+    try {
+      let proofUrl = ''
+      let proofFileName = ''
+      
+      if (formData.paymentProof) {
+        const formDataObj = new FormData()
+        formDataObj.append('file', formData.paymentProof)
+        formDataObj.append('courseId', course._id)
+        
+        const uploadResponse = await fetch('/api/upload/payment-proof', {
+          method: 'POST',
+          body: formDataObj
+        })
+        
+        if (!uploadResponse.ok) {
+          const errorText = await uploadResponse.text()
+          throw new Error('Failed to upload payment proof')
+        }
+        
+        const uploadData = await uploadResponse.json()
+        proofUrl = uploadData.fileUrl
+        proofFileName = uploadData.fileName || formData.paymentProof.name
+      }
+
+      const response = await fetch(`/api/courses/${course._id}/payment/initiate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paymentMethod: formData.paymentMethod,
+          transactionId: formData.transactionId,
+          paymentProof: proofUrl ? {
+            url: proofUrl,
+            fileName: proofFileName || formData.paymentProof?.name || 'payment_proof'
+          } : undefined,
+          notes: formData.notes
+        })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        toast({
+          title: "Success",
+          description: "Payment request submitted successfully!",
+        })
+        toast({
+          title: "Info",
+          description: "Admin will review your request within 24-48 hours. You'll be notified via email.",
+        })
+        onSuccess(data.requestId || data._id)
+        onClose()
+      } else {
+        toast({
+          title: "Error",
+          description: data.error || 'Failed to submit payment request',
+          variant: "destructive"
+        })
+      }
+    } catch (error) {
+      console.error('Error submitting payment request:', error)
+      toast({
+        title: "Error",
+        description: "An error occurred. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setLoading(false)
+    }
   }
-}
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -749,19 +741,32 @@ export default function CourseDetailPage() {
   const [isLiked, setIsLiked] = useState(false)
   const [showShareMenu, setShowShareMenu] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [isIOS, setIsIOS] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
+  const videoContainerRef = useRef<HTMLDivElement>(null)
 
   const slug = params.slug as string
+
+  // Detect iOS and mobile
+  useEffect(() => {
+    const checkDevice = () => {
+      const userAgent = navigator.userAgent
+      setIsIOS(/iPad|iPhone|iPod/.test(userAgent) && !(window as any).MSStream)
+      setIsMobile(window.innerWidth < 768)
+    }
+    
+    checkDevice()
+    window.addEventListener('resize', checkDevice)
+    return () => window.removeEventListener('resize', checkDevice)
+  }, [])
 
   // Updated extractVideoAsset function
   const extractVideoAsset = useCallback((videoData: any): S3Asset | undefined => {
     if (!videoData) return undefined
     
-    console.log('Video data structure:', videoData) // Debug log
-    
     // Case 1: Direct S3Asset format
     if (videoData.key || videoData.url) {
       const url = videoData.url || videoData.secure_url || ''
-      console.log('Extracted video URL:', url) // Debug log
       return {
         key: videoData.key || '',
         url: url,
@@ -776,7 +781,6 @@ export default function CourseDetailPage() {
     // Case 2: videoSource.video format
     if (videoData.video && (videoData.video.key || videoData.video.url)) {
       const url = videoData.video.url || videoData.video.secure_url || ''
-      console.log('Extracted video URL from videoSource:', url) // Debug log
       return {
         key: videoData.video.key || '',
         url: url,
@@ -791,7 +795,6 @@ export default function CourseDetailPage() {
     // Case 3: Cloudinary format
     if (videoData.public_id || videoData.secure_url) {
       const url = videoData.secure_url || videoData.url || ''
-      console.log('Extracted Cloudinary video URL:', url) // Debug log
       return {
         key: videoData.public_id || '',
         url: url,
@@ -805,7 +808,6 @@ export default function CourseDetailPage() {
     
     // Case 4: Simple string URL
     if (typeof videoData === 'string') {
-      console.log('Simple video URL:', videoData) // Debug log
       return {
         key: 'video',
         url: videoData,
@@ -814,7 +816,6 @@ export default function CourseDetailPage() {
       }
     }
     
-    console.warn('Could not extract video asset from:', videoData)
     return undefined
   }, [])
 
@@ -856,9 +857,7 @@ export default function CourseDetailPage() {
           chapters: module.chapters?.map((chapter: any) => ({
             ...chapter,
             lessons: chapter.lessons?.map((lesson: any) => {
-              // Extract video from lesson - try multiple possible structures
               const videoAsset = extractVideoAsset(lesson.videoSource || lesson.video)
-              
               return {
                 ...lesson,
                 video: videoAsset
@@ -1399,14 +1398,28 @@ export default function CourseDetailPage() {
         {/* Main Learning Content */}
         <div className="container px-4 py-6">
           <div className="space-y-6">
-            {/* Video Player - USING SIMPLIFIED UltraFastVideoPlayer */}
-            <div className="bg-gradient-to-br from-slate-900 to-black rounded-2xl overflow-hidden shadow-2xl">
-              
+            {/* Video Player - USING FIXED UltraFastVideoPlayer */}
+            <div 
+              ref={videoContainerRef}
+              className="bg-gradient-to-br from-slate-900 to-black rounded-2xl overflow-hidden shadow-2xl"
+            >
               <UltraFastVideoPlayer
                 src={activeLesson.video?.url || ''}
                 poster={course?.thumbnail?.url}
                 autoplay={true}
+                playsInline={true}
+                muted={isIOS} // iOS requires muted autoplay
                 className="w-full aspect-video"
+                onError={(error) => {
+                  console.error('Video player error:', error)
+                  toast({
+                    title: 'Playback Error',
+                    description: isIOS 
+                      ? 'iOS requires MP4 format with H.264 codec. Try opening in Safari.'
+                      : 'Failed to play video. Please try again.',
+                    variant: 'destructive'
+                  })
+                }}
               />
             </div>
 
@@ -1728,7 +1741,7 @@ export default function CourseDetailPage() {
         <div className="absolute inset-0 bg-gradient-to-r from-red-500/10 via-orange-500/10 to-amber-500/10" />
         
         <div className="relative px-4 pt-6 pb-8">
-          {/* Preview Video - USING SIMPLIFIED UltraFastVideoPlayer */}
+          {/* Preview Video - USING FIXED UltraFastVideoPlayer */}
           {course.previewVideo && (
             <div className="mb-6">
               <div className="flex items-center gap-2 mb-3">
@@ -1738,11 +1751,15 @@ export default function CourseDetailPage() {
                 <h2 className="text-lg font-bold text-slate-900 dark:text-white">Course Preview</h2>
               </div>
 
-              <UltraFastVideoPlayer
-                src={course.previewVideo.url}
-                poster={course.thumbnail?.url}
-                className="rounded-2xl overflow-hidden shadow-2xl"
-              />
+              <div className="rounded-2xl overflow-hidden shadow-2xl">
+                <UltraFastVideoPlayer
+                  src={course.previewVideo.url}
+                  poster={course.thumbnail?.url}
+                  className="w-full aspect-video"
+                  playsInline={true}
+                  muted={isIOS} // iOS requires muted preview
+                />
+              </div>
             </div>
           )}
 
