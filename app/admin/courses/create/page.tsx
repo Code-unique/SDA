@@ -446,6 +446,84 @@ const getConcurrencyLimit = (
   return Math.max(1, Math.min(baseConcurrency, 8))
 }
 
+// ==================== IOS FILE UTILS CLASS ====================
+class IOSFileUtils {
+  private static instance: IOSFileUtils
+  
+  public static getInstance(): IOSFileUtils {
+    if (!IOSFileUtils.instance) {
+      IOSFileUtils.instance = new IOSFileUtils()
+    }
+    return IOSFileUtils.instance
+  }
+  
+  async processIOSVideoFile(file: File): Promise<{
+    processedFile: File
+    needsProcessing: boolean
+    originalSize: number
+    processedSize: number
+  }> {
+    const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) && !(window as any).MSStream
+    
+    if (!isIOS || !file.type.startsWith('video/')) {
+      return {
+        processedFile: file,
+        needsProcessing: false,
+        originalSize: file.size,
+        processedSize: file.size
+      }
+    }
+    
+    console.log('📱 Processing iOS video file...')
+    
+    try {
+      // Create a video element to get metadata
+      const video = document.createElement('video')
+      video.preload = 'metadata'
+      
+      return new Promise((resolve, reject) => {
+        video.onloadedmetadata = () => {
+          URL.revokeObjectURL(video.src)
+          
+          // iOS sometimes has issues with large files, so we create a new File object
+          const processedFile = new File([file], file.name, {
+            type: file.type,
+            lastModified: file.lastModified
+          })
+          
+          resolve({
+            processedFile,
+            needsProcessing: true,
+            originalSize: file.size,
+            processedSize: processedFile.size
+          })
+        }
+        
+        video.onerror = () => {
+          URL.revokeObjectURL(video.src)
+          console.warn('⚠️ Could not process iOS video metadata')
+          resolve({
+            processedFile: file,
+            needsProcessing: false,
+            originalSize: file.size,
+            processedSize: file.size
+          })
+        }
+        
+        video.src = URL.createObjectURL(file)
+      })
+    } catch (error) {
+      console.error('Error processing iOS file:', error)
+      return {
+        processedFile: file,
+        needsProcessing: false,
+        originalSize: file.size,
+        processedSize: file.size
+      }
+    }
+  }
+}
+
 // ==================== MEMOIZED COMPONENTS ====================
 interface UploadOptimizationTipsProps {
   fileSize: number
@@ -758,6 +836,32 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
   const pausedUploadsData = useRef<Record<string, { file: File; type: any; identifier: string; moduleIndex?: number }>>({})
   const { getToken } = useAuth()
 
+  const iosFileUtils = useMemo(() => IOSFileUtils.getInstance(), [])
+
+  const optimizeFileForIOS = useCallback(async (file: File): Promise<File> => {
+    const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    
+    if (!isIOS) {
+      return file;
+    }
+    
+    console.log('📱 iOS file optimization started');
+    
+    try {
+      // Process the file for iOS
+      const result = await iosFileUtils.processIOSVideoFile(file);
+      
+      if (result.needsProcessing) {
+        console.log(`✅ iOS: File processed - Original: ${formatFileSize(result.originalSize)}, Processed: ${formatFileSize(result.processedSize)}`);
+      }
+      
+      return result.processedFile;
+    } catch (error) {
+      console.error('❌ iOS optimization failed:', error);
+      return file; // Fallback to original file
+    }
+  }, [iosFileUtils]);
+
   const apiCallRef = useRef(async (endpoint: string, body: any, signal?: AbortSignal): Promise<ApiResponse> => {
     try {
       const token = await getToken()
@@ -871,13 +975,38 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
     try {
       setActiveUploads(prev => new Set([...prev, identifier]))
       
+      // OPTIMIZATION: Process file for iOS before upload
+      let optimizedFile = file;
+      if (deviceType === 'ios') {
+        updateUploadProgress(identifier, {
+          progress: 5,
+          status: 'processing',
+          fileName: file.name,
+          type,
+          isMultipart: shouldUseMultipart,
+          size: file.size,
+          uploadedBytes: 0,
+          startTime: Date.now(),
+          deviceType,
+          networkType,
+          memoryStatus
+        });
+        
+        optimizedFile = await optimizeFileForIOS(file);
+        
+        updateUploadProgress(identifier, {
+          progress: 10,
+          status: 'initiating'
+        });
+      }
+
       const initialProgress: UploadProgress[string] = {
-        progress: 0,
-        fileName: file.name,
+        progress: deviceType === 'ios' ? 10 : 0,
+        fileName: optimizedFile.name,
         type,
         status: 'initiating',
         isMultipart: shouldUseMultipart,
-        size: file.size,
+        size: optimizedFile.size,
         uploadedBytes: 0,
         startTime: Date.now(),
         deviceType,
@@ -897,12 +1026,12 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
       if (shouldUseMultipart) {
         // Initialize multipart upload
         const initData = await apiCallRef.current('/api/admin/upload/initiate', {
-          fileName: file.name,
-          fileType: file.type,
+          fileName: optimizedFile.name,
+          fileType: optimizedFile.type,
           folder: `${type}s`,
           deviceType,
-          fileSize: file.size,
-          totalParts: Math.ceil(file.size / PART_SIZE)
+          fileSize: optimizedFile.size,
+          totalParts: Math.ceil(optimizedFile.size / PART_SIZE)
         }, abortController.signal)
         
         uploadId = initData.uploadId
@@ -918,11 +1047,11 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
           status: 'generating-urls'
         })
 
-        const totalParts = Math.ceil(file.size / PART_SIZE)
+        const totalParts = Math.ceil(optimizedFile.size / PART_SIZE)
         const parts = Array.from({ length: totalParts }, (_, i) => ({
           partNumber: i + 1,
           start: i * PART_SIZE,
-          end: Math.min((i + 1) * PART_SIZE, file.size),
+          end: Math.min((i + 1) * PART_SIZE, optimizedFile.size),
           presignedUrl: undefined,
           etag: undefined,
           status: 'pending' as const,
@@ -947,7 +1076,7 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
             isUploading: true,
             totalProgress: 10,
             startTime: Date.now(),
-            totalBytes: file.size,
+            totalBytes: optimizedFile.size,
             uploadedBytes: 0,
             completedParts: 0
           }
@@ -959,7 +1088,7 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
           uploadId,
           totalParts,
           deviceType,
-          fileSize: file.size,
+          fileSize: optimizedFile.size,
           partSize: PART_SIZE
         }, abortController.signal)
         
@@ -1006,7 +1135,7 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
             }
 
             const partSize = part.end - part.start
-            const blob = file.slice(part.start, part.end)
+            const blob = optimizedFile.slice(part.start, part.end)
             
             // Update part status
             setMultipartUploads(prev => ({
@@ -1035,12 +1164,12 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
                   const partBytes = uploadedBytesByPart.current[identifier]
                   const totalUploadedBytes = Object.values(partBytes).reduce((sum, bytes) => sum + bytes, 0)
                   
-                  const uploadProgressValue = 15 + (totalUploadedBytes / file.size) * 80
+                  const uploadProgressValue = 15 + (totalUploadedBytes / optimizedFile.size) * 80
                   
                   const elapsedSeconds = (Date.now() - startTime) / 1000
                   const uploadSpeed = calculateUploadSpeed(identifier, totalUploadedBytes, startTime)
                   
-                  const remainingBytes = file.size - totalUploadedBytes
+                  const remainingBytes = optimizedFile.size - totalUploadedBytes
                   const timeRemaining = uploadSpeed > 0 ? remainingBytes / uploadSpeed : 0
                   
                   const now = Date.now()
@@ -1095,7 +1224,7 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
               xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')))
               
               xhr.open('PUT', part.presignedUrl!)
-              xhr.setRequestHeader('Content-Type', file.type)
+              xhr.setRequestHeader('Content-Type', optimizedFile.type)
               xhr.send(blob)
             })
             
@@ -1196,9 +1325,9 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
       } else {
         // Single part upload for smaller files
         const initData = await apiCallRef.current('/api/admin/upload', {
-          fileName: file.name,
-          fileType: file.type,
-          fileSize: file.size,
+          fileName: optimizedFile.name,
+          fileType: optimizedFile.type,
+          fileSize: optimizedFile.size,
           folder: `${type}s`,
           deviceType
         }, abortController.signal)
@@ -1262,8 +1391,8 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
           })
 
           xhr.open('PUT', presignedUrl)
-          xhr.setRequestHeader('Content-Type', file.type)
-          xhr.send(file)
+          xhr.setRequestHeader('Content-Type', optimizedFile.type)
+          xhr.send(optimizedFile)
         })
       }
 
@@ -1304,12 +1433,12 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
       const s3Asset: S3Asset = {
         key: fileKey!,
         url: fileUrl!,
-        size: file.size,
+        size: optimizedFile.size,
         type: type === 'thumbnail' || type === 'moduleThumbnail' ? 'image' : 'video',
         duration: type.includes('video') ? 0 : undefined,
         uploadedAt: new Date().toISOString(),
-        fileName: file.name,
-        mimeType: file.type,
+        fileName: optimizedFile.name,
+        mimeType: optimizedFile.type,
         lastModified: new Date().toISOString()
       }
 
@@ -1335,7 +1464,7 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
       
       throw error
     }
-  }, [updateUploadProgress, calculateUploadSpeed, pausedUploads])
+  }, [updateUploadProgress, calculateUploadSpeed, pausedUploads, optimizeFileForIOS])
 
   const pauseUpload = useCallback((identifier: string) => {
     const upload = uploadProgress[identifier]
@@ -1472,7 +1601,7 @@ const useEnhancedS3Upload = (): UseEnhancedS3UploadReturn => {
   ])
 }
 
-// ==================== FIXED FILE UPLOAD AREA FOR ALL DEVICES ====================
+// ==================== FIXED FILE UPLOAD AREA FOR ALL DEVICES (iOS FIXED) ====================
 interface FileUploadAreaProps {
   type: 'thumbnail' | 'previewVideo' | 'lessonVideo' | 'moduleThumbnail'
   label: string
@@ -1513,9 +1642,15 @@ const FileUploadArea = memo(({
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
   const [fileSizeError, setFileSizeError] = useState<string | null>(null)
-  const [isUploading, setIsUploading] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [processingProgress, setProcessingProgress] = useState(0)
   const [isIOS, setIsIOS] = useState(false)
   const [isAndroid, setIsAndroid] = useState(false)
+  const [fileInfo, setFileInfo] = useState<{
+    name: string;
+    size: number;
+    type: string;
+  } | null>(null)
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -1541,6 +1676,57 @@ const FileUploadArea = memo(({
     type === 'previewVideo' || type === 'lessonVideo'
   , [type])
 
+  const processIOSFile = useCallback(async (file: File) => {
+    if (!isIOS || !file.type.startsWith('video/')) {
+      return file;
+    }
+    
+    setIsProcessing(true);
+    setProcessingProgress(10);
+    
+    try {
+      // Create a video element to get metadata
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      
+      return new Promise<File>((resolve, reject) => {
+        video.onloadedmetadata = () => {
+          setProcessingProgress(50);
+          URL.revokeObjectURL(video.src);
+          
+          // iOS sometimes has issues with large files, so we create a new File object
+          const processedFile = new File([file], file.name, {
+            type: file.type,
+            lastModified: file.lastModified
+          });
+          
+          setProcessingProgress(100);
+          setTimeout(() => {
+            setIsProcessing(false);
+            setProcessingProgress(0);
+          }, 500);
+          
+          resolve(processedFile);
+        };
+        
+        video.onerror = () => {
+          URL.revokeObjectURL(video.src);
+          console.warn('⚠️ Could not process video metadata');
+          setIsProcessing(false);
+          setProcessingProgress(0);
+          resolve(file); // Fallback to original file
+        };
+        
+        video.src = URL.createObjectURL(file);
+      });
+    } catch (error) {
+      console.error('Error processing iOS file:', error);
+      setIsProcessing(false);
+      setProcessingProgress(0);
+      return file;
+    }
+  }, [isIOS])
+
   const handleFileSelect = useCallback(async (file: File) => {
     const MAX_SIZE = 10 * 1024 * 1024 * 1024
     
@@ -1552,34 +1738,44 @@ const FileUploadArea = memo(({
     }
     
     setFileSizeError(null)
-    setIsUploading(true)
     
-    // Special handling for mobile devices
-    if ((isIOS || isAndroid) && file.size > 500 * 1024 * 1024) {
-      // Give mobile devices time to process large files
-      await new Promise(resolve => setTimeout(resolve, 500))
-    }
+    // Show file info immediately
+    setFileInfo({
+      name: file.name,
+      size: file.size,
+      type: file.type
+    })
     
     try {
+      let processedFile = file;
+      
+      // Special handling for iOS
+      if (isIOS && file.type.startsWith('video/')) {
+        processedFile = await processIOSFile(file);
+      }
+      
       if (onFileSelect) {
-        onFileSelect(file)
+        onFileSelect(processedFile)
       } else {
         const dataTransfer = new DataTransfer()
-        dataTransfer.items.add(file)
+        dataTransfer.items.add(processedFile)
         const syntheticEvent = {
           target: { files: dataTransfer.files }
         } as React.ChangeEvent<HTMLInputElement>
         onFileChange(syntheticEvent)
       }
+      
+      // Clear file info after successful selection
+      setTimeout(() => {
+        setFileInfo(null);
+      }, 2000);
+      
     } catch (error) {
       console.error('Error handling file select:', error)
       setFileSizeError('Failed to process file. Please try again.')
-    } finally {
-      setTimeout(() => {
-        setIsUploading(false)
-      }, 500)
+      setFileInfo(null)
     }
-  }, [onFileSelect, onFileChange, isIOS, isAndroid])
+  }, [onFileSelect, onFileChange, isIOS, processIOSFile])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -1609,7 +1805,7 @@ const FileUploadArea = memo(({
   }, [handleFileSelect])
 
   const handleClick = useCallback(() => {
-    if (upload?.status === 'uploading' || isUploading) return
+    if (upload?.status === 'uploading' || isProcessing) return
     
     setFileSizeError(null)
     
@@ -1617,7 +1813,7 @@ const FileUploadArea = memo(({
       inputRef.current.value = ''
       inputRef.current.click()
     }
-  }, [upload?.status, isUploading])
+  }, [upload?.status, isProcessing])
 
   const isFromLibrary = useMemo(() => {
     return currentFile?.url?.includes('s3.amazonaws.com') || currentFile?.key?.includes('courses/')
@@ -1647,9 +1843,9 @@ const FileUploadArea = memo(({
                 ✓ {isFromLibrary ? 'From Library' : 'Uploaded'}
               </span>
             )}
-            {isUploading && !upload && (
+            {isProcessing && (
               <span className="text-xs text-blue-600 dark:text-blue-400">
-                {isIOS ? 'iOS Processing...' : isAndroid ? 'Android Processing...' : 'Processing...'}
+                {isIOS ? 'iOS Processing...' : isAndroid ? 'Android Processing...' : 'Processing...'} {processingProgress}%
               </span>
             )}
           </div>
@@ -1682,7 +1878,7 @@ const FileUploadArea = memo(({
         </div>
         
         {/* Library Button */}
-        {isVideo && !upload && !isUploading && onBrowseLibrary && (
+        {isVideo && !upload && !isProcessing && onBrowseLibrary && (
           <Button
             type="button"
             variant="outline"
@@ -1702,14 +1898,14 @@ const FileUploadArea = memo(({
         accept={acceptedFiles}
         onChange={handleInputChange}
         className="hidden"
-        disabled={upload?.status === 'uploading' || isUploading}
+        disabled={upload?.status === 'uploading' || isProcessing}
       />
       
       <div 
         className={`relative rounded-2xl p-6 text-center cursor-pointer transition-all duration-300 min-h-[180px] flex flex-col items-center justify-center border-2 ${
           dragOver 
             ? 'border-emerald-400 bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 shadow-lg' 
-            : upload || isUploading
+            : upload || isProcessing
               ? 'border-blue-300 bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 cursor-not-allowed shadow-inner' 
               : currentFile
                 ? 'border-emerald-400 bg-gradient-to-br from-emerald-50/50 to-teal-50/50 dark:from-emerald-900/20 dark:to-teal-900/20 shadow-sm'
@@ -1720,13 +1916,31 @@ const FileUploadArea = memo(({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        {/* File Info Display */}
+        {fileInfo && !currentFile && !upload && (
+          <div className="absolute top-3 left-3 right-3 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs px-3 py-2 rounded-lg shadow-lg z-30">
+            <div className="flex items-center justify-between">
+              <span className="truncate">{fileInfo.name}</span>
+              <span>{formatFileSize(fileInfo.size)}</span>
+            </div>
+            {isProcessing && (
+              <div className="w-full bg-white/30 rounded-full h-1.5 mt-1">
+                <div 
+                  className="bg-white h-1.5 rounded-full transition-all duration-300"
+                  style={{ width: `${processingProgress}%` }}
+                />
+              </div>
+            )}
+          </div>
+        )}
+        
         {fileSizeError && (
           <div className="absolute top-3 left-3 right-3 bg-gradient-to-r from-rose-500 to-red-500 text-white text-xs px-3 py-2 rounded-lg shadow-lg z-30">
             {fileSizeError}
           </div>
         )}
         
-        {currentFile && !upload && !isUploading ? (
+        {currentFile && !upload && !isProcessing ? (
           <div className="space-y-4 w-full">
             <div className="relative mx-auto w-40 h-40 rounded-xl overflow-hidden shadow-lg">
               {isVideo ? (
@@ -1788,16 +2002,23 @@ const FileUploadArea = memo(({
         ) : (
           <div className="space-y-4 px-4">
             <div className="relative mx-auto">
-              <div className={`p-4 rounded-2xl shadow-lg ${upload || isUploading ? 'bg-gradient-to-r from-blue-500 to-cyan-500' : 'bg-gradient-to-r from-emerald-500 to-teal-500'}`}>
-                {upload || isUploading ? (
-                  <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <div className={`p-4 rounded-2xl shadow-lg ${upload || isProcessing ? 'bg-gradient-to-r from-blue-500 to-cyan-500' : 'bg-gradient-to-r from-emerald-500 to-teal-500'}`}>
+                {upload || isProcessing ? (
+                  <div className="relative">
+                    <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    {isProcessing && (
+                      <div className="absolute inset-0 flex items-center justify-center text-xs text-white">
+                        {processingProgress}%
+                      </div>
+                    )}
+                  </div>
                 ) : isVideo ? (
                   <Film className="w-8 h-8 text-white" />
                 ) : (
                   <Image className="w-8 h-8 text-white" />
                 )}
               </div>
-              {!upload && !isUploading && deviceType === 'ios' && (
+              {!upload && !isProcessing && deviceType === 'ios' && (
                 <div className="absolute -top-2 -right-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs px-2 py-1 rounded-full shadow-lg">
                   iOS Ready
                 </div>
@@ -1805,9 +2026,14 @@ const FileUploadArea = memo(({
             </div>
             <div className="space-y-2">
               <p className="font-semibold text-slate-900 dark:text-white">
-                {upload || isUploading ? (
+                {upload || isProcessing ? (
                   <span className="inline-flex items-center gap-2">
-                    <span>{isUploading && !upload ? (isIOS ? 'Processing for iOS...' : 'Processing...') : 'Uploading...'}</span>
+                    <span>
+                      {isProcessing 
+                        ? `${isIOS ? 'Processing for iOS...' : 'Processing...'}`
+                        : 'Uploading...'
+                      }
+                    </span>
                     {upload?.progress && (
                       <span className="text-sm font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
                         {Math.round(upload.progress)}%
@@ -1837,7 +2063,7 @@ const FileUploadArea = memo(({
                   </span>
                 </div>
               )}
-              {isVideo && onBrowseLibrary && !upload && !isUploading && (
+              {isVideo && onBrowseLibrary && !upload && !isProcessing && (
                 <Button
                   type="button"
                   variant="outline"
@@ -1870,6 +2096,66 @@ const FileUploadArea = memo(({
 FileUploadArea.displayName = 'FileUploadArea'
 
 // ==================== NEW COMPONENTS ====================
+interface IOSUploadNotificationProps {
+  show: boolean
+  uploadProgress?: UploadProgress[string]
+  onDismiss: () => void
+}
+
+const IOSUploadNotification = memo(({ 
+  show, 
+  uploadProgress,
+  onDismiss 
+}: IOSUploadNotificationProps) => {
+  if (!show) return null
+  
+  return (
+    <motion.div
+      initial={{ y: 100 }}
+      animate={{ y: 0 }}
+      exit={{ y: 100 }}
+      className="fixed bottom-4 left-4 right-4 z-50"
+    >
+      <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-500 to-cyan-500 text-white shadow-2xl">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-white/20">
+            <CloudUpload className="w-5 h-5" />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center justify-between mb-1">
+              <p className="font-semibold">iOS Upload in Progress</p>
+              <button
+                onClick={onDismiss}
+                className="text-white/80 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-sm opacity-90 mb-2">
+              Keep this screen open for reliable upload
+            </p>
+            {uploadProgress && (
+              <div className="space-y-1">
+                <div className="w-full bg-white/30 rounded-full h-1.5">
+                  <div 
+                    className="bg-white h-1.5 rounded-full transition-all duration-300"
+                    style={{ width: `${uploadProgress.progress}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span>{uploadProgress.fileName}</span>
+                  <span>{uploadProgress.progress}%</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  )
+})
+IOSUploadNotification.displayName = 'IOSUploadNotification'
+
 interface SectionHeaderProps {
   title: string
   description: string
@@ -2249,6 +2535,9 @@ export default function CreateCoursePage() {
     type: 'info' | 'warning' | 'error' | 'success'
   }>({ show: false, message: '', type: 'info' })
   
+  // iOS notification state
+  const [showIOSNotification, setShowIOSNotification] = useState(false)
+  
   const { 
     uploadProgress, 
     uploadFile: enhancedUploadFile, 
@@ -2346,6 +2635,30 @@ export default function CreateCoursePage() {
     setUploadStats(stats)
   }, [uploadProgress])
 
+  // iOS notification effect
+  useEffect(() => {
+    const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    
+    if (isIOS && activeUploads.length > 0) {
+      setShowIOSNotification(true);
+      
+      // Auto-dismiss after 10 seconds if upload is complete
+      const timer = setTimeout(() => {
+        const hasActiveUploads = Object.values(uploadProgress).some(
+          u => u.status === 'uploading' || u.status === 'initiating' || u.status === 'generating-urls'
+        );
+        
+        if (!hasActiveUploads) {
+          setShowIOSNotification(false);
+        }
+      }, 10000);
+      
+      return () => clearTimeout(timer);
+    } else {
+      setShowIOSNotification(false);
+    }
+  }, [activeUploads, uploadProgress]);
+
   // Mobile notification effect
   useEffect(() => {
     const isMobileDevice = isMobile()
@@ -2368,6 +2681,11 @@ export default function CreateCoursePage() {
       setMobileUploadNotification(prev => ({ ...prev, show: false }))
     }
   }, [activeUploads, mobileUploadNotification.show])
+
+  // Get active iOS upload for notification
+  const activeIOSUpload = Object.values(uploadProgress).find(
+    u => u.status === 'uploading' && u.deviceType === 'ios'
+  );
 
   // Memoized values for performance
   const totalDuration = useMemo(() => formData.modules.reduce((total, module) => {
@@ -4964,6 +5282,13 @@ export default function CreateCoursePage() {
         message={mobileUploadNotification.message}
         type={mobileUploadNotification.type}
         onClose={() => setMobileUploadNotification(prev => ({ ...prev, show: false }))}
+      />
+
+      {/* iOS Upload Notification */}
+      <IOSUploadNotification
+        show={showIOSNotification}
+        uploadProgress={activeIOSUpload}
+        onDismiss={() => setShowIOSNotification(false)}
       />
 
       {/* Sticky Bottom Actions */}

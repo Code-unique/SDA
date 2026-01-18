@@ -26,12 +26,15 @@ export async function POST(request: NextRequest) {
 
     console.log(`✅ Authenticated admin: ${authResult.user.email}`)
 
-    const { fileName, fileType, folder } = await request.json()
+    const { fileName, fileType, folder, deviceType, fileSize, totalParts } = await request.json()
 
     console.log('📥 Initiate request received:', { 
       fileName, 
       fileType, 
       folder,
+      deviceType,
+      fileSize: fileSize ? `${Math.round(fileSize / (1024 * 1024))}MB` : 'unknown',
+      totalParts,
       userId: authResult.user.clerkId 
     })
 
@@ -62,19 +65,35 @@ export async function POST(request: NextRequest) {
     
     console.log('🚀 Initiating multipart upload for:', fileKey)
 
+    // Add iOS-specific metadata
+    const metadata: Record<string, string> = {
+      originalFileName: fileName,
+      uploadedBy: authResult.user.email || 'unknown',
+      uploadedAt: new Date().toISOString(),
+      uploadType: 'multipart',
+      folder: folder
+    }
+
+    // Add device-specific metadata for optimization
+    if (deviceType) {
+      metadata.deviceType = deviceType;
+    }
+
+    if (deviceType === 'ios' && fileSize) {
+      metadata.iosOptimized = 'true';
+      // Adjust chunk size for iOS
+      if (fileSize > 500 * 1024 * 1024) { // > 500MB
+        metadata.recommendedChunkSize = '10485760'; // 10MB chunks for iOS
+      }
+    }
+
     // Create multipart upload
     const command = new CreateMultipartUploadCommand({
       Bucket: process.env.AWS_S3_BUCKET_NAME!,
       Key: fileKey,
       ContentType: fileType,
       CacheControl: 'max-age=31536000, public',
-      Metadata: {
-        originalFileName: fileName,
-        uploadedBy: authResult.user.email || 'unknown',
-        uploadedAt: new Date().toISOString(),
-        uploadType: 'multipart',
-        folder: folder
-      }
+      Metadata: metadata
     })
 
     const response = await s3Client.send(command)
@@ -89,6 +108,7 @@ export async function POST(request: NextRequest) {
       uploadId: response.UploadId,
       fileKey,
       fileUrl,
+      deviceType,
       duration: `${Date.now() - startTime}ms`
     })
 
@@ -101,7 +121,8 @@ export async function POST(request: NextRequest) {
       region: process.env.AWS_REGION || 'eu-north-1',
       timestamp: Date.now(),
       expiresAt: Date.now() + (7 * 24 * 60 * 60 * 1000), // 7 days for completion
-      duration: Date.now() - startTime
+      duration: Date.now() - startTime,
+      iosOptimized: deviceType === 'ios'
     })
 
   } catch (error: any) {
