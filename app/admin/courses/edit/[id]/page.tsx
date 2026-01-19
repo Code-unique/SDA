@@ -74,7 +74,24 @@ import {
   Feather,
   Gem,
   Crown,
-  Loader2
+  Loader2,
+  Search,
+  Filter,
+  Check,
+  Copy,
+  Grid,
+  List,
+  Download,
+  Cloud,
+  Database,
+  AlertTriangle,
+  Info,
+  Battery,
+  Wifi,
+  Cpu,
+  Smartphone,
+  Monitor,
+  Tablet
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 
@@ -92,6 +109,9 @@ interface S3Asset {
   height?: number
   uploadedAt?: string
   fileName?: string
+  mimeType?: string
+  etag?: string
+  lastModified?: string
   originalFileName?: string
 }
 
@@ -112,6 +132,9 @@ interface UploadProgress {
     startTime?: number
     lastBytes?: number
     lastTime?: number
+    deviceType?: 'ios' | 'android' | 'desktop' | 'tablet'
+    networkType?: 'wifi' | 'cellular' | 'ethernet' | 'unknown'
+    memoryStatus?: 'healthy' | 'warning' | 'critical'
   }
 }
 
@@ -127,35 +150,66 @@ interface MultipartUploadState {
     etag?: string
     status: 'pending' | 'uploading' | 'completed' | 'error'
     progress?: number
+    uploadedBytes?: number
   }>
   isUploading: boolean
   totalProgress: number
   startTime?: number
   totalBytes?: number
   uploadedBytes?: number
+  completedParts: number
+}
+
+interface Resource {
+  _id?: string
+  title: string
+  url: string
+  type: 'pdf' | 'document' | 'link' | 'video'
+}
+
+interface SubLesson {
+  _id?: string
+  title: string
+  description: string
+  content: string
+  video?: S3Asset
+  videoSource?: {
+    type: 'uploaded' | 'library'
+    videoLibraryId?: string
+    video: S3Asset
+    uploadedAt?: string
+    uploadedBy?: string
+  }
+  duration: number
+  isPreview: boolean
+  resources: Resource[]
+  order: number
 }
 
 interface Lesson {
   _id?: string
   title: string
-  description?: string
-  content?: string
-  video?: S3Asset
+  description: string
+  content: string
+  video?: S3Asset  // Keep for backward compatibility
+  videoSource?: {  // Add this for consistency with sub-lessons
+    type: 'uploaded' | 'library'
+    videoLibraryId?: string
+    video: S3Asset
+    uploadedAt?: string
+    uploadedBy?: string
+  }
   duration: number
   isPreview: boolean
-  resources: {
-    _id?: string
-    title: string
-    url: string
-    type: 'pdf' | 'document' | 'link' | 'video'
-  }[]
+  resources: Resource[]
   order: number
+  subLessons: SubLesson[]
 }
 
 interface Chapter {
   _id?: string
   title: string
-  description?: string
+  description: string
   order: number
   lessons: Lesson[]
 }
@@ -163,7 +217,7 @@ interface Chapter {
 interface Module {
   _id?: string
   title: string
-  description?: string
+  description: string
   thumbnailUrl?: string
   chapters: Chapter[]
   order: number
@@ -209,6 +263,38 @@ interface FileWithPossibleVideo {
   height?: number
   original_filename?: string
   [key: string]: any // Allow any other properties
+}
+
+interface VideoLibraryItem {
+  _id: string;
+  title: string;
+  description?: string;
+  video: {
+    key: string;
+    url: string;
+    size: number;
+    type: 'video';
+    duration?: number;
+    width?: number;
+    height?: number;
+    originalFileName?: string;
+    mimeType?: string;
+  };
+  categories: string[];
+  tags: string[];
+  usageCount: number;
+  courses: any[];
+  uploadDate: string;
+  uploadedBy?: any;
+  formattedDuration?: string;
+  formattedSize?: string;
+  isPublic?: boolean;
+  metadata?: {
+    resolution?: string;
+    format?: string;
+    bitrate?: number;
+    frameRate?: number;
+  };
 }
 
 // ==================== HELPER FUNCTIONS ====================
@@ -258,53 +344,371 @@ const isS3Asset = (obj: any): obj is S3Asset => {
   return obj && typeof obj === 'object' && 'key' in obj && 'url' in obj;
 };
 
+// ==================== NEW HELPER FUNCTIONS ====================
+const detectDeviceType = (): 'ios' | 'android' | 'desktop' | 'tablet' => {
+  if (typeof window === 'undefined') return 'desktop'
+  
+  const userAgent = navigator.userAgent.toLowerCase()
+  const isTablet = /(ipad|tablet|(android(?!.*mobile))|(windows(?!.*phone)(.*touch))|kindle|playbook|silk|(puffin(?!.*(IP|AP|WP))))/.test(userAgent)
+  
+  if (isTablet) return 'tablet'
+  if (/iphone|ipod/.test(userAgent)) return 'ios'
+  if (/android/.test(userAgent)) return 'android'
+  return 'desktop'
+}
+
+const isMobile = () => {
+  if (typeof window === 'undefined') return false
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+}
+
+const detectNetworkType = (): 'wifi' | 'cellular' | 'ethernet' | 'unknown' => {
+  if (typeof window === 'undefined' || !('connection' in navigator)) return 'unknown'
+  
+  const connection = (navigator as any).connection
+  if (!connection) return 'unknown'
+  
+  const type = connection.type || connection.effectiveType
+  if (type.includes('wifi') || type.includes('ethernet')) return 'wifi'
+  if (type.includes('cellular') || type.includes('2g') || type.includes('3g') || type.includes('4g') || type.includes('5g')) return 'cellular'
+  if (type.includes('ethernet')) return 'ethernet'
+  return 'unknown'
+}
+
+const getConnectionSpeed = (): number => {
+  if (typeof window === 'undefined' || !('connection' in navigator)) return 0
+  
+  const connection = (navigator as any).connection
+  if (!connection || !connection.downlink) return 0
+  
+  return connection.downlink * 1024 * 1024 // Convert Mbps to bytes per second
+}
+
+const checkMemoryStatus = (): 'healthy' | 'warning' | 'critical' => {
+  if (typeof window === 'undefined' || !('deviceMemory' in navigator)) return 'healthy'
+  
+  const deviceMemory = (navigator as any).deviceMemory
+  if (!deviceMemory) return 'healthy'
+  
+  if (deviceMemory >= 8) return 'healthy'
+  if (deviceMemory >= 4) return 'warning'
+  return 'critical'
+}
+
+// Device-specific optimizations
+const getOptimalChunkSize = (
+  deviceType: 'ios' | 'android' | 'desktop' | 'tablet', 
+  fileSize: number,
+  networkType: 'wifi' | 'cellular' | 'ethernet' | 'unknown',
+  memoryStatus: 'healthy' | 'warning' | 'critical'
+): number => {
+  const MAX_CHUNK_SIZE = 200 * 1024 * 1024 // 200MB absolute max
+  const MIN_CHUNK_SIZE = 5 * 1024 * 1024 // 5MB min for reliability
+  
+  let baseChunkSize = 100 * 1024 * 1024 // 100MB default
+  
+  // Adjust for device type
+  switch (deviceType) {
+    case 'ios':
+      baseChunkSize = 50 * 1024 * 1024 // 50MB for iOS
+      break
+    case 'android':
+      baseChunkSize = 75 * 1024 * 1024 // 75MB for Android
+      break
+    case 'tablet':
+      baseChunkSize = 100 * 1024 * 1024 // 100MB for tablets
+      break
+    case 'desktop':
+      baseChunkSize = 150 * 1024 * 1024 // 150MB for desktop
+      break
+  }
+  
+  // Adjust for network type
+  switch (networkType) {
+    case 'cellular':
+      baseChunkSize = Math.min(baseChunkSize, 20 * 1024 * 1024) // 20MB max for cellular
+      break
+    case 'ethernet':
+      baseChunkSize = Math.min(baseChunkSize * 1.5, MAX_CHUNK_SIZE) // Boost for ethernet
+      break
+  }
+  
+  // Adjust for memory status
+  switch (memoryStatus) {
+    case 'warning':
+      baseChunkSize = Math.min(baseChunkSize, 50 * 1024 * 1024) // 50MB max for low memory
+      break
+    case 'critical':
+      baseChunkSize = Math.min(baseChunkSize, 10 * 1024 * 1024) // 10MB max for very low memory
+      break
+  }
+  
+  // Adjust for file size
+  if (fileSize > 5 * 1024 * 1024 * 1024) { // >5GB
+    baseChunkSize = Math.min(baseChunkSize, 50 * 1024 * 1024)
+  } else if (fileSize > 2 * 1024 * 1024 * 1024) { // >2GB
+    baseChunkSize = Math.min(baseChunkSize, 100 * 1024 * 1024)
+  } else if (fileSize > 500 * 1024 * 1024) { // >500MB
+    baseChunkSize = Math.min(baseChunkSize, 50 * 1024 * 1024)
+  }
+  
+  return Math.max(MIN_CHUNK_SIZE, Math.min(baseChunkSize, MAX_CHUNK_SIZE))
+}
+
+const getConcurrencyLimit = (
+  deviceType: 'ios' | 'android' | 'desktop' | 'tablet',
+  networkType: 'wifi' | 'cellular' | 'ethernet' | 'unknown',
+  memoryStatus: 'healthy' | 'warning' | 'critical'
+): number => {
+  let baseConcurrency = 4
+  
+  // Adjust for device type
+  switch (deviceType) {
+    case 'ios':
+      baseConcurrency = 2 // iOS has fewer concurrent connections
+      break
+    case 'android':
+      baseConcurrency = 3 // Android can handle more
+      break
+    case 'tablet':
+      baseConcurrency = 3 // Tablets in between
+      break
+    case 'desktop':
+      baseConcurrency = 6 // Desktop can handle the most
+      break
+  }
+  
+  // Adjust for network type
+  switch (networkType) {
+    case 'cellular':
+      baseConcurrency = Math.max(1, baseConcurrency - 2) // Reduce for cellular
+      break
+    case 'ethernet':
+      baseConcurrency = Math.min(8, baseConcurrency + 2) // Increase for ethernet
+      break
+  }
+  
+  // Adjust for memory status
+  switch (memoryStatus) {
+    case 'warning':
+      baseConcurrency = Math.max(1, baseConcurrency - 1)
+      break
+    case 'critical':
+      baseConcurrency = 1 // Single upload for low memory
+      break
+  }
+  
+  return Math.max(1, Math.min(baseConcurrency, 8))
+}
+
+// ==================== IOS FILE UTILS CLASS ====================
+class IOSFileUtils {
+  private static instance: IOSFileUtils
+  
+  public static getInstance(): IOSFileUtils {
+    if (!IOSFileUtils.instance) {
+      IOSFileUtils.instance = new IOSFileUtils()
+    }
+    return IOSFileUtils.instance
+  }
+  
+  async processIOSVideoFile(file: File): Promise<{
+    processedFile: File
+    needsProcessing: boolean
+    originalSize: number
+    processedSize: number
+  }> {
+    const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) && !(window as any).MSStream
+    
+    if (!isIOS || !file.type.startsWith('video/')) {
+      return {
+        processedFile: file,
+        needsProcessing: false,
+        originalSize: file.size,
+        processedSize: file.size
+      }
+    }
+    
+    console.log('📱 Processing iOS video file...')
+    
+    try {
+      // Create a video element to get metadata
+      const video = document.createElement('video')
+      video.preload = 'metadata'
+      
+      return new Promise((resolve, reject) => {
+        video.onloadedmetadata = () => {
+          URL.revokeObjectURL(video.src)
+          
+          // iOS sometimes has issues with large files, so we create a new File object
+          const processedFile = new File([file], file.name, {
+            type: file.type,
+            lastModified: file.lastModified
+          })
+          
+          resolve({
+            processedFile,
+            needsProcessing: true,
+            originalSize: file.size,
+            processedSize: processedFile.size
+          })
+        }
+        
+        video.onerror = () => {
+          URL.revokeObjectURL(video.src)
+          console.warn('⚠️ Could not process iOS video metadata')
+          resolve({
+            processedFile: file,
+            needsProcessing: false,
+            originalSize: file.size,
+            processedSize: file.size
+          })
+        }
+        
+        video.src = URL.createObjectURL(file)
+      })
+    } catch (error) {
+      console.error('Error processing iOS file:', error)
+      return {
+        processedFile: file,
+        needsProcessing: false,
+        originalSize: file.size,
+        processedSize: file.size
+      }
+    }
+  }
+}
+
 // ==================== MEMOIZED COMPONENTS ====================
-const UploadOptimizationTips = memo(({ fileSize, uploadStatus }: { fileSize: number, uploadStatus?: string }) => {
-  const sizeInMB = fileSize / (1024 * 1024)
+interface UploadOptimizationTipsProps {
+  fileSize: number
+  uploadStatus?: string
+  deviceType?: 'ios' | 'android' | 'desktop' | 'tablet'
+  networkType?: 'wifi' | 'cellular' | 'ethernet' | 'unknown'
+  memoryStatus?: 'healthy' | 'warning' | 'critical'
+}
+
+const UploadOptimizationTips = memo(({ 
+  fileSize, 
+  uploadStatus, 
+  deviceType,
+  networkType,
+  memoryStatus
+}: UploadOptimizationTipsProps) => {
   const sizeInGB = fileSize / (1024 * 1024 * 1024)
   const isLargeFile = sizeInGB > 1
+  
+  const getDeviceIcon = () => {
+    switch (deviceType) {
+      case 'ios': return <Smartphone className="w-4 h-4 sm:w-5 sm:h-5" />
+      case 'android': return <Smartphone className="w-4 h-4 sm:w-5 sm:h-5" />
+      case 'tablet': return <Tablet className="w-4 h-4 sm:w-5 sm:h-5" />
+      default: return <Monitor className="w-4 h-4 sm:w-5 sm:h-5" />
+    }
+  }
+  
+  const getNetworkIcon = () => {
+    switch (networkType) {
+      case 'wifi': return <Wifi className="w-3 h-3 sm:w-4 sm:h-4" />
+      case 'cellular': return <Battery className="w-3 h-3 sm:w-4 sm:h-4" />
+      case 'ethernet': return <Cpu className="w-3 h-3 sm:w-4 sm:h-4" />
+      default: return <Wifi className="w-3 h-3 sm:w-4 sm:h-4" />
+    }
+  }
+  
+  const getMemoryIcon = () => {
+    switch (memoryStatus) {
+      case 'healthy': return <Database className="w-3 h-3 sm:w-4 sm:h-4" />
+      case 'warning': return <AlertTriangle className="w-3 h-3 sm:w-4 sm:h-4" />
+      case 'critical': return <AlertCircle className="w-3 h-3 sm:w-4 sm:h-4" />
+      default: return <Database className="w-3 h-3 sm:w-4 sm:h-4" />
+    }
+  }
+  
+  const getDeviceTips = () => {
+    if (deviceType === 'ios') {
+      return [
+        'iOS optimized multipart upload',
+        'Adaptive chunk sizing',
+        'Background upload support',
+        'Memory efficient processing'
+      ]
+    } else if (deviceType === 'android') {
+      return [
+        'Android optimized upload',
+        'Network aware chunking',
+        'Resumable uploads',
+        'Battery efficient'
+      ]
+    } else if (deviceType === 'tablet') {
+      return [
+        'Tablet optimized upload',
+        'Balanced performance',
+        'Stable connection preferred',
+        'Large file support'
+      ]
+    } else {
+      return [
+        'Desktop multipart upload',
+        'High concurrency support',
+        'Maximum file size: 10GB',
+        'Network optimized'
+      ]
+    }
+  }
   
   return (
     <Card className="rounded-xl sm:rounded-2xl border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 dark:border-blue-800">
       <CardContent className="p-3 sm:p-4">
         <div className="flex items-start gap-3">
           <div className="flex-shrink-0">
-            <div className="p-1.5 sm:p-2 bg-blue-100 dark:bg-blue-800 rounded-lg">
-              {isLargeFile ? <HardDrive className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 dark:text-blue-300" /> : <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 dark:text-blue-300" />}
+            <div className="p-1.5 sm:p-2 bg-gradient-to-r from-blue-600 to-cyan-600 rounded-lg text-white">
+              {getDeviceIcon()}
             </div>
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-start sm:items-center justify-between gap-2 mb-1 sm:mb-2">
-              <p className="text-xs sm:text-sm font-semibold text-blue-800 dark:text-blue-300 truncate leading-tight sm:leading-normal">
-                {isLargeFile ? `Large File (${sizeInGB.toFixed(1)}GB)` : `File (${sizeInMB.toFixed(0)}MB)`}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="text-xs sm:text-sm font-semibold text-blue-800 dark:text-blue-300 truncate leading-tight sm:leading-normal">
+                  {deviceType === 'ios' 
+                    ? `iOS Optimized (${sizeInGB.toFixed(2)}GB)`
+                    : deviceType === 'android'
+                      ? `Android Optimized (${sizeInGB.toFixed(2)}GB)`
+                      : isLargeFile 
+                        ? `Large File Upload (${sizeInGB.toFixed(2)}GB)` 
+                        : `File Upload (${formatFileSize(fileSize)})`
+                  }
+                </p>
+                <div className="flex items-center gap-1">
+                  {getNetworkIcon()}
+                  {getMemoryIcon()}
+                </div>
+              </div>
               {uploadStatus && (
-                <Badge variant="outline" className="text-xs px-1.5 py-0.5 h-auto">
+                <Badge variant="outline" className="text-xs px-1.5 py-0.5 h-auto bg-blue-50 text-blue-700">
                   {uploadStatus}
                 </Badge>
               )}
             </div>
             <ul className="text-[11px] sm:text-xs text-blue-700 dark:text-blue-400 space-y-1">
-              {isLargeFile && (
-                <>
-                  <li className="flex items-start gap-1.5">
-                    <div className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-0.5 flex-shrink-0"></div>
-                    <span className="truncate">Multipart upload for reliability</span>
-                  </li>
-                  <li className="flex items-start gap-1.5">
-                    <div className="w-1.5 h-1.5 bg-blue-500 rounded-full mt=0.5 flex-shrink-0"></div>
-                    <span className="truncate">Parallel uploads for speed</span>
-                  </li>
-                </>
+              {getDeviceTips().map((tip, index) => (
+                <li key={index} className="flex items-start gap-1.5">
+                  <div className="w-1.5 h-1.5 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full mt-0.5 flex-shrink-0"></div>
+                  <span className="truncate">{tip}</span>
+                </li>
+              ))}
+              {memoryStatus === 'warning' && (
+                <li className="flex items-start gap-1.5 text-amber-600">
+                  <div className="w-1.5 h-1.5 bg-amber-500 rounded-full mt-0.5 flex-shrink-0"></div>
+                  <span className="truncate">Low memory mode enabled</span>
+                </li>
               )}
-              <li className="flex items-start gap-1.5">
-                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-0.5 flex-shrink-0"></div>
-                <span className="truncate">Keep page open during upload</span>
-              </li>
-              <li className="flex items-start gap-1.5">
-                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-0.5 flex-shrink-0"></div>
-                <span className="truncate">Use stable connection</span>
-              </li>
+              {memoryStatus === 'critical' && (
+                <li className="flex items-start gap-1.5 text-rose-600">
+                  <div className="w-1.5 h-1.5 bg-rose-500 rounded-full mt=0.5 flex-shrink-0"></div>
+                  <span className="truncate">Ultra low memory mode</span>
+                </li>
+              )}
             </ul>
           </div>
         </div>
@@ -314,11 +718,15 @@ const UploadOptimizationTips = memo(({ fileSize, uploadStatus }: { fileSize: num
 })
 UploadOptimizationTips.displayName = 'UploadOptimizationTips'
 
-const UploadStatusCard = memo(({ upload, onCancel, onRetry }: {
+interface UploadStatusCardProps {
   upload: UploadProgress[string]
   onCancel: () => void
   onRetry?: () => void
-}) => {
+  onPause?: () => void
+  onResume?: () => void
+}
+
+const UploadStatusCard = memo(({ upload, onCancel, onRetry, onPause, onResume }: UploadStatusCardProps) => {
   const getStatusColor = useCallback(() => {
     switch (upload.status) {
       case 'initiating': return 'bg-blue-500'
@@ -348,13 +756,15 @@ const UploadStatusCard = memo(({ upload, onCancel, onRetry }: {
   }, [upload.status])
 
   const getStatusText = useMemo(() => {
+    const partsText = upload.parts ? ` (Part ${upload.currentPart}/${upload.parts})` : ''
+    const speedText = upload.uploadSpeed ? ` • ${formatUploadSpeed(upload.uploadSpeed)}` : ''
+    const deviceText = upload.deviceType === 'ios' ? ' • iOS Optimized' : upload.deviceType === 'android' ? ' • Android Optimized' : ''
+    const timeText = upload.timeRemaining ? ` • ${formatTimeRemaining(upload.timeRemaining)}` : ''
+    
     switch (upload.status) {
       case 'initiating': return 'Preparing upload...'
       case 'generating-urls': return 'Generating URLs...'
-      case 'uploading': 
-        const partsText = upload.parts ? ` (${upload.currentPart}/${upload.parts})` : ''
-        const speedText = upload.uploadSpeed ? ` • ${formatUploadSpeed(upload.uploadSpeed)}` : ''
-        return `Uploading${partsText}${speedText}`
+      case 'uploading': return `Uploading${partsText}${speedText}${deviceText}${timeText}`
       case 'processing': return 'Finalizing...'
       case 'completed': return 'Completed'
       case 'error': return 'Failed'
@@ -362,11 +772,11 @@ const UploadStatusCard = memo(({ upload, onCancel, onRetry }: {
       case 'cancelled': return 'Cancelled'
       default: return 'Uploading...'
     }
-  }, [upload])
+  }, [upload.parts, upload.currentPart, upload.uploadSpeed, upload.deviceType, upload.timeRemaining, upload.status])
 
   return (
-    <div className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-4 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-700">
-      <div className={`p-1.5 sm:p-2 rounded-full ${getStatusColor()} text-white flex-shrink-0`}>
+    <div className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-4 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
+      <div className={`p-1.5 sm:p-2 rounded-full ${getStatusColor()} text-white flex-shrink-0 shadow-md`}>
         {getStatusIcon()}
       </div>
       <div className="flex-1 min-w-0">
@@ -374,7 +784,7 @@ const UploadStatusCard = memo(({ upload, onCancel, onRetry }: {
           <span className="font-medium text-xs sm:text-sm truncate max-w-[100px] xs:max-w-[120px] sm:max-w-[150px]">
             {upload.fileName}
           </span>
-          <span className="text-xs sm:text-sm font-semibold flex-shrink-0">
+          <span className="text-xs sm:text-sm font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
             {Math.round(upload.progress)}%
           </span>
         </div>
@@ -399,18 +809,44 @@ const UploadStatusCard = memo(({ upload, onCancel, onRetry }: {
             variant="ghost"
             size="icon"
             onClick={onRetry}
-            className="h-7 w-7 sm:h-8 sm:w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+            className="h-7 w-7 sm:h-8 sm:w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30"
+            title="Retry upload"
           >
             <RefreshCw className="w-3 h-3" />
           </Button>
         )}
-        {(upload.status === 'initiating' || upload.status === 'generating-urls' || upload.status === 'uploading') && (
+        {(upload.status === 'uploading' || upload.status === 'initiating' || upload.status === 'generating-urls') && onPause && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onPause}
+            className="h-7 w-7 sm:h-8 sm:w-8 text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-900/30"
+            title="Pause upload"
+          >
+            <Pause className="w-3 h-3" />
+          </Button>
+        )}
+        {upload.status === 'paused' && onResume && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onResume}
+            className="h-7 w-7 sm:h-8 sm:w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-900/30"
+            title="Resume upload"
+          >
+            <Play className="w-3 h-3" />
+          </Button>
+        )}
+        {(upload.status === 'initiating' || upload.status === 'generating-urls' || upload.status === 'uploading' || upload.status === 'paused') && (
           <Button
             type="button"
             variant="ghost"
             size="icon"
             onClick={onCancel}
-            className="h-7 w-7 sm:h-8 sm:w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+            className="h-7 w-7 sm:h-8 sm:w-8 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/30"
+            title="Cancel upload"
           >
             <X className="w-3 h-3" />
           </Button>
@@ -433,9 +869,12 @@ interface FileUploadAreaProps {
   moduleIndex?: number
   chapterIndex?: number
   lessonIndex?: number
+  subLessonIndex?: number // ADDED: Sub-lesson index
   uploadProgress?: UploadProgress
   onCancelUpload?: (identifier: string) => void
   onRetryUpload?: (identifier: string) => void
+  onPauseUpload?: (identifier: string) => void
+  onResumeUpload?: (identifier: string) => void
 }
 
 const FileUploadArea = memo(({
@@ -449,21 +888,27 @@ const FileUploadArea = memo(({
   moduleIndex,
   chapterIndex,
   lessonIndex,
+  subLessonIndex, // ADDED
   uploadProgress,
   onCancelUpload,
   onRetryUpload,
+  onPauseUpload,
+  onResumeUpload,
 }: FileUploadAreaProps) => {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
   const [showVideoLibrary, setShowVideoLibrary] = useState(false)
 
-  const identifier = useMemo(() => 
-    type === 'lessonVideo' && moduleIndex !== undefined && chapterIndex !== undefined && lessonIndex !== undefined
-      ? `lesson-${moduleIndex}-${chapterIndex}-${lessonIndex}` 
-      : type === 'moduleThumbnail' && moduleIndex !== undefined
-        ? `module-${moduleIndex}-thumbnail` 
-        : type
-  , [type, moduleIndex, chapterIndex, lessonIndex])
+  const identifier = useMemo(() => {
+    if (subLessonIndex !== undefined && moduleIndex !== undefined && chapterIndex !== undefined && lessonIndex !== undefined) {
+      return `sublesson-${moduleIndex}-${chapterIndex}-${lessonIndex}-${subLessonIndex}`;
+    } else if (type === 'lessonVideo' && moduleIndex !== undefined && chapterIndex !== undefined && lessonIndex !== undefined) {
+      return `lesson-${moduleIndex}-${chapterIndex}-${lessonIndex}`;
+    } else if (type === 'moduleThumbnail' && moduleIndex !== undefined) {
+      return `module-${moduleIndex}-thumbnail`;
+    }
+    return type;
+  }, [type, moduleIndex, chapterIndex, lessonIndex, subLessonIndex])
 
   const upload = useMemo(() => 
     uploadProgress?.[identifier]
@@ -502,6 +947,20 @@ const FileUploadArea = memo(({
       return fileWithVideo.videoSource.video;
     }
     
+    // Handle S3 format directly
+    if (fileWithVideo.key || fileWithVideo.url) {
+      return {
+        key: fileWithVideo.key || '',
+        url: fileWithVideo.url || '',
+        size: fileWithVideo.size || 0,
+        type: fileWithVideo.type || 'image',
+        duration: fileWithVideo.duration,
+        width: fileWithVideo.width,
+        height: fileWithVideo.height,
+        fileName: fileWithVideo.fileName || fileWithVideo.originalFileName || fileWithVideo.key?.split('/').pop()
+      } as S3Asset;
+    }
+    
     // Handle Cloudinary format
     if (fileWithVideo.public_id || fileWithVideo.secure_url) {
       return {
@@ -517,7 +976,7 @@ const FileUploadArea = memo(({
     }
     
     return null;
-  }, [currentFile]);
+  }, [currentFile])
 
   const actualFile = getActualFile;
 
@@ -703,6 +1162,8 @@ const FileUploadArea = memo(({
           upload={upload}
           onCancel={() => onCancelUpload?.(identifier)}
           onRetry={onRetryUpload && (() => onRetryUpload(identifier))}
+          onPause={onPauseUpload && (() => onPauseUpload(identifier))}
+          onResume={onResumeUpload && (() => onResumeUpload(identifier))}
         />
       )}
 
@@ -717,12 +1178,129 @@ const FileUploadArea = memo(({
           moduleIndex={moduleIndex}
           chapterIndex={chapterIndex}
           lessonIndex={lessonIndex}
+          // FIX: Remove subLessonIndex since VideoLibrarySelector doesn't accept it
+          // subLessonIndex={subLessonIndex}
         />
       )}
     </div>
   )
 })
 FileUploadArea.displayName = 'FileUploadArea'
+
+// ==================== NEW COMPONENTS ====================
+interface IOSUploadNotificationProps {
+  show: boolean
+  uploadProgress?: UploadProgress[string]
+  onDismiss: () => void
+}
+
+const IOSUploadNotification = memo(({ 
+  show, 
+  uploadProgress,
+  onDismiss 
+}: IOSUploadNotificationProps) => {
+  if (!show) return null
+  
+  return (
+    <motion.div
+      initial={{ y: 100 }}
+      animate={{ y: 0 }}
+      exit={{ y: 100 }}
+      className="fixed bottom-4 left-4 right-4 z-50"
+    >
+      <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-500 to-cyan-500 text-white shadow-2xl">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-white/20">
+            <CloudUpload className="w-5 h-5" />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center justify-between mb-1">
+              <p className="font-semibold">iOS Upload in Progress</p>
+              <button
+                onClick={onDismiss}
+                className="text-white/80 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-sm opacity-90 mb-2">
+              Keep this screen open for reliable upload
+            </p>
+            {uploadProgress && (
+              <div className="space-y-1">
+                <div className="w-full bg-white/30 rounded-full h-1.5">
+                  <div 
+                    className="bg-white h-1.5 rounded-full transition-all duration-300"
+                    style={{ width: `${uploadProgress.progress}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span>{uploadProgress.fileName}</span>
+                  <span>{uploadProgress.progress}%</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  )
+})
+IOSUploadNotification.displayName = 'IOSUploadNotification'
+
+interface MobileUploadNotificationProps {
+  show: boolean
+  message: string
+  type: 'info' | 'warning' | 'error' | 'success'
+  onClose: () => void
+}
+
+const MobileUploadNotification = memo(({ 
+  show, 
+  message, 
+  type,
+  onClose 
+}: MobileUploadNotificationProps) => {
+  if (!show) return null
+  
+  const bgColor = {
+    info: 'from-blue-500 to-cyan-500',
+    warning: 'from-amber-500 to-orange-500',
+    error: 'from-rose-500 to-red-500',
+    success: 'from-emerald-500 to-green-500'
+  }[type]
+  
+  return (
+    <motion.div
+      initial={{ y: 100 }}
+      animate={{ y: 0 }}
+      exit={{ y: 100 }}
+      className="fixed bottom-20 left-4 right-4 z-50 sm:hidden"
+    >
+      <div className={`p-4 rounded-2xl bg-gradient-to-r ${bgColor} text-white shadow-2xl`}>
+        <div className="flex items-center gap-3">
+          {type === 'warning' ? (
+            <AlertTriangle className="w-5 h-5" />
+          ) : type === 'error' ? (
+            <AlertCircle className="w-5 h-5" />
+          ) : type === 'success' ? (
+            <CheckCircle className="w-5 h-5" />
+          ) : (
+            <Info className="w-5 h-5" />
+          )}
+          <p className="flex-1 text-sm font-medium">{message}</p>
+          <button
+            onClick={onClose}
+            className="text-white/80 hover:text-white"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  )
+})
+MobileUploadNotification.displayName = 'MobileUploadNotification'
 
 // ==================== ENHANCED UPLOAD HOOK ====================
 const useEnhancedS3Upload = () => {
@@ -818,6 +1396,22 @@ const useEnhancedS3Upload = () => {
     identifier: string,
     moduleIndex?: number
   ): Promise<S3Asset> => {
+    // Detect device and network conditions
+    const deviceType = detectDeviceType()
+    const networkType = detectNetworkType()
+    const memoryStatus = checkMemoryStatus()
+    
+    // Process iOS files if needed
+    if (deviceType === 'ios' && type.includes('video')) {
+      const iosUtils = IOSFileUtils.getInstance()
+      const { processedFile } = await iosUtils.processIOSVideoFile(file)
+      file = processedFile
+    }
+    
+    // Get optimized settings
+    const optimalChunkSize = getOptimalChunkSize(deviceType, file.size, networkType, memoryStatus)
+    const concurrencyLimit = getConcurrencyLimit(deviceType, networkType, memoryStatus)
+    
     const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024
     if (file.size > MAX_FILE_SIZE) {
       throw new Error(`File too large. Maximum size: 10GB. Your file: ${formatFileSize(file.size)}`)
@@ -826,24 +1420,9 @@ const useEnhancedS3Upload = () => {
     const abortController = new AbortController()
     abortControllers.current.set(identifier, abortController)
     
-    const shouldUseMultipart = file.size > 100 * 1024 * 1024
-    const OPTIMAL_PART_SIZE = 25 * 1024 * 1024
-    const PART_SIZE = shouldUseMultipart ? OPTIMAL_PART_SIZE : file.size
+    const shouldUseMultipart = file.size > optimalChunkSize
+    const PART_SIZE = shouldUseMultipart ? optimalChunkSize : file.size
     
-    const getConcurrencyLimit = (): number => {
-      if (typeof navigator !== 'undefined' && 'connection' in navigator) {
-        const conn = (navigator as any).connection;
-        if (conn) {
-          const downlink = conn.downlink;
-          if (downlink > 50) return 8;
-          if (downlink > 20) return 6;
-          if (downlink > 5) return 4;
-        }
-      }
-      return 3;
-    }
-    const CONCURRENCY_LIMIT = getConcurrencyLimit()
-
     try {
       setActiveUploads(prev => new Set([...prev, identifier]))
       
@@ -857,7 +1436,10 @@ const useEnhancedS3Upload = () => {
           isMultipart: shouldUseMultipart,
           size: file.size,
           uploadedBytes: 0,
-          startTime: Date.now()
+          startTime: Date.now(),
+          deviceType,
+          networkType,
+          memoryStatus
         }
       }))
 
@@ -921,7 +1503,8 @@ const useEnhancedS3Upload = () => {
             totalProgress: 10,
             startTime: Date.now(),
             totalBytes: file.size,
-            uploadedBytes: 0
+            uploadedBytes: 0,
+            completedParts: 0
           }
         }))
 
@@ -964,8 +1547,8 @@ const useEnhancedS3Upload = () => {
         const uploadedParts: Array<{ ETag: string; PartNumber: number }> = []
         uploadedBytesByPart.current[identifier] = {}
 
-        for (let i = 0; i < partsWithUrls.length; i += CONCURRENCY_LIMIT) {
-          const batch = partsWithUrls.slice(i, i + CONCURRENCY_LIMIT)
+        for (let i = 0; i < partsWithUrls.length; i += concurrencyLimit) {
+          const batch = partsWithUrls.slice(i, i + concurrencyLimit)
           
           if (abortController.signal.aborted) {
             throw new Error('Upload cancelled')
@@ -1078,7 +1661,8 @@ const useEnhancedS3Upload = () => {
                     p.partNumber === part.partNumber 
                       ? { ...p, status: 'completed', etag: result.ETag, progress: 100 }
                       : p
-                  )
+                  ),
+                  completedParts: (prev[identifier]?.completedParts || 0) + 1
                 }
               }));
 
@@ -1261,7 +1845,8 @@ const useEnhancedS3Upload = () => {
         type: type === 'thumbnail' || type === 'moduleThumbnail' ? 'image' : 'video',
         duration: type.includes('video') ? 0 : undefined,
         uploadedAt: new Date().toISOString(),
-        fileName: file.name
+        fileName: file.name,
+        mimeType: file.type
       }
 
     } catch (error) {
@@ -1360,14 +1945,55 @@ const useEnhancedS3Upload = () => {
     return uploadFile(file, type, identifier, moduleIndex)
   }, [uploadFile])
 
+  const pauseUpload = useCallback(async (identifier: string) => {
+    const controller = abortControllers.current.get(identifier)
+    if (controller) {
+      controller.abort()
+    }
+    
+    setUploadProgress(prev => ({
+      ...prev,
+      [identifier]: {
+        ...prev[identifier]!,
+        status: 'paused'
+      }
+    }))
+  }, [])
+
+  const resumeUpload = useCallback(async (identifier: string) => {
+    // For resuming, we need to get the file from the user again
+    // This is a simplified version - in production you would want to save the file reference
+    const upload = uploadProgress[identifier]
+    if (!upload) return
+    
+    // Show a file picker to get the file again
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = upload.type.includes('video') 
+      ? 'video/mp4,video/webm,video/ogg,video/quicktime,video/mov' 
+      : 'image/jpeg,image/jpg,image/png,image/webp'
+    
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0]
+      if (!file) return
+      
+      // Re-upload the file
+      await uploadFile(file, upload.type, identifier)
+    }
+    
+    input.click()
+  }, [uploadProgress, uploadFile])
+
   return useMemo(() => ({ 
     uploadProgress, 
     uploadFile, 
     cancelUpload, 
-    retryUpload, 
+    retryUpload,
+    pauseUpload,
+    resumeUpload,
     multipartUploads,
     activeUploads: Array.from(activeUploads)
-  }), [uploadProgress, uploadFile, cancelUpload, retryUpload, multipartUploads, activeUploads])
+  }), [uploadProgress, uploadFile, cancelUpload, retryUpload, pauseUpload, resumeUpload, multipartUploads, activeUploads])
 }
 
 // ==================== NEW COMPONENTS ====================
@@ -1653,11 +2279,30 @@ export default function EditCoursePage() {
     completedFiles: 0
   })
   
+  const [showVideoLibrary, setShowVideoLibrary] = useState<{
+    open: boolean
+    type: 'previewVideo' | 'lessonVideo'
+    moduleIndex?: number
+    chapterIndex?: number
+    lessonIndex?: number
+    subLessonIndex?: number
+  }>({ open: false, type: 'lessonVideo' })
+
+  const [mobileUploadNotification, setMobileUploadNotification] = useState<{
+    show: boolean
+    message: string
+    type: 'info' | 'warning' | 'error' | 'success'
+  }>({ show: false, message: '', type: 'info' })
+
+  const [showIOSNotification, setShowIOSNotification] = useState(false)
+  
   const { 
     uploadProgress, 
     uploadFile: enhancedUploadFile, 
     cancelUpload, 
     retryUpload,
+    pauseUpload,
+    resumeUpload,
     multipartUploads,
     activeUploads
   } = useEnhancedS3Upload()
@@ -1715,17 +2360,106 @@ export default function EditCoursePage() {
     setUploadStats(stats)
   }, [uploadProgress])
 
+  // iOS notification effect
+  useEffect(() => {
+    const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    
+    if (isIOS && activeUploads.length > 0) {
+      setShowIOSNotification(true);
+      
+      // Auto-dismiss after 10 seconds if upload is complete
+      const timer = setTimeout(() => {
+        const hasActiveUploads = Object.values(uploadProgress).some(
+          u => u.status === 'uploading' || u.status === 'initiating' || u.status === 'generating-urls'
+        );
+        
+        if (!hasActiveUploads) {
+          setShowIOSNotification(false);
+        }
+      }, 10000);
+      
+      return () => clearTimeout(timer);
+    } else {
+      setShowIOSNotification(false);
+    }
+  }, [activeUploads, uploadProgress]);
+
+  // Mobile notification effect
+  useEffect(() => {
+    const isMobileDevice = isMobile()
+    
+    if (isMobileDevice && activeUploads.length > 0) {
+      setMobileUploadNotification({
+        show: true,
+        message: 'Upload in progress. Keep screen on and app open for best results.',
+        type: 'info'
+      })
+      
+      const timer = setTimeout(() => {
+        setMobileUploadNotification(prev => ({ ...prev, show: false }))
+      }, 10000)
+      
+      return () => clearTimeout(timer)
+    }
+    
+    if (activeUploads.length === 0 && mobileUploadNotification.show) {
+      setMobileUploadNotification(prev => ({ ...prev, show: false }))
+    }
+  }, [activeUploads, mobileUploadNotification.show])
+
+  // Get active iOS upload for notification
+  const activeIOSUpload = Object.values(uploadProgress).find(
+    u => u.status === 'uploading' && u.deviceType === 'ios'
+  );
+
+  // ==================== DURATION CALCULATION HELPERS ====================
+  const calculateLessonDuration = useCallback((lesson: Lesson): number => {
+    let totalDuration = 0;
+    
+    // Add lesson video duration if it exists
+    if (lesson.video?.duration) {
+      totalDuration += lesson.video.duration;
+    } else if (lesson.videoSource?.video?.duration) {
+      totalDuration += lesson.videoSource.video.duration;
+    }
+    
+    // Add all sub-lesson durations
+    totalDuration += lesson.subLessons.reduce((sum, subLesson) => {
+      if (subLesson.video?.duration) {
+        return sum + subLesson.video.duration;
+      } else if (subLesson.videoSource?.video?.duration) {
+        return sum + subLesson.videoSource.video.duration;
+      }
+      return sum + (subLesson.duration || 0);
+    }, 0);
+    
+    return totalDuration || lesson.duration || 0;
+  }, []);
+
   // Memoized calculations
   const totalDuration = useMemo(() => formData.modules.reduce((total, module) => {
     return total + module.chapters.reduce((chapterTotal, chapter) => {
-      return chapterTotal + chapter.lessons.reduce((lessonTotal, lesson) => 
-        lessonTotal + lesson.duration, 0)
-    }, 0)
+      return chapterTotal + chapter.lessons.reduce((lessonTotal, lesson) => {
+        // Calculate lesson duration based on both lesson video and sub-lesson videos
+        return lessonTotal + calculateLessonDuration(lesson);
+      }, 0);
+    }, 0);
+  }, 0), [formData.modules, calculateLessonDuration]);
+
+  // Add total sub-lessons count
+  const totalSubLessons = useMemo(() => formData.modules.reduce((total, module) => {
+    return total + module.chapters.reduce((chapterTotal, chapter) => 
+      chapterTotal + chapter.lessons.reduce((lessonTotal, lesson) => 
+        lessonTotal + lesson.subLessons.length, 0
+      ), 0
+    )
   }, 0), [formData.modules])
 
+  // Update total lessons to count only lessons (not sub-lessons)
   const totalLessons = useMemo(() => formData.modules.reduce((total, module) => {
     return total + module.chapters.reduce((chapterTotal, chapter) => 
-      chapterTotal + chapter.lessons.length, 0)
+      chapterTotal + chapter.lessons.length, 0
+    )
   }, 0), [formData.modules])
 
   const totalChapters = useMemo(() => formData.modules.reduce((total, module) => total + module.chapters.length, 0), [formData.modules])
@@ -1733,138 +2467,343 @@ export default function EditCoursePage() {
   // Fetch course data
   const fetchCourse = async () => {
     try {
-      setLoading(true)
-      const response = await fetch(`/api/admin/courses/${params.id}`)
+      setLoading(true);
+      const response = await fetch(`/api/admin/courses/${params.id}`);
       
       if (!response.ok) {
-        throw new Error('Failed to fetch course')
+        throw new Error(`Failed to fetch course: ${response.status}`);
       }
 
-      const courseData = await response.json()
-      setCourse(courseData)
+      const courseData = await response.json();
+      setCourse(courseData);
       
-      // Transform assets to S3 assets format
+      console.log('📥 Raw course data:', {
+        title: courseData.title,
+        thumbnail: courseData.thumbnail,
+        previewVideo: courseData.previewVideo,
+        modulesCount: courseData.modules?.length,
+        firstModule: courseData.modules?.[0]
+      });
+      
+      // Helper function to transform any asset to S3Asset format
       const transformAsset = (asset: any): S3Asset | null => {
-        if (!asset) return null
+        if (!asset) return null;
         
-        // Handle both Cloudinary and S3 asset formats
+        // Case 1: Already in S3Asset format
+        if (asset.key && asset.url) {
+          return {
+            key: asset.key,
+            url: asset.url,
+            size: asset.size || 0,
+            type: asset.type === 'video' ? 'video' : 'image',
+            duration: asset.duration,
+            width: asset.width,
+            height: asset.height,
+            fileName: asset.fileName || asset.originalFileName || asset.key?.split('/').pop(),
+            mimeType: asset.mimeType,
+            uploadedAt: asset.uploadedAt,
+            originalFileName: asset.originalFileName
+          };
+        }
+        
+        // Case 2: Cloudinary format
         if (asset.public_id || asset.secure_url) {
-          // Cloudinary format
           return {
             key: asset.public_id || '',
             url: asset.secure_url || '',
             size: asset.bytes || 0,
-            type: asset.resource_type === 'image' ? 'image' : 'video',
+            type: asset.resource_type === 'video' ? 'video' : 'image',
             duration: asset.duration,
             width: asset.width,
             height: asset.height,
             fileName: asset.original_filename || asset.public_id?.split('/').pop()
-
-          }
-        } else if (isS3Asset(asset)) {
-          // S3 format - direct asset
-          return {
-            key: asset.key || '',
-            url: asset.url || '',
-            size: asset.size || 0,
-            type: asset.type || 'image',
-            duration: asset.duration,
-            width: asset.width,
-            height: asset.height,
-            fileName: asset.fileName || asset.originalFileName || asset.key?.split('/').pop()
-          }
-        } else if (asset.video && isS3Asset(asset.video)) {
-          // VideoSource format with nested video
-          return asset.video
-        }
-        return null
-      }
-
-      // Transform module assets (for backward compatibility)
-      const transformedModules = courseData.modules.map((module: any) => {
-        // Handle old structure where lessons are directly in module
-        if (module.lessons && !module.chapters) {
-          return {
-            ...module,
-            thumbnailUrl: module.thumbnailUrl || undefined,
-            chapters: [
-              {
-                title: 'Main Chapter',
-                description: 'Default chapter for migrated content',
-                order: 0,
-                lessons: module.lessons.map((lesson: any) => {
-                  // Check if lesson has videoSource or video
-                  const videoAsset = lesson.videoSource?.video || lesson.video;
-                  return {
-                    ...lesson,
-                    video: transformAsset(videoAsset)
-                  }
-                })
-              }
-            ]
-          }
+          };
         }
         
-        // Handle new structure with chapters
-        return {
-          ...module,
-          thumbnailUrl: module.thumbnailUrl || undefined,
-          chapters: module.chapters?.map((chapter: any) => ({
-            ...chapter,
-            lessons: chapter.lessons.map((lesson: any) => {
-              // Check if lesson has videoSource or video
-              const videoAsset = lesson.videoSource?.video || lesson.video;
-              return {
-                ...lesson,
-                video: transformAsset(videoAsset)
-              }
-            })
-          })) || []
+        // Case 3: Nested in videoSource
+        if (asset.video && typeof asset.video === 'object') {
+          return transformAsset(asset.video);
         }
-      })
+        
+        // Case 4: videoSource.video format
+        if (asset.videoSource?.video) {
+          return transformAsset(asset.videoSource.video);
+        }
+        
+        return null;
+      };
 
-      setFormData({
-        title: courseData.title,
-        description: courseData.description,
-        shortDescription: courseData.shortDescription,
-        price: courseData.price,
-        isFree: courseData.isFree,
-        level: courseData.level,
-        category: courseData.category || '',
-        tags: courseData.tags,
-        thumbnail: transformAsset(courseData.thumbnail),
-        previewVideo: transformAsset(courseData.previewVideo),
-        modules: transformedModules,
-        requirements: courseData.requirements,
-        learningOutcomes: courseData.learningOutcomes,
-        isPublished: courseData.isPublished,
-        isFeatured: courseData.isFeatured
-      })
+      // Transform modules with proper error handling
+      const transformModules = (modules: any[]): Module[] => {
+        if (!modules || !Array.isArray(modules)) return [];
+        
+        return modules.map((module: any, moduleIndex: number) => {
+          // Ensure module has basic structure
+          const baseModule: Module = {
+            title: module.title || `Module ${moduleIndex + 1}`,
+            description: module.description || '',
+            thumbnailUrl: module.thumbnailUrl,
+            order: module.order || moduleIndex,
+            chapters: [],
+            _id: module._id
+          };
+          
+          // Handle chapters
+          if (module.chapters && Array.isArray(module.chapters)) {
+            baseModule.chapters = module.chapters.map((chapter: any, chapterIndex: number) => {
+              const baseChapter: Chapter = {
+                title: chapter.title || `Chapter ${chapterIndex + 1}`,
+                description: chapter.description || '',
+                order: chapter.order || chapterIndex,
+                lessons: [],
+                _id: chapter._id
+              };
+              
+              // Handle lessons
+              if (chapter.lessons && Array.isArray(chapter.lessons)) {
+                baseChapter.lessons = chapter.lessons.map((lesson: any, lessonIndex: number) => {
+                  const videoAsset = transformAsset(lesson.video || lesson.videoSource?.video);
+                  
+                  const baseLesson: Lesson = {
+                    title: lesson.title || `Lesson ${lessonIndex + 1}`,
+                    description: lesson.description || '',
+                    content: lesson.content || '',
+                    duration: lesson.duration || 0,
+                    isPreview: lesson.isPreview || false,
+                    order: lesson.order || lessonIndex,
+                    resources: Array.isArray(lesson.resources) ? lesson.resources.map((res: any) => ({
+                      title: res.title || '',
+                      url: res.url || '',
+                      type: res.type || 'pdf'
+                    })) : [],
+                    subLessons: [],
+                    video: videoAsset || undefined, // FIX: Convert null to undefined
+                    videoSource: lesson.videoSource ? {
+                      type: lesson.videoSource.type || 'uploaded',
+                      videoLibraryId: lesson.videoSource.videoLibraryId,
+                      video: videoAsset!, // FIX: Use non-null assertion
+                      uploadedAt: lesson.videoSource.uploadedAt,
+                      uploadedBy: lesson.videoSource.uploadedBy
+                    } : videoAsset ? {
+                      type: 'uploaded' as const,
+                      video: videoAsset,
+                      videoLibraryId: undefined,
+                      uploadedAt: undefined,
+                      uploadedBy: undefined
+                    } : undefined, // FIX: Return undefined if no video
+                    _id: lesson._id
+                  };
+                  
+                  // Handle sub-lessons
+                  if (lesson.subLessons && Array.isArray(lesson.subLessons)) {
+                    baseLesson.subLessons = lesson.subLessons.map((subLesson: any, subLessonIndex: number) => {
+                      const subLessonVideoAsset = transformAsset(subLesson.video || subLesson.videoSource?.video);
+                      
+                      return {
+                        title: subLesson.title || `Sub-lesson ${subLessonIndex + 1}`,
+                        description: subLesson.description || '',
+                        content: subLesson.content || '',
+                        duration: subLesson.duration || 0,
+                        isPreview: subLesson.isPreview || false,
+                        order: subLesson.order || subLessonIndex,
+                        resources: Array.isArray(subLesson.resources) ? subLesson.resources.map((res: any) => ({
+                          title: res.title || '',
+                          url: res.url || '',
+                          type: res.type || 'pdf'
+                        })) : [],
+                        video: subLessonVideoAsset || undefined, // FIX: Convert null to undefined
+                        videoSource: subLesson.videoSource ? {
+                          type: subLesson.videoSource.type || 'uploaded',
+                          videoLibraryId: subLesson.videoSource.videoLibraryId,
+                          video: subLessonVideoAsset!, // FIX: Use non-null assertion
+                          uploadedAt: subLesson.videoSource.uploadedAt,
+                          uploadedBy: subLesson.videoSource.uploadedBy
+                        } : subLessonVideoAsset ? {
+                          type: 'uploaded' as const,
+                          video: subLessonVideoAsset,
+                          videoLibraryId: undefined,
+                          uploadedAt: undefined,
+                          uploadedBy: undefined
+                        } : undefined, // FIX: Return undefined if no video
+                        _id: subLesson._id
+                      };
+                    });
+                  }
+                  
+                  return baseLesson;
+                });
+              }
+              
+              return baseChapter;
+            });
+          }
+          
+          return baseModule;
+        });
+      };
+
+      const thumbnailAsset = transformAsset(courseData.thumbnail);
+      const previewVideoAsset = transformAsset(courseData.previewVideo);
       
-      console.log('Course loaded successfully:', {
-        title: courseData.title,
-        modules: transformedModules.length,
-        firstLessonVideo: transformedModules[0]?.chapters[0]?.lessons[0]?.video
-      })
+      const formDataToSet = {
+        title: courseData.title || '',
+        description: courseData.description || '',
+        shortDescription: courseData.shortDescription || '',
+        price: courseData.price || 0,
+        isFree: courseData.isFree || false,
+        level: courseData.level || 'beginner',
+        category: courseData.category || '',
+        tags: Array.isArray(courseData.tags) ? courseData.tags : [],
+        thumbnail: thumbnailAsset,
+        previewVideo: previewVideoAsset,
+        modules: transformModules(courseData.modules),
+        requirements: Array.isArray(courseData.requirements) ? courseData.requirements : [],
+        learningOutcomes: Array.isArray(courseData.learningOutcomes) ? courseData.learningOutcomes : [],
+        isPublished: courseData.isPublished || false,
+        isFeatured: courseData.isFeatured || false
+      };
+
+      console.log('✅ Transformed form data:', {
+        title: formDataToSet.title,
+        thumbnail: formDataToSet.thumbnail ? 'Has thumbnail' : 'No thumbnail',
+        previewVideo: formDataToSet.previewVideo ? 'Has preview video' : 'No preview video',
+        modules: formDataToSet.modules.length,
+        firstModuleFirstLesson: formDataToSet.modules[0]?.chapters[0]?.lessons[0],
+        firstModuleFirstLessonVideo: formDataToSet.modules[0]?.chapters[0]?.lessons[0]?.video,
+        firstModuleFirstLessonResources: formDataToSet.modules[0]?.chapters[0]?.lessons[0]?.resources
+      });
+
+      setFormData(formDataToSet);
       
       toast({
         title: 'Success',
         description: 'Course loaded successfully!',
         variant: 'default'
-      })
+      });
     } catch (err: any) {
-      console.error('Error fetching course:', err)
+      console.error('❌ Error fetching course:', err);
       toast({
         title: 'Error',
-        description: 'Failed to load course',
+        description: err.message || 'Failed to load course',
         variant: 'destructive'
-      })
+      });
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   // ==================== VIDEO LIBRARY HANDLERS ====================
+  const handleVideoLibrarySelect = useCallback((video: VideoLibraryItem, context: {
+    type: 'previewVideo' | 'lessonVideo'
+    moduleIndex?: number
+    chapterIndex?: number
+    lessonIndex?: number
+    subLessonIndex?: number
+  }) => {
+    const s3Asset: S3Asset = {
+      key: video.video.key,
+      url: video.video.url,
+      size: video.video.size,
+      type: 'video',
+      duration: video.video.duration,
+      fileName: video.video.originalFileName || video.title,
+      width: video.video.width,
+      height: video.video.height,
+      uploadedAt: video.uploadDate,
+      mimeType: video.video.mimeType,
+      lastModified: new Date().toISOString()
+    }
+
+    if (context.type === 'previewVideo') {
+      setFormData(prev => ({ 
+        ...prev, 
+        previewVideo: s3Asset 
+      }))
+    } else if (context.type === 'lessonVideo') {
+      if (context.subLessonIndex !== undefined && 
+          context.moduleIndex !== undefined && 
+          context.chapterIndex !== undefined && 
+          context.lessonIndex !== undefined) {
+        // For sub-lesson video selection
+        setFormData(prev => {
+          const updatedModules = [...prev.modules]
+          
+          updatedModules[context.moduleIndex!] = {
+            ...updatedModules[context.moduleIndex!],
+            chapters: updatedModules[context.moduleIndex!].chapters.map((chapter, chapIdx) =>
+              chapIdx === context.chapterIndex ? {
+                ...chapter,
+                lessons: chapter.lessons.map((lesson, lesIdx) =>
+                  lesIdx === context.lessonIndex ? {
+                    ...lesson,
+                    subLessons: lesson.subLessons.map((subLesson, subIdx) =>
+                      subIdx === context.subLessonIndex ? {
+                        ...subLesson,
+                        video: s3Asset,
+                        videoSource: {
+                          type: 'library',
+                          videoLibraryId: video._id,
+                          video: s3Asset,
+                          uploadedAt: video.uploadDate,
+                          uploadedBy: video.uploadedBy?._id
+                        }
+                      } : subLesson
+                    )
+                  } : lesson
+                )
+              } : chapter
+            )
+          }
+          
+          return { 
+            ...prev, 
+            modules: updatedModules 
+          }
+        })
+      } else if (context.moduleIndex !== undefined && 
+                 context.chapterIndex !== undefined && 
+                 context.lessonIndex !== undefined) {
+        // For lesson video selection
+        setFormData(prev => {
+          const updatedModules = [...prev.modules]
+          
+          updatedModules[context.moduleIndex!] = {
+            ...updatedModules[context.moduleIndex!],
+            chapters: updatedModules[context.moduleIndex!].chapters.map((chapter, chapIdx) =>
+              chapIdx === context.chapterIndex ? {
+                ...chapter,
+                lessons: chapter.lessons.map((lesson, lesIdx) =>
+                  lesIdx === context.lessonIndex ? {
+                    ...lesson,
+                    video: s3Asset,
+                    videoSource: {
+                      type: 'library',
+                      videoLibraryId: video._id,
+                      video: s3Asset,
+                      uploadedAt: video.uploadDate,
+                      uploadedBy: video.uploadedBy?._id
+                    }
+                  } : lesson
+                )
+              } : chapter
+            )
+          }
+          
+          return { 
+            ...prev, 
+            modules: updatedModules 
+          }
+        })
+      }
+    }
+    
+    toast({
+      title: 'Success',
+      description: 'Video selected from library!',
+      variant: 'default'
+    });
+  }, [toast]);
+
   const handlePreviewVideoSelectFromLibrary = useCallback((video: any) => {
     const s3Asset: S3Asset = {
       key: video.video.key,
@@ -1884,42 +2823,6 @@ export default function EditCoursePage() {
       variant: 'default'
     });
   }, [toast]);
-
-  const handleLessonVideoSelectFromLibrary = useCallback((video: any, moduleIndex: number, chapterIndex: number, lessonIndex: number) => {
-    const s3Asset: S3Asset = {
-      key: video.video.key,
-      url: video.video.url,
-      size: video.video.size,
-      type: 'video' as const,
-      duration: video.video.duration,
-      uploadedAt: new Date().toISOString(),
-      fileName: video.video.originalFileName || video.title
-    };
-    
-    const updatedModules = [...formData.modules];
-    updatedModules[moduleIndex] = {
-      ...updatedModules[moduleIndex],
-      chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) => 
-        chapIdx === chapterIndex ? {
-          ...chapter,
-          lessons: chapter.lessons.map((lesson, lesIdx) => 
-            lesIdx === lessonIndex ? {
-              ...lesson,
-              video: s3Asset
-            } : lesson
-          )
-        } : chapter
-      )
-    };
-    
-    setFormData(prev => ({ ...prev, modules: updatedModules }));
-    
-    toast({
-      title: 'Success',
-      description: 'Lesson video selected from library!',
-      variant: 'default'
-    });
-  }, [formData.modules, toast]);
 
   // ==================== UPDATED FILE UPLOAD HANDLERS ====================
   const handleThumbnailChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1999,12 +2902,30 @@ export default function EditCoursePage() {
     chapterIndex: number, 
     lessonIndex: number
   ) => {
-    const file = e.target.files?.[0]
-    if (file) {
-      const identifier = `lesson-${moduleIndex}-${chapterIndex}-${lessonIndex}`
-      try {
-        const result = await enhancedUploadFile(file, 'lessonVideo', identifier, moduleIndex)
-        const updatedModules = [...formData.modules]
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const identifier = `lesson-${moduleIndex}-${chapterIndex}-${lessonIndex}`;
+    
+    try {
+      const result = await enhancedUploadFile(file, 'lessonVideo', identifier, moduleIndex);
+      
+      // Create proper videoSource structure
+      const videoSource = {
+        type: 'uploaded' as const,
+        videoLibraryId: undefined,
+        video: result,
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: 'current-user-id' // Get from your auth
+      };
+
+      setFormData(prev => {
+        const updatedModules = [...prev.modules];
+        
+        if (!updatedModules[moduleIndex]?.chapters[chapterIndex]?.lessons[lessonIndex]) {
+          return prev;
+        }
+        
         updatedModules[moduleIndex] = {
           ...updatedModules[moduleIndex],
           chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) => 
@@ -2013,28 +2934,211 @@ export default function EditCoursePage() {
               lessons: chapter.lessons.map((lesson, lesIdx) => 
                 lesIdx === lessonIndex ? {
                   ...lesson,
-                  video: result
+                  video: result, // Keep for backward compatibility
+                  videoSource: videoSource, // Add new structure
+                  duration: result.duration || calculateLessonDuration({
+                    ...lesson,
+                    video: result,
+                    videoSource
+                  })
                 } : lesson
               )
             } : chapter
           )
-        }
-        setFormData(prev => ({ ...prev, modules: updatedModules }))
-        toast({
-          title: 'Success',
-          description: 'Lesson video uploaded successfully!',
-          variant: 'default'
-        })
-      } catch (error) {
-        console.error('Error uploading lesson video:', error)
-        toast({
-          title: 'Error',
-          description: error instanceof Error ? error.message : 'Failed to upload lesson video',
-          variant: 'destructive'
-        })
-      }
+        };
+        
+        return { ...prev, modules: updatedModules };
+      });
+      
+      toast({
+        title: 'Success',
+        description: 'Lesson video uploaded successfully!',
+        variant: 'default'
+      });
+    } catch (error) {
+      console.error('Error uploading lesson video:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to upload lesson video',
+        variant: 'destructive'
+      });
     }
-  }, [enhancedUploadFile, formData.modules, toast])
+  }, [enhancedUploadFile, toast, calculateLessonDuration]);
+
+  // NEW: Sub-lesson video change handler
+  const handleSubLessonVideoChange = useCallback(async (
+    e: React.ChangeEvent<HTMLInputElement>, 
+    moduleIndex: number, 
+    chapterIndex: number, 
+    lessonIndex: number,
+    subLessonIndex: number
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const identifier = `sublesson-${moduleIndex}-${chapterIndex}-${lessonIndex}-${subLessonIndex}`;
+    
+    try {
+      const result = await enhancedUploadFile(file, 'lessonVideo', identifier, moduleIndex);
+      
+      // Create proper videoSource structure
+      const videoSource = {
+        type: 'uploaded' as const,
+        videoLibraryId: undefined,
+        video: result,
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: 'current-user-id' // You should get this from auth
+      };
+
+      setFormData(prev => {
+        const updatedModules = [...prev.modules];
+        
+        // Safely update the structure
+        if (!updatedModules[moduleIndex]?.chapters[chapterIndex]?.lessons[lessonIndex]?.subLessons[subLessonIndex]) {
+          return prev;
+        }
+        
+        updatedModules[moduleIndex] = {
+          ...updatedModules[moduleIndex],
+          chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) => 
+            chapIdx === chapterIndex ? {
+              ...chapter,
+              lessons: chapter.lessons.map((lesson, lesIdx) => 
+                lesIdx === lessonIndex ? {
+                  ...lesson,
+                  subLessons: lesson.subLessons.map((subLesson, subIdx) =>
+                    subIdx === subLessonIndex ? {
+                      ...subLesson,
+                      video: result,
+                      videoSource: videoSource,
+                      duration: result.duration || 0
+                    } : subLesson
+                  )
+                } : lesson
+              )
+            } : chapter
+          )
+        };
+        
+        return { ...prev, modules: updatedModules };
+      });
+      
+      toast({
+        title: 'Success',
+        description: 'Sub-lesson video uploaded successfully!',
+        variant: 'default'
+      });
+    } catch (error) {
+      console.error('Error uploading sub-lesson video:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to upload sub-lesson video',
+        variant: 'destructive'
+      });
+    }
+  }, [enhancedUploadFile, toast]);
+
+  // Device-optimized file selection handler
+  const handleDeviceFileSelect = useCallback(async (
+    file: File,
+    type: 'thumbnail' | 'previewVideo' | 'lessonVideo' | 'moduleThumbnail',
+    moduleIndex?: number,
+    chapterIndex?: number,
+    lessonIndex?: number,
+    subLessonIndex?: number
+  ) => {
+    if (!file) return
+
+    try {
+      let result: S3Asset
+      
+      if (type === 'thumbnail') {
+        result = await enhancedUploadFile(file, type, 'thumbnail')
+        setFormData(prev => ({ ...prev, thumbnail: result }))
+      } else if (type === 'previewVideo') {
+        result = await enhancedUploadFile(file, type, 'previewVideo')
+        setFormData(prev => ({ ...prev, previewVideo: result }))
+      } else if (type === 'moduleThumbnail' && moduleIndex !== undefined) {
+        result = await enhancedUploadFile(file, type, `module-${moduleIndex}-thumbnail`, moduleIndex)
+        setFormData(prev => {
+          const updatedModules = [...prev.modules]
+          updatedModules[moduleIndex] = {
+            ...updatedModules[moduleIndex],
+            thumbnailUrl: result.url
+          }
+          return { ...prev, modules: updatedModules }
+        })
+      } else if (type === 'lessonVideo' && moduleIndex !== undefined && chapterIndex !== undefined && lessonIndex !== undefined) {
+        if (subLessonIndex !== undefined) {
+          // For sub-lesson video
+          const identifier = `sublesson-${moduleIndex}-${chapterIndex}-${lessonIndex}-${subLessonIndex}`
+          result = await enhancedUploadFile(file, type, identifier, moduleIndex)
+          setFormData(prev => {
+            const updatedModules = [...prev.modules]
+            updatedModules[moduleIndex] = {
+              ...updatedModules[moduleIndex],
+              chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) => 
+                chapIdx === chapterIndex ? {
+                  ...chapter,
+                  lessons: chapter.lessons.map((lesson, lesIdx) => 
+                    lesIdx === lessonIndex ? {
+                      ...lesson,
+                      subLessons: lesson.subLessons.map((subLesson, subIdx) =>
+                        subIdx === subLessonIndex ? {
+                          ...subLesson,
+                          video: result,
+                          videoSource: {
+                            type: 'uploaded',
+                            video: result,
+                            uploadedAt: new Date().toISOString()
+                          }
+                        } : subLesson
+                      )
+                    } : lesson
+                  )
+                } : chapter
+              )
+            }
+            return { ...prev, modules: updatedModules }
+          })
+        } else {
+          // For lesson video
+          const identifier = `lesson-${moduleIndex}-${chapterIndex}-${lessonIndex}`
+          result = await enhancedUploadFile(file, type, identifier, moduleIndex)
+          setFormData(prev => {
+            const updatedModules = [...prev.modules]
+            updatedModules[moduleIndex] = {
+              ...updatedModules[moduleIndex],
+              chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) => 
+                chapIdx === chapterIndex ? {
+                  ...chapter,
+                  lessons: chapter.lessons.map((lesson, lesIdx) => 
+                    lesIdx === lessonIndex ? {
+                      ...lesson,
+                      video: result,
+                      videoSource: {
+                        type: 'uploaded',
+                        video: result,
+                        uploadedAt: new Date().toISOString()
+                      }
+                    } : lesson
+                  )
+                } : chapter
+              )
+            }
+            return { ...prev, modules: updatedModules }
+          })
+        }
+      }
+    } catch (error) {
+      console.error('Upload failed:', error)
+      setMobileUploadNotification({
+        show: true,
+        message: error instanceof Error ? error.message : 'Upload failed. Please try again.',
+        type: 'error'
+      })
+    }
+  }, [enhancedUploadFile])
 
   const handleRetryUpload = useCallback(async (identifier: string) => {
     const upload = uploadProgress[identifier]
@@ -2056,6 +3160,9 @@ export default function EditCoursePage() {
           const parts = identifier.split('-')
           moduleIndex = parseInt(parts[1])
         } else if (identifier.startsWith('module-')) {
+          const parts = identifier.split('-')
+          moduleIndex = parseInt(parts[1])
+        } else if (identifier.startsWith('sublesson-')) {
           const parts = identifier.split('-')
           moduleIndex = parseInt(parts[1])
         }
@@ -2091,6 +3198,36 @@ export default function EditCoursePage() {
                     lIdx === lesIdx ? {
                       ...lesson,
                       video: result
+                    } : lesson
+                  )
+                } : chapter
+              )
+            }
+            setFormData(prev => ({ ...prev, modules: updatedModules }))
+          }
+        } else if (type === 'lessonVideo' && identifier.startsWith('sublesson-')) {
+          const parts = identifier.split('-')
+          const modIdx = parseInt(parts[1])
+          const chapIdx = parseInt(parts[2])
+          const lesIdx = parseInt(parts[3])
+          const subIdx = parseInt(parts[4])
+          
+          const updatedModules = [...formData.modules]
+          if (updatedModules[modIdx]?.chapters[chapIdx]?.lessons[lesIdx]?.subLessons[subIdx]) {
+            updatedModules[modIdx] = {
+              ...updatedModules[modIdx],
+              chapters: updatedModules[modIdx].chapters.map((chapter, cIdx) => 
+                cIdx === chapIdx ? {
+                  ...chapter,
+                  lessons: chapter.lessons.map((lesson, lIdx) => 
+                    lIdx === lesIdx ? {
+                      ...lesson,
+                      subLessons: lesson.subLessons.map((subLesson, sIdx) =>
+                        sIdx === subIdx ? {
+                          ...subLesson,
+                          video: result
+                        } : subLesson
+                      )
                     } : lesson
                   )
                 } : chapter
@@ -2223,29 +3360,40 @@ export default function EditCoursePage() {
 
   // Lesson management
   const addLesson = useCallback((moduleIndex: number, chapterIndex: number) => {
-    const updatedModules = [...formData.modules]
-    updatedModules[moduleIndex] = {
-      ...updatedModules[moduleIndex],
-      chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) =>
-        chapIdx === chapterIndex ? {
-          ...chapter,
-          lessons: [
-            ...chapter.lessons,
-            {
-              title: '',
-              description: '',
-              content: '',
-              duration: 0,
-              isPreview: false,
-              resources: [],
-              order: chapter.lessons.length
-            }
-          ]
-        } : chapter
-      )
-    }
-    setFormData(prev => ({ ...prev, modules: updatedModules }))
-  }, [formData.modules])
+    setFormData(prev => {
+      const updatedModules = [...prev.modules];
+      
+      if (!updatedModules[moduleIndex]?.chapters[chapterIndex]) {
+        return prev;
+      }
+      
+      const chapter = updatedModules[moduleIndex].chapters[chapterIndex];
+      const newLesson: Lesson = {
+        title: '',
+        description: '',
+        content: '',
+        duration: 0,
+        isPreview: false,
+        order: chapter.lessons.length,
+        resources: [],
+        subLessons: [],
+        video: undefined,
+        videoSource: undefined // Will be set when video is uploaded
+      };
+      
+      updatedModules[moduleIndex] = {
+        ...updatedModules[moduleIndex],
+        chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) => 
+          chapIdx === chapterIndex ? {
+            ...chap,
+            lessons: [...chap.lessons, newLesson]
+          } : chap
+        )
+      };
+      
+      return { ...prev, modules: updatedModules };
+    });
+  }, []);
 
   const removeLesson = useCallback((moduleIndex: number, chapterIndex: number, lessonIndex: number) => {
     const updatedModules = [...formData.modules]
@@ -2262,6 +3410,70 @@ export default function EditCoursePage() {
     }
     setFormData(prev => ({ ...prev, modules: updatedModules }))
   }, [formData.modules])
+
+  // NEW: Sub-lesson management functions
+  const addSubLesson = useCallback((moduleIndex: number, chapterIndex: number, lessonIndex: number) => {
+    setFormData(prev => {
+      const updatedModules = [...prev.modules];
+      
+      if (!updatedModules[moduleIndex]?.chapters[chapterIndex]?.lessons[lessonIndex]) {
+        return prev;
+      }
+      
+      const lesson = updatedModules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex];
+      const newSubLesson: SubLesson = {
+        title: '',
+        description: '',
+        content: '',
+        duration: 0,
+        isPreview: false,
+        order: lesson.subLessons.length,
+        resources: [],
+        video: undefined,
+        videoSource: undefined // Will be set when video is uploaded
+      };
+      
+      updatedModules[moduleIndex] = {
+        ...updatedModules[moduleIndex],
+        chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) => 
+          chapIdx === chapterIndex ? {
+            ...chapter,
+            lessons: chapter.lessons.map((lesson, lesIdx) => 
+              lesIdx === lessonIndex ? {
+                ...lesson,
+                subLessons: [...lesson.subLessons, newSubLesson]
+              } : lesson
+            )
+          } : chapter
+        )
+      };
+      
+      return { ...prev, modules: updatedModules };
+    });
+  }, []);
+
+  const removeSubLesson = useCallback((moduleIndex: number, chapterIndex: number, lessonIndex: number, subLessonIndex: number) => {
+    setFormData(prev => {
+      const updatedModules = [...prev.modules]
+      updatedModules[moduleIndex] = {
+        ...updatedModules[moduleIndex],
+        chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) =>
+          chapIdx === chapterIndex ? {
+            ...chapter,
+            lessons: chapter.lessons.map((lesson, lesIdx) =>
+              lesIdx === lessonIndex ? {
+                ...lesson,
+                subLessons: lesson.subLessons.filter(
+                  (_, index) => index !== subLessonIndex
+                )
+              } : lesson
+            )
+          } : chapter
+        )
+      }
+      return { ...prev, modules: updatedModules }
+    })
+  }, [])
 
   const addResource = useCallback((moduleIndex: number, chapterIndex: number, lessonIndex: number) => {
     const updatedModules = [...formData.modules]
@@ -2304,6 +3516,63 @@ export default function EditCoursePage() {
     }
     setFormData(prev => ({ ...prev, modules: updatedModules }))
   }, [formData.modules])
+
+  // NEW: Sub-lesson resource management
+  const addSubLessonResource = useCallback((moduleIndex: number, chapterIndex: number, lessonIndex: number, subLessonIndex: number) => {
+    setFormData(prev => {
+      const updatedModules = [...prev.modules]
+      updatedModules[moduleIndex] = {
+        ...updatedModules[moduleIndex],
+        chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) =>
+          chapIdx === chapterIndex ? {
+            ...chapter,
+            lessons: chapter.lessons.map((lesson, lesIdx) =>
+              lesIdx === lessonIndex ? {
+                ...lesson,
+                subLessons: lesson.subLessons.map((subLesson, subIdx) =>
+                  subIdx === subLessonIndex ? {
+                    ...subLesson,
+                    resources: [...subLesson.resources, {
+                      title: '',
+                      url: '',
+                      type: 'pdf'
+                    }]
+                  } : subLesson
+                )
+              } : lesson
+            )
+          } : chapter
+        )
+      }
+      return { ...prev, modules: updatedModules }
+    })
+  }, [])
+
+  const removeSubLessonResource = useCallback((moduleIndex: number, chapterIndex: number, lessonIndex: number, subLessonIndex: number, resourceIndex: number) => {
+    setFormData(prev => {
+      const updatedModules = [...prev.modules]
+      updatedModules[moduleIndex] = {
+        ...updatedModules[moduleIndex],
+        chapters: updatedModules[moduleIndex].chapters.map((chapter, chapIdx) =>
+          chapIdx === chapterIndex ? {
+            ...chapter,
+            lessons: chapter.lessons.map((lesson, lesIdx) =>
+              lesIdx === lessonIndex ? {
+                ...lesson,
+                subLessons: lesson.subLessons.map((subLesson, subIdx) =>
+                  subIdx === subLessonIndex ? {
+                    ...subLesson,
+                    resources: subLesson.resources.filter((_, index) => index !== resourceIndex)
+                  } : subLesson
+                )
+              } : lesson
+            )
+          } : chapter
+        )
+      }
+      return { ...prev, modules: updatedModules }
+    })
+  }, [])
 
   // Form submission
   const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent<HTMLButtonElement>) => {
@@ -2360,19 +3629,32 @@ export default function EditCoursePage() {
       return
     }
 
+    // Update the missing videos check to include sub-lessons
     const missingVideos = formData.modules.some(module => 
       module.chapters.some(chapter => 
-        chapter.lessons.some(lesson => !lesson.video)
+        chapter.lessons.some(lesson => {
+          // Check if lesson needs a video (only if no sub-lessons)
+          const lessonNeedsVideo = lesson.subLessons.length === 0 && 
+                                  !lesson.video && 
+                                  !lesson.videoSource?.video;
+          
+          // Check if any sub-lesson needs a video
+          const subLessonsNeedVideo = lesson.subLessons.some(subLesson => 
+            !subLesson.video && !subLesson.videoSource?.video
+          );
+          
+          return lessonNeedsVideo || subLessonsNeedVideo;
+        })
       )
-    )
+    );
 
     if (missingVideos) {
       toast({
         title: 'Error',
-        description: 'All lessons must have a video uploaded',
+        description: 'Each lesson must have either: 1) A lesson video, OR 2) Sub-lessons with videos',
         variant: 'destructive'
-      })
-      return
+      });
+      return;
     }
 
     setSaving(true)
@@ -2389,7 +3671,7 @@ export default function EditCoursePage() {
           duration: formData.thumbnail.duration,
           width: formData.thumbnail.width,
           height: formData.thumbnail.height,
-          uploadedAt: new Date().toISOString(),
+          uploadedAt: formData.thumbnail.uploadedAt || new Date().toISOString(),
           fileName: formData.thumbnail.fileName || 'thumbnail.jpg'
         } : null,
         previewVideo: formData.previewVideo ? {
@@ -2400,7 +3682,7 @@ export default function EditCoursePage() {
           duration: formData.previewVideo.duration,
           width: formData.previewVideo.width,
           height: formData.previewVideo.height,
-          uploadedAt: new Date().toISOString(),
+          uploadedAt: formData.previewVideo.uploadedAt || new Date().toISOString(),
           fileName: formData.previewVideo.fileName || 'preview-video.mp4'
         } : null,
         modules: formData.modules.map(module => ({
@@ -2414,48 +3696,74 @@ export default function EditCoursePage() {
             title: chapter.title,
             description: chapter.description || undefined,
             order: chapter.order,
-            lessons: chapter.lessons.map(lesson => {
-              // Format the video data properly for the API
-              let videoSourceData = null;
-              
-              if (lesson.video) {
-                videoSourceData = {
-                  type: 'uploaded' as const,
+            // In the submitData preparation, update lessons transformation:
+            lessons: chapter.lessons.map(lesson => ({
+              _id: lesson._id || undefined,
+              title: lesson.title,
+              description: lesson.description || undefined,
+              content: lesson.content || undefined,
+              videoSource: lesson.video ? {
+                type: lesson.videoSource?.type || 'uploaded',
+                videoLibraryId: lesson.videoSource?.videoLibraryId,
+                video: {
+                  key: lesson.video.key,
+                  url: lesson.video.url,
+                  size: lesson.video.size,
+                  type: 'video' as const,
+                  duration: lesson.video.duration || lesson.duration || 0,
+                  width: lesson.video.width,
+                  height: lesson.video.height,
+                  uploadedAt: lesson.video.uploadedAt || new Date().toISOString(),
+                  fileName: lesson.video.fileName || lesson.title
+                },
+                uploadedAt: lesson.videoSource?.uploadedAt || new Date().toISOString(),
+                uploadedBy: lesson.videoSource?.uploadedBy
+              } : lesson.videoSource || undefined, // FIX: Return undefined if no video
+              duration: calculateLessonDuration(lesson),
+              isPreview: lesson.isPreview,
+              resources: (lesson.resources || []).map(resource => ({
+                _id: resource._id || undefined,
+                title: resource.title,
+                url: resource.url,
+                type: resource.type
+              })),
+              order: lesson.order,
+              subLessons: (lesson.subLessons || []).map(subLesson => ({
+                _id: subLesson._id || undefined,
+                title: subLesson.title,
+                description: subLesson.description,
+                content: subLesson.content,
+                videoSource: subLesson.video ? {
+                  type: subLesson.videoSource?.type || 'uploaded',
+                  videoLibraryId: subLesson.videoSource?.videoLibraryId,
                   video: {
-                    key: lesson.video.key,
-                    url: lesson.video.url,
-                    size: lesson.video.size,
+                    key: subLesson.video.key,
+                    url: subLesson.video.url,
+                    size: subLesson.video.size,
                     type: 'video' as const,
-                    duration: lesson.video.duration || lesson.duration || 0,
-                    width: lesson.video.width,
-                    height: lesson.video.height,
-                    uploadedAt: new Date().toISOString(),
-                    fileName: lesson.video.fileName || lesson.title,
-                    originalFileName: lesson.video.fileName || lesson.title
-                  }
-                };
-              }
-              
-              return {
-                _id: lesson._id || undefined,
-                title: lesson.title,
-                description: lesson.description || undefined,
-                content: lesson.content || undefined,
-                videoSource: videoSourceData,
-                duration: lesson.duration,
-                isPreview: lesson.isPreview,
-                resources: lesson.resources.map(resource => ({
+                    duration: subLesson.video.duration || subLesson.duration || 0,
+                    width: subLesson.video.width,
+                    height: subLesson.video.height,
+                    uploadedAt: subLesson.video.uploadedAt || new Date().toISOString(),
+                    fileName: subLesson.video.fileName || subLesson.title
+                  },
+                  uploadedAt: subLesson.videoSource?.uploadedAt || new Date().toISOString(),
+                  uploadedBy: subLesson.videoSource?.uploadedBy
+                } : subLesson.videoSource || undefined, // FIX: Return undefined if no video
+                duration: subLesson.duration,
+                isPreview: subLesson.isPreview,
+                resources: (subLesson.resources || []).map(resource => ({
                   _id: resource._id || undefined,
                   title: resource.title,
                   url: resource.url,
                   type: resource.type
                 })),
-                order: lesson.order
-              };
-            })
+                order: subLesson.order
+              }))
+            }))
           }))
         }))
-      }
+      };
 
       console.log('📤 Updating course with data:', {
         title: submitData.title,
@@ -2499,7 +3807,7 @@ export default function EditCoursePage() {
     } finally {
       setSaving(false)
     }
-  }, [uploadProgress, networkStatus, formData, params.id, router, toast])
+  }, [uploadProgress, networkStatus, formData, params.id, router, toast, calculateLessonDuration])
 
   const togglePublish = async () => {
     try {
@@ -2671,6 +3979,9 @@ export default function EditCoursePage() {
                 <UploadOptimizationTips 
                   fileSize={uploadStats.totalSize}
                   uploadStatus="Active"
+                  deviceType={uploadProgress[activeUploads[0]]?.deviceType}
+                  networkType={uploadProgress[activeUploads[0]]?.networkType}
+                  memoryStatus={uploadProgress[activeUploads[0]]?.memoryStatus}
                 />
               )}
             </motion.div>
@@ -2817,6 +4128,8 @@ export default function EditCoursePage() {
                       uploadProgress={uploadProgress}
                       onCancelUpload={cancelUpload}
                       onRetryUpload={handleRetryUpload}
+                      onPauseUpload={pauseUpload}
+                      onResumeUpload={resumeUpload}
                     />
 
                     <FileUploadArea
@@ -2826,10 +4139,12 @@ export default function EditCoursePage() {
                       maxSize="10GB"
                       currentFile={formData.previewVideo}
                       onFileChange={handlePreviewVideoChange}
-                      onSelectFromLibrary={handlePreviewVideoSelectFromLibrary}
+                      onSelectFromLibrary={(video) => handleVideoLibrarySelect(video, { type: 'previewVideo' })}
                       uploadProgress={uploadProgress}
                       onCancelUpload={cancelUpload}
                       onRetryUpload={handleRetryUpload}
+                      onPauseUpload={pauseUpload}
+                      onResumeUpload={resumeUpload}
                     />
                   </CardContent>
                 </FormCard>
@@ -3001,6 +4316,8 @@ export default function EditCoursePage() {
                                 uploadProgress={uploadProgress}
                                 onCancelUpload={cancelUpload}
                                 onRetryUpload={handleRetryUpload}
+                                onPauseUpload={pauseUpload}
+                                onResumeUpload={resumeUpload}
                               />
 
                               {/* Chapters */}
@@ -3102,6 +4419,9 @@ export default function EditCoursePage() {
                                                   </div>
                                                   <div className="flex-1 min-w-0">
                                                     <p className="font-semibold text-slate-900 dark:text-white truncate">{lesson.title || `Lesson ${lessonIndex + 1}`}</p>
+                                                    <p className="text-xs text-slate-500">
+                                                      {lesson.subLessons.length} sub-lessons
+                                                    </p>
                                                   </div>
                                                   <Button 
                                                     type="button" 
@@ -3167,22 +4487,413 @@ export default function EditCoursePage() {
                                                   />
                                                 </FormGroup>
 
-                                                {/* Video Upload - Updated with Library Selector */}
-                                                <FileUploadArea
-                                                  type="lessonVideo"
-                                                  label="Lesson Video * (10GB supported)"
-                                                  acceptedFiles="video/mp4,video/webm,video/ogg,video/quicktime,video/mov"
-                                                  maxSize="10GB"
-                                                  currentFile={lesson.video || null}
-                                                  onFileChange={(e) => handleLessonVideoChange(e, moduleIndex, chapterIndex, lessonIndex)}
-                                                  onSelectFromLibrary={(video) => handleLessonVideoSelectFromLibrary(video, moduleIndex, chapterIndex, lessonIndex)}
-                                                  moduleIndex={moduleIndex}
-                                                  chapterIndex={chapterIndex}
-                                                  lessonIndex={lessonIndex}
-                                                  uploadProgress={uploadProgress}
-                                                  onCancelUpload={cancelUpload}
-                                                  onRetryUpload={handleRetryUpload}
-                                                />
+                                                {/* Sub-lessons */}
+                                                <div className="space-y-3">
+                                                  <div className="flex items-center justify-between">
+                                                    <h6 className="font-medium text-slate-900 dark:text-white">Sub-lessons</h6>
+                                                    <Button 
+                                                      type="button" 
+                                                      onClick={() => addSubLesson(moduleIndex, chapterIndex, lessonIndex)} 
+                                                      variant="outline"
+                                                      size="sm"
+                                                      className="h-8 rounded-lg"
+                                                    >
+                                                      <Plus className="w-3.5 h-3.5 mr-1" />
+                                                      Add Sub-lesson
+                                                    </Button>
+                                                  </div>
+                                                  
+                                                  {lesson.subLessons.map((subLesson, subLessonIndex) => (
+                                                    <Accordion key={subLessonIndex} type="single" collapsible className="border border-slate-200/50 dark:border-slate-700/50 rounded-lg">
+                                                      <AccordionItem value={`sublesson-${moduleIndex}-${chapterIndex}-${lessonIndex}-${subLessonIndex}`} className="border-b-0">
+                                                        <AccordionTrigger className="px-3 hover:no-underline">
+                                                          <div className="flex items-center gap-2 flex-1 text-left">
+                                                            <div className="w-6 h-6 bg-gradient-to-r from-slate-500 to-slate-600 rounded-md flex items-center justify-center text-white font-bold text-xs shadow-sm">
+                                                              {subLessonIndex + 1}
+                                                            </div>
+                                                            <div className="flex-1 min-w-0">
+                                                              <p className="font-medium text-slate-900 dark:text-white truncate text-sm">{subLesson.title || `Sub-lesson ${subLessonIndex + 1}`}</p>
+                                                            </div>
+                                                          </div>
+                                                        </AccordionTrigger>
+                                                        <AccordionContent className="px-3 pb-3">
+                                                          <div className="space-y-3">
+                                                            <FormGroup label="Sub-lesson Title" required icon={Feather}>
+                                                              <Input
+                                                                placeholder="Sub-lesson Title *"
+                                                                value={subLesson.title}
+                                                                onChange={(e) => {
+                                                                  const updatedModules = [...formData.modules]
+                                                                  updatedModules[moduleIndex] = {
+                                                                    ...updatedModules[moduleIndex],
+                                                                    chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                                      chapIdx === chapterIndex ? {
+                                                                        ...chap,
+                                                                        lessons: chap.lessons.map((les, lesIdx) =>
+                                                                          lesIdx === lessonIndex ? {
+                                                                            ...les,
+                                                                            subLessons: les.subLessons.map((subLes, subIdx) =>
+                                                                              subIdx === subLessonIndex ? {
+                                                                                ...subLes,
+                                                                                title: e.target.value
+                                                                              } : subLes
+                                                                            )
+                                                                          } : les
+                                                                        )
+                                                                      } : chap
+                                                                    )
+                                                                  }
+                                                                  setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                                }}
+                                                                className="h-9 rounded-md text-sm"
+                                                                required
+                                                              />
+                                                            </FormGroup>
+
+                                                            <FormGroup label="Sub-lesson Description" icon={FileText}>
+                                                              <Textarea
+                                                                placeholder="Sub-lesson Description (Optional)"
+                                                                value={subLesson.description}
+                                                                onChange={(e) => {
+                                                                  const updatedModules = [...formData.modules]
+                                                                  updatedModules[moduleIndex] = {
+                                                                    ...updatedModules[moduleIndex],
+                                                                    chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                                      chapIdx === chapterIndex ? {
+                                                                        ...chap,
+                                                                        lessons: chap.lessons.map((les, lesIdx) =>
+                                                                          lesIdx === lessonIndex ? {
+                                                                            ...les,
+                                                                            subLessons: les.subLessons.map((subLes, subIdx) =>
+                                                                              subIdx === subLessonIndex ? {
+                                                                                ...subLes,
+                                                                                description: e.target.value
+                                                                              } : subLes
+                                                                            )
+                                                                          } : les
+                                                                        )
+                                                                      } : chap
+                                                                    )
+                                                                  }
+                                                                  setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                                }}
+                                                                className="min-h-[60px] rounded-md text-sm"
+                                                              />
+                                                            </FormGroup>
+
+                                                            {/* Video Upload for Sub-lesson */}
+                                                            <FileUploadArea
+                                                              type="lessonVideo"
+                                                              label="Sub-lesson Video * (10GB supported)"
+                                                              acceptedFiles="video/mp4,video/webm,video/ogg,video/quicktime,video/mov"
+                                                              maxSize="10GB"
+                                                              currentFile={subLesson.video || null}
+                                                              onFileChange={(e) => handleSubLessonVideoChange(e, moduleIndex, chapterIndex, lessonIndex, subLessonIndex)}
+                                                              onSelectFromLibrary={(video) => handleVideoLibrarySelect(video, { 
+                                                                type: 'lessonVideo',
+                                                                moduleIndex,
+                                                                chapterIndex,
+                                                                lessonIndex,
+                                                                subLessonIndex
+                                                              })}
+                                                              moduleIndex={moduleIndex}
+                                                              chapterIndex={chapterIndex}
+                                                              lessonIndex={lessonIndex}
+                                                              // FIX: Remove subLessonIndex prop
+                                                              uploadProgress={uploadProgress}
+                                                              onCancelUpload={cancelUpload}
+                                                              onRetryUpload={handleRetryUpload}
+                                                              onPauseUpload={pauseUpload}
+                                                              onResumeUpload={resumeUpload}
+                                                            />
+
+                                                            <FormGroup label="Duration (minutes)" icon={Clock}>
+                                                              <Input
+                                                                type="number"
+                                                                placeholder="e.g., 15"
+                                                                value={subLesson.duration}
+                                                                onChange={(e) => {
+                                                                  const updatedModules = [...formData.modules]
+                                                                  updatedModules[moduleIndex] = {
+                                                                    ...updatedModules[moduleIndex],
+                                                                    chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                                      chapIdx === chapterIndex ? {
+                                                                        ...chap,
+                                                                        lessons: chap.lessons.map((les, lesIdx) =>
+                                                                          lesIdx === lessonIndex ? {
+                                                                            ...les,
+                                                                            subLessons: les.subLessons.map((subLes, subIdx) =>
+                                                                              subIdx === subLessonIndex ? {
+                                                                                ...subLes,
+                                                                                duration: parseInt(e.target.value) || 0
+                                                                              } : subLes
+                                                                            )
+                                                                          } : les
+                                                                        )
+                                                                      } : chap
+                                                                    )
+                                                                  }
+                                                                  setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                                }}
+                                                                className="h-9 rounded-md text-sm"
+                                                                min="0"
+                                                              />
+                                                            </FormGroup>
+
+                                                            <FormGroup label="Sub-lesson Content" icon={BookOpen}>
+                                                              <Textarea
+                                                                placeholder="Detailed content for this sub-lesson... (Optional)"
+                                                                value={subLesson.content}
+                                                                onChange={(e) => {
+                                                                  const updatedModules = [...formData.modules]
+                                                                  updatedModules[moduleIndex] = {
+                                                                    ...updatedModules[moduleIndex],
+                                                                    chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                                      chapIdx === chapterIndex ? {
+                                                                        ...chap,
+                                                                        lessons: chap.lessons.map((les, lesIdx) =>
+                                                                          lesIdx === lessonIndex ? {
+                                                                            ...les,
+                                                                            subLessons: les.subLessons.map((subLes, subIdx) =>
+                                                                              subIdx === subLessonIndex ? {
+                                                                                ...subLes,
+                                                                                content: e.target.value
+                                                                              } : subLes
+                                                                            )
+                                                                          } : les
+                                                                        )
+                                                                      } : chap
+                                                                    )
+                                                                  }
+                                                                  setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                                }}
+                                                                className="min-h-[80px] rounded-md text-sm"
+                                                              />
+                                                            </FormGroup>
+
+                                                            <div className="flex items-center gap-3 p-2 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-md">
+                                                              <input
+                                                                type="checkbox"
+                                                                checked={subLesson.isPreview}
+                                                                onChange={(e) => {
+                                                                  const updatedModules = [...formData.modules]
+                                                                  updatedModules[moduleIndex] = {
+                                                                    ...updatedModules[moduleIndex],
+                                                                    chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                                      chapIdx === chapterIndex ? {
+                                                                        ...chap,
+                                                                        lessons: chap.lessons.map((les, lesIdx) =>
+                                                                          lesIdx === lessonIndex ? {
+                                                                            ...les,
+                                                                            subLessons: les.subLessons.map((subLes, subIdx) =>
+                                                                              subIdx === subLessonIndex ? {
+                                                                                ...subLes,
+                                                                                isPreview: e.target.checked
+                                                                              } : subLes
+                                                                            )
+                                                                          } : les
+                                                                        )
+                                                                      } : chap
+                                                                    )
+                                                                  }
+                                                                  setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                                }}
+                                                                className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-emerald-600 focus:ring-emerald-500"
+                                                              />
+                                                              <label className="text-xs font-semibold text-slate-900 dark:text-white">Preview Sub-lesson</label>
+                                                              <span className="text-xs text-slate-500">(Free for all students)</span>
+                                                            </div>
+
+                                                            {/* Sub-lesson Resources */}
+                                                            <div className="space-y-2">
+                                                              <div className="flex items-center justify-between">
+                                                                <h6 className="text-xs font-medium text-slate-900 dark:text-white">Resources</h6>
+                                                                <Button 
+                                                                  type="button" 
+                                                                  onClick={() => addSubLessonResource(moduleIndex, chapterIndex, lessonIndex, subLessonIndex)} 
+                                                                  variant="outline"
+                                                                  size="sm"
+                                                                  className="h-7 rounded-md text-xs"
+                                                                >
+                                                                  <Plus className="w-3 h-3 mr-1" />
+                                                                  Add Resource
+                                                                </Button>
+                                                              </div>
+                                                              
+                                                              {subLesson.resources.map((resource, resourceIndex) => (
+                                                                <div key={resourceIndex} className="grid grid-cols-12 gap-1 p-1.5 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800/50 dark:to-slate-900/50 rounded-md">
+                                                                  <Input
+                                                                    placeholder="Title"
+                                                                    value={resource.title}
+                                                                    onChange={(e) => {
+                                                                      const updatedModules = [...formData.modules]
+                                                                      updatedModules[moduleIndex] = {
+                                                                        ...updatedModules[moduleIndex],
+                                                                        chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                                          chapIdx === chapterIndex ? {
+                                                                            ...chap,
+                                                                            lessons: chap.lessons.map((les, lesIdx) =>
+                                                                              lesIdx === lessonIndex ? {
+                                                                                ...les,
+                                                                                subLessons: les.subLessons.map((subLes, subIdx) =>
+                                                                                  subIdx === subLessonIndex ? {
+                                                                                    ...subLes,
+                                                                                    resources: subLes.resources.map((res, resIdx) =>
+                                                                                      resIdx === resourceIndex ? {
+                                                                                        ...res,
+                                                                                        title: e.target.value
+                                                                                      } : res
+                                                                                    )
+                                                                                  } : subLes
+                                                                                )
+                                                                              } : les
+                                                                            )
+                                                                          } : chap
+                                                                        )
+                                                                      }
+                                                                      setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                                    }}
+                                                                    className="col-span-5 rounded h-7 text-xs"
+                                                                  />
+                                                                  <Input
+                                                                    placeholder="URL"
+                                                                    value={resource.url}
+                                                                    onChange={(e) => {
+                                                                      const updatedModules = [...formData.modules]
+                                                                      updatedModules[moduleIndex] = {
+                                                                        ...updatedModules[moduleIndex],
+                                                                        chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                                          chapIdx === chapterIndex ? {
+                                                                            ...chap,
+                                                                            lessons: chap.lessons.map((les, lesIdx) =>
+                                                                              lesIdx === lessonIndex ? {
+                                                                                ...les,
+                                                                                subLessons: les.subLessons.map((subLes, subIdx) =>
+                                                                                  subIdx === subLessonIndex ? {
+                                                                                    ...subLes,
+                                                                                    resources: subLes.resources.map((res, resIdx) =>
+                                                                                      resIdx === resourceIndex ? {
+                                                                                        ...res,
+                                                                                        url: e.target.value
+                                                                                      } : res
+                                                                                    )
+                                                                                  } : subLes
+                                                                                )
+                                                                              } : les
+                                                                            )
+                                                                          } : chap
+                                                                        )
+                                                                      }
+                                                                      setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                                    }}
+                                                                    className="col-span-5 rounded h-7 text-xs"
+                                                                  />
+                                                                  <select
+                                                                    value={resource.type}
+                                                                    onChange={(e) => {
+                                                                      const updatedModules = [...formData.modules]
+                                                                      updatedModules[moduleIndex] = {
+                                                                        ...updatedModules[moduleIndex],
+                                                                        chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                                          chapIdx === chapterIndex ? {
+                                                                            ...chap,
+                                                                            lessons: chap.lessons.map((les, lesIdx) =>
+                                                                              lesIdx === lessonIndex ? {
+                                                                                ...les,
+                                                                                subLessons: les.subLessons.map((subLes, subIdx) =>
+                                                                                  subIdx === subLessonIndex ? {
+                                                                                    ...subLes,
+                                                                                    resources: subLes.resources.map((res, resIdx) =>
+                                                                                      resIdx === resourceIndex ? {
+                                                                                        ...res,
+                                                                                        type: e.target.value as any
+                                                                                      } : res
+                                                                                    )
+                                                                                  } : subLes
+                                                                                )
+                                                                              } : les
+                                                                            )
+                                                                          } : chap
+                                                                        )
+                                                                      }
+                                                                      setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                                    }}
+                                                                    className="col-span-1 rounded h-7 text-xs border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+                                                                  >
+                                                                    <option value="pdf">PDF</option>
+                                                                    <option value="document">Document</option>
+                                                                    <option value="link">Link</option>
+                                                                    <option value="video">Video</option>
+                                                                  </select>
+                                                                  <Button 
+                                                                    type="button" 
+                                                                    variant="ghost" 
+                                                                    size="icon"
+                                                                    onClick={() => removeSubLessonResource(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, resourceIndex)}
+                                                                    className="col-span-1 h-7 w-7 rounded text-rose-500 hover:text-rose-600 text-xs"
+                                                                  >
+                                                                    <X className="w-3 h-3" />
+                                                                  </Button>
+                                                                </div>
+                                                              ))}
+                                                            </div>
+
+                                                            <div className="flex justify-end pt-2">
+                                                              <Button 
+                                                                type="button" 
+                                                                variant="destructive" 
+                                                                size="sm"
+                                                                onClick={() => removeSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex)}
+                                                                className="h-7 rounded-md text-xs"
+                                                              >
+                                                                <X className="w-3 h-3 mr-1" />
+                                                                Remove Sub-lesson
+                                                              </Button>
+                                                            </div>
+                                                          </div>
+                                                        </AccordionContent>
+                                                      </AccordionItem>
+                                                    </Accordion>
+                                                  ))}
+                                                </div>
+
+                                                {/* Lesson Video (always show, even with sub-lessons) */}
+                                                <div className="mt-4">
+                                                  <FileUploadArea
+                                                    type="lessonVideo"
+                                                    label="Lesson Video * (10GB supported)"
+                                                    acceptedFiles="video/mp4,video/webm,video/ogg,video/quicktime,video/mov"
+                                                    maxSize="10GB"
+                                                    currentFile={lesson.video || null}
+                                                    onFileChange={(e) => handleLessonVideoChange(e, moduleIndex, chapterIndex, lessonIndex)}
+                                                    onSelectFromLibrary={(video) => handleVideoLibrarySelect(video, { 
+                                                      type: 'lessonVideo',
+                                                      moduleIndex,
+                                                      chapterIndex,
+                                                      lessonIndex
+                                                    })}
+                                                    moduleIndex={moduleIndex}
+                                                    chapterIndex={chapterIndex}
+                                                    lessonIndex={lessonIndex}
+                                                    uploadProgress={uploadProgress}
+                                                    onCancelUpload={cancelUpload}
+                                                    onRetryUpload={handleRetryUpload}
+                                                    onPauseUpload={pauseUpload}
+                                                    onResumeUpload={resumeUpload}
+                                                  />
+                                                  
+
+                                                  <div className="mt-2 text-sm text-slate-500">
+                                                    {lesson.subLessons.length > 0 ? (
+                                                      <div className="space-y-1">
+                                                        <p>✓ This lesson has {lesson.subLessons.length} sub-lesson(s) with their own videos</p>
+                                                        <p className="text-xs">Optional: You can also upload a lesson overview video</p>
+                                                      </div>
+                                                    ) : (
+                                                      <p>✓ This is a standalone lesson video (required)</p>
+                                                    )}
+                                                  </div>
+                                                </div>
 
                                                 <FormGroup label="Duration (minutes)" icon={Clock}>
                                                   <Input
@@ -3202,7 +4913,7 @@ export default function EditCoursePage() {
                                                                 duration: parseInt(e.target.value) || 0
                                                               } : les
                                                             )
-                                                          } : chap
+                                                          } : chapter
                                                         )
                                                       }
                                                       setFormData(prev => ({ ...prev, modules: updatedModules }))
@@ -3266,7 +4977,7 @@ export default function EditCoursePage() {
                                                   <span className="text-xs text-slate-500">(Free for all students)</span>
                                                 </div>
 
-                                                {/* Resources */}
+                                                {/* Lesson Resources - SAFE VERSION */}
                                                 <div className="space-y-3">
                                                   <div className="flex items-center justify-between">
                                                     <h6 className="font-medium text-slate-900 dark:text-white">Resources</h6>
@@ -3282,13 +4993,14 @@ export default function EditCoursePage() {
                                                     </Button>
                                                   </div>
                                                   
-                                                  {lesson.resources.map((resource, resourceIndex) => (
+                                                  {/* Safe mapping with fallback to empty array */}
+                                                  {((lesson.resources || []) as Resource[]).map((resource, resourceIndex) => (
                                                     <div key={resourceIndex} className="grid grid-cols-12 gap-2 p-2 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800/50 dark:to-slate-900/50 rounded-lg">
                                                       <Input
                                                         placeholder="Title"
-                                                        value={resource.title}
+                                                        value={resource.title || ''}
                                                         onChange={(e) => {
-                                                          const updatedModules = [...formData.modules]
+                                                          const updatedModules = [...formData.modules];
                                                           updatedModules[moduleIndex] = {
                                                             ...updatedModules[moduleIndex],
                                                             chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
@@ -3297,7 +5009,7 @@ export default function EditCoursePage() {
                                                                 lessons: chap.lessons.map((les, lesIdx) =>
                                                                   lesIdx === lessonIndex ? {
                                                                     ...les,
-                                                                    resources: les.resources.map((res, resIdx) =>
+                                                                    resources: (les.resources || []).map((res, resIdx) =>
                                                                       resIdx === resourceIndex ? {
                                                                         ...res,
                                                                         title: e.target.value
@@ -3307,16 +5019,16 @@ export default function EditCoursePage() {
                                                                 )
                                                               } : chap
                                                             )
-                                                          }
-                                                          setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                          };
+                                                          setFormData(prev => ({ ...prev, modules: updatedModules }));
                                                         }}
                                                         className="col-span-5 rounded-md h-9 text-sm"
                                                       />
                                                       <Input
                                                         placeholder="URL"
-                                                        value={resource.url}
+                                                        value={resource.url || ''}
                                                         onChange={(e) => {
-                                                          const updatedModules = [...formData.modules]
+                                                          const updatedModules = [...formData.modules];
                                                           updatedModules[moduleIndex] = {
                                                             ...updatedModules[moduleIndex],
                                                             chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
@@ -3325,7 +5037,7 @@ export default function EditCoursePage() {
                                                                 lessons: chap.lessons.map((les, lesIdx) =>
                                                                   lesIdx === lessonIndex ? {
                                                                     ...les,
-                                                                    resources: les.resources.map((res, resIdx) =>
+                                                                    resources: (les.resources || []).map((res, resIdx) =>
                                                                       resIdx === resourceIndex ? {
                                                                         ...res,
                                                                         url: e.target.value
@@ -3335,15 +5047,15 @@ export default function EditCoursePage() {
                                                                 )
                                                               } : chap
                                                             )
-                                                          }
-                                                          setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                          };
+                                                          setFormData(prev => ({ ...prev, modules: updatedModules }));
                                                         }}
                                                         className="col-span-5 rounded-md h-9 text-sm"
                                                       />
                                                       <select
-                                                        value={resource.type}
+                                                        value={resource.type || 'pdf'}
                                                         onChange={(e) => {
-                                                          const updatedModules = [...formData.modules]
+                                                          const updatedModules = [...formData.modules];
                                                           updatedModules[moduleIndex] = {
                                                             ...updatedModules[moduleIndex],
                                                             chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
@@ -3352,7 +5064,7 @@ export default function EditCoursePage() {
                                                                 lessons: chap.lessons.map((les, lesIdx) =>
                                                                   lesIdx === lessonIndex ? {
                                                                     ...les,
-                                                                    resources: les.resources.map((res, resIdx) =>
+                                                                    resources: (les.resources || []).map((res, resIdx) =>
                                                                       resIdx === resourceIndex ? {
                                                                         ...res,
                                                                         type: e.target.value as any
@@ -3362,8 +5074,8 @@ export default function EditCoursePage() {
                                                                 )
                                                               } : chap
                                                             )
-                                                          }
-                                                          setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                          };
+                                                          setFormData(prev => ({ ...prev, modules: updatedModules }));
                                                         }}
                                                         className="col-span-1 rounded-md h-9 text-sm border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
                                                       >
@@ -3540,9 +5252,9 @@ export default function EditCoursePage() {
                         </p>
                       </div>
                       <div className="bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/20 p-3 rounded-xl">
-                        <p className="text-xs text-slate-600 dark:text-slate-400">Duration</p>
+                        <p className="text-xs text-slate-600 dark:text-slate-400">Sub-lessons</p>
                         <p className="text-base font-bold bg-gradient-to-r from-emerald-600 to-green-600 bg-clip-text text-transparent">
-                          {formatDuration(totalDuration)}
+                          {totalSubLessons}
                         </p>
                       </div>
                     </div>
@@ -3745,6 +5457,8 @@ export default function EditCoursePage() {
                       uploadProgress={uploadProgress}
                       onCancelUpload={cancelUpload}
                       onRetryUpload={handleRetryUpload}
+                      onPauseUpload={pauseUpload}
+                      onResumeUpload={resumeUpload}
                     />
 
                     <FileUploadArea
@@ -3754,10 +5468,12 @@ export default function EditCoursePage() {
                       maxSize="10GB"
                       currentFile={formData.previewVideo}
                       onFileChange={handlePreviewVideoChange}
-                      onSelectFromLibrary={handlePreviewVideoSelectFromLibrary}
+                      onSelectFromLibrary={(video) => handleVideoLibrarySelect(video, { type: 'previewVideo' })}
                       uploadProgress={uploadProgress}
                       onCancelUpload={cancelUpload}
                       onRetryUpload={handleRetryUpload}
+                      onPauseUpload={pauseUpload}
+                      onResumeUpload={resumeUpload}
                     />
                   </div>
                 </CardContent>
@@ -3928,6 +5644,8 @@ export default function EditCoursePage() {
                               uploadProgress={uploadProgress}
                               onCancelUpload={cancelUpload}
                               onRetryUpload={handleRetryUpload}
+                              onPauseUpload={pauseUpload}
+                              onResumeUpload={resumeUpload}
                             />
 
                             {/* Chapters */}
@@ -4029,6 +5747,9 @@ export default function EditCoursePage() {
                                                 </div>
                                                 <div className="flex-1 min-w-0">
                                                   <p className="font-semibold text-slate-900 dark:text-white truncate">{lesson.title || `Lesson ${lessonIndex + 1}`}</p>
+                                                  <p className="text-xs text-slate-500">
+                                                    {lesson.subLessons.length} sub-lessons
+                                                  </p>
                                                 </div>
                                                 <Button 
                                                   type="button" 
@@ -4094,22 +5815,396 @@ export default function EditCoursePage() {
                                                 />
                                               </FormGroup>
 
-                                              {/* Video Upload - Updated with Library Selector */}
-                                              <FileUploadArea
-                                                type="lessonVideo"
-                                                label="Lesson Video * (10GB supported)"
-                                                acceptedFiles="video/mp4,video/webm,video/ogg,video/quicktime,video/mov"
-                                                maxSize="10GB"
-                                                currentFile={lesson.video || null}
-                                                onFileChange={(e) => handleLessonVideoChange(e, moduleIndex, chapterIndex, lessonIndex)}
-                                                onSelectFromLibrary={(video) => handleLessonVideoSelectFromLibrary(video, moduleIndex, chapterIndex, lessonIndex)}
-                                                moduleIndex={moduleIndex}
-                                                chapterIndex={chapterIndex}
-                                                lessonIndex={lessonIndex}
-                                                uploadProgress={uploadProgress}
-                                                onCancelUpload={cancelUpload}
-                                                onRetryUpload={handleRetryUpload}
-                                              />
+                                              {/* Sub-lessons */}
+                                              <div className="space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                  <h6 className="font-medium text-slate-900 dark:text-white">Sub-lessons</h6>
+                                                  <Button 
+                                                    type="button" 
+                                                    onClick={() => addSubLesson(moduleIndex, chapterIndex, lessonIndex)} 
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="h-8 rounded-lg"
+                                                  >
+                                                    <Plus className="w-3.5 h-3.5 mr-1" />
+                                                    Add Sub-lesson
+                                                  </Button>
+                                                </div>
+                                                
+                                                {lesson.subLessons.map((subLesson, subLessonIndex) => (
+                                                  <Accordion key={subLessonIndex} type="single" collapsible className="border border-slate-200/50 dark:border-slate-700/50 rounded-lg">
+                                                    <AccordionItem value={`sublesson-${moduleIndex}-${chapterIndex}-${lessonIndex}-${subLessonIndex}`} className="border-b-0">
+                                                      <AccordionTrigger className="px-3 hover:no-underline">
+                                                        <div className="flex items-center gap-2 flex-1 text-left">
+                                                          <div className="w-6 h-6 bg-gradient-to-r from-slate-500 to-slate-600 rounded-md flex items-center justify-center text-white font-bold text-xs shadow-sm">
+                                                            {subLessonIndex + 1}
+                                                          </div>
+                                                          <div className="flex-1 min-w-0">
+                                                            <p className="font-medium text-slate-900 dark:text-white truncate text-sm">{subLesson.title || `Sub-lesson ${subLessonIndex + 1}`}</p>
+                                                          </div>
+                                                        </div>
+                                                      </AccordionTrigger>
+                                                      <AccordionContent className="px-3 pb-3">
+                                                        <div className="space-y-3">
+                                                          <FormGroup label="Sub-lesson Title" required icon={Feather}>
+                                                            <Input
+                                                              placeholder="Sub-lesson Title *"
+                                                              value={subLesson.title}
+                                                              onChange={(e) => {
+                                                                const updatedModules = [...formData.modules]
+                                                                updatedModules[moduleIndex] = {
+                                                                  ...updatedModules[moduleIndex],
+                                                                  chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                                    chapIdx === chapterIndex ? {
+                                                                      ...chap,
+                                                                      lessons: chap.lessons.map((les, lesIdx) =>
+                                                                        lesIdx === lessonIndex ? {
+                                                                          ...les,
+                                                                          subLessons: les.subLessons.map((subLes, subIdx) =>
+                                                                            subIdx === subLessonIndex ? {
+                                                                              ...subLes,
+                                                                              title: e.target.value
+                                                                            } : subLes
+                                                                          )
+                                                                        } : les
+                                                                      )
+                                                                    } : chap
+                                                                  )
+                                                                }
+                                                                setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                              }}
+                                                              className="h-9 rounded-md text-sm"
+                                                              required
+                                                            />
+                                                          </FormGroup>
+
+                                                          <FormGroup label="Sub-lesson Description" icon={FileText}>
+                                                            <Textarea
+                                                              placeholder="Sub-lesson Description (Optional)"
+                                                              value={subLesson.description}
+                                                              onChange={(e) => {
+                                                                const updatedModules = [...formData.modules]
+                                                                updatedModules[moduleIndex] = {
+                                                                  ...updatedModules[moduleIndex],
+                                                                  chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                                    chapIdx === chapterIndex ? {
+                                                                      ...chap,
+                                                                      lessons: chap.lessons.map((les, lesIdx) =>
+                                                                        lesIdx === lessonIndex ? {
+                                                                          ...les,
+                                                                          subLessons: les.subLessons.map((subLes, subIdx) =>
+                                                                            subIdx === subLessonIndex ? {
+                                                                              ...subLes,
+                                                                              description: e.target.value
+                                                                            } : subLes
+                                                                          )
+                                                                        } : les
+                                                                      )
+                                                                    } : chap
+                                                                  )
+                                                                }
+                                                                setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                              }}
+                                                              className="min-h-[60px] rounded-md text-sm"
+                                                            />
+                                                          </FormGroup>
+
+                                                          {/* Video Upload for Sub-lesson */}
+                                                          <FileUploadArea
+                                                            type="lessonVideo"
+                                                            label="Sub-lesson Video * (10GB supported)"
+                                                            acceptedFiles="video/mp4,video/webm,video/ogg,video/quicktime,video/mov"
+                                                            maxSize="10GB"
+                                                            currentFile={subLesson.video || null}
+                                                            onFileChange={(e) => handleSubLessonVideoChange(e, moduleIndex, chapterIndex, lessonIndex, subLessonIndex)}
+                                                            onSelectFromLibrary={(video) => handleVideoLibrarySelect(video, { 
+                                                              type: 'lessonVideo',
+                                                              moduleIndex,
+                                                              chapterIndex,
+                                                              lessonIndex,
+                                                              subLessonIndex
+                                                            })}
+                                                            moduleIndex={moduleIndex}
+                                                            chapterIndex={chapterIndex}
+                                                            lessonIndex={lessonIndex}
+                                                            // FIX: Remove subLessonIndex prop
+                                                            uploadProgress={uploadProgress}
+                                                            onCancelUpload={cancelUpload}
+                                                            onRetryUpload={handleRetryUpload}
+                                                            onPauseUpload={pauseUpload}
+                                                            onResumeUpload={resumeUpload}
+                                                          />
+
+                                                          <FormGroup label="Duration (minutes)" icon={Clock}>
+                                                            <Input
+                                                              type="number"
+                                                              placeholder="e.g., 15"
+                                                              value={subLesson.duration}
+                                                              onChange={(e) => {
+                                                                const updatedModules = [...formData.modules]
+                                                                updatedModules[moduleIndex] = {
+                                                                  ...updatedModules[moduleIndex],
+                                                                  chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                                    chapIdx === chapterIndex ? {
+                                                                      ...chap,
+                                                                      lessons: chap.lessons.map((les, lesIdx) =>
+                                                                        lesIdx === lessonIndex ? {
+                                                                          ...les,
+                                                                          subLessons: les.subLessons.map((subLes, subIdx) =>
+                                                                            subIdx === subLessonIndex ? {
+                                                                              ...subLes,
+                                                                              duration: parseInt(e.target.value) || 0
+                                                                            } : subLes
+                                                                          )
+                                                                        } : les
+                                                                      )
+                                                                    } : chap
+                                                                  )
+                                                                }
+                                                                setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                              }}
+                                                              className="h-9 rounded-md text-sm"
+                                                              min="0"
+                                                            />
+                                                          </FormGroup>
+
+                                                          <FormGroup label="Sub-lesson Content" icon={BookOpen}>
+                                                            <Textarea
+                                                              placeholder="Detailed content for this sub-lesson... (Optional)"
+                                                              value={subLesson.content}
+                                                              onChange={(e) => {
+                                                                const updatedModules = [...formData.modules]
+                                                                updatedModules[moduleIndex] = {
+                                                                  ...updatedModules[moduleIndex],
+                                                                  chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                                    chapIdx === chapterIndex ? {
+                                                                      ...chap,
+                                                                      lessons: chap.lessons.map((les, lesIdx) =>
+                                                                        lesIdx === lessonIndex ? {
+                                                                          ...les,
+                                                                          subLessons: les.subLessons.map((subLes, subIdx) =>
+                                                                            subIdx === subLessonIndex ? {
+                                                                              ...subLes,
+                                                                              content: e.target.value
+                                                                            } : subLes
+                                                                          )
+                                                                        } : les
+                                                                      )
+                                                                    } : chap
+                                                                  )
+                                                                }
+                                                                setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                              }}
+                                                              className="min-h-[80px] rounded-md text-sm"
+                                                            />
+                                                          </FormGroup>
+
+                                                          <div className="flex items-center gap-3 p-2 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-md">
+                                                            <input
+                                                              type="checkbox"
+                                                              checked={subLesson.isPreview}
+                                                              onChange={(e) => {
+                                                                const updatedModules = [...formData.modules]
+                                                                updatedModules[moduleIndex] = {
+                                                                  ...updatedModules[moduleIndex],
+                                                                  chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                                    chapIdx === chapterIndex ? {
+                                                                      ...chap,
+                                                                      lessons: chap.lessons.map((les, lesIdx) =>
+                                                                        lesIdx === lessonIndex ? {
+                                                                          ...les,
+                                                                          subLessons: les.subLessons.map((subLes, subIdx) =>
+                                                                            subIdx === subLessonIndex ? {
+                                                                              ...subLes,
+                                                                              isPreview: e.target.checked
+                                                                            } : subLes
+                                                                          )
+                                                                        } : les
+                                                                      )
+                                                                    } : chap
+                                                                  )
+                                                                }
+                                                                setFormData(prev => ({ ...prev, modules: updatedModules }))
+                                                              }}
+                                                              className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-emerald-600 focus:ring-emerald-500"
+                                                            />
+                                                            <label className="text-xs font-semibold text-slate-900 dark:text-white">Preview Sub-lesson</label>
+                                                            <span className="text-xs text-slate-500">(Free for all students)</span>
+                                                          </div>
+
+                                                          {/* Sub-lesson Resources - SAFE VERSION */}
+                                                          <div className="space-y-2">
+                                                            <div className="flex items-center justify-between">
+                                                              <h6 className="text-xs font-medium text-slate-900 dark:text-white">Resources</h6>
+                                                              <Button 
+                                                                type="button" 
+                                                                onClick={() => addSubLessonResource(moduleIndex, chapterIndex, lessonIndex, subLessonIndex)} 
+                                                                variant="outline"
+                                                                size="sm"
+                                                                className="h-7 rounded-md text-xs"
+                                                              >
+                                                                <Plus className="w-3 h-3 mr-1" />
+                                                                Add Resource
+                                                              </Button>
+                                                            </div>
+                                                            
+                                                            {((subLesson.resources || []) as Resource[]).map((resource, resourceIndex) => (
+                                                              <div key={resourceIndex} className="grid grid-cols-12 gap-1 p-1.5 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800/50 dark:to-slate-900/50 rounded-md">
+                                                                <Input
+                                                                  placeholder="Title"
+                                                                  value={resource.title || ''}
+                                                                  onChange={(e) => {
+                                                                    const updatedModules = [...formData.modules];
+                                                                    updatedModules[moduleIndex] = {
+                                                                      ...updatedModules[moduleIndex],
+                                                                      chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                                        chapIdx === chapterIndex ? {
+                                                                          ...chap,
+                                                                          lessons: chap.lessons.map((les, lesIdx) =>
+                                                                            lesIdx === lessonIndex ? {
+                                                                              ...les,
+                                                                              subLessons: les.subLessons.map((subLes, subIdx) =>
+                                                                                subIdx === subLessonIndex ? {
+                                                                                  ...subLes,
+                                                                                  resources: (subLes.resources || []).map((res, resIdx) =>
+                                                                                    resIdx === resourceIndex ? {
+                                                                                      ...res,
+                                                                                      title: e.target.value
+                                                                                    } : res
+                                                                                  )
+                                                                                } : subLes
+                                                                              )
+                                                                            } : les
+                                                                          )
+                                                                        } : chap
+                                                                      )
+                                                                    };
+                                                                    setFormData(prev => ({ ...prev, modules: updatedModules }));
+                                                                  }}
+                                                                  className="col-span-5 rounded h-7 text-xs"
+                                                                />
+                                                                <Input
+                                                                  placeholder="URL"
+                                                                  value={resource.url || ''}
+                                                                  onChange={(e) => {
+                                                                    const updatedModules = [...formData.modules];
+                                                                    updatedModules[moduleIndex] = {
+                                                                      ...updatedModules[moduleIndex],
+                                                                      chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                                        chapIdx === chapterIndex ? {
+                                                                          ...chap,
+                                                                          lessons: chap.lessons.map((les, lesIdx) =>
+                                                                            lesIdx === lessonIndex ? {
+                                                                              ...les,
+                                                                              subLessons: les.subLessons.map((subLes, subIdx) =>
+                                                                                subIdx === subLessonIndex ? {
+                                                                                  ...subLes,
+                                                                                  resources: (subLes.resources || []).map((res, resIdx) =>
+                                                                                    resIdx === resourceIndex ? {
+                                                                                      ...res,
+                                                                                      url: e.target.value
+                                                                                    } : res
+                                                                                  )
+                                                                                } : subLes
+                                                                              )
+                                                                            } : les
+                                                                          )
+                                                                        } : chap
+                                                                      )
+                                                                    };
+                                                                    setFormData(prev => ({ ...prev, modules: updatedModules }));
+                                                                  }}
+                                                                  className="col-span-5 rounded h-7 text-xs"
+                                                                />
+                                                                <select
+                                                                  value={resource.type || 'pdf'}
+                                                                  onChange={(e) => {
+                                                                    const updatedModules = [...formData.modules];
+                                                                    updatedModules[moduleIndex] = {
+                                                                      ...updatedModules[moduleIndex],
+                                                                      chapters: updatedModules[moduleIndex].chapters.map((chap, chapIdx) =>
+                                                                        chapIdx === chapterIndex ? {
+                                                                          ...chap,
+                                                                          lessons: chap.lessons.map((les, lesIdx) =>
+                                                                            lesIdx === lessonIndex ? {
+                                                                              ...les,
+                                                                              subLessons: les.subLessons.map((subLes, subIdx) =>
+                                                                                subIdx === subLessonIndex ? {
+                                                                                  ...subLes,
+                                                                                  resources: (subLes.resources || []).map((res, resIdx) =>
+                                                                                    resIdx === resourceIndex ? {
+                                                                                      ...res,
+                                                                                      type: e.target.value as any
+                                                                                    } : res
+                                                                                  )
+                                                                                } : subLes
+                                                                              )
+                                                                            } : les
+                                                                          )
+                                                                        } : chap
+                                                                      )
+                                                                    };
+                                                                    setFormData(prev => ({ ...prev, modules: updatedModules }));
+                                                                  }}
+                                                                  className="col-span-1 rounded h-7 text-xs border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+                                                                >
+                                                                  <option value="pdf">PDF</option>
+                                                                  <option value="document">Document</option>
+                                                                  <option value="link">Link</option>
+                                                                  <option value="video">Video</option>
+                                                                </select>
+                                                                <Button 
+                                                                  type="button" 
+                                                                  variant="ghost" 
+                                                                  size="icon"
+                                                                  onClick={() => removeSubLessonResource(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, resourceIndex)}
+                                                                  className="col-span-1 h-7 w-7 rounded text-rose-500 hover:text-rose-600 text-xs"
+                                                                >
+                                                                  <X className="w-3 h-3" />
+                                                                </Button>
+                                                              </div>
+                                                            ))}
+                                                          </div>
+                                                        </div>
+                                                      </AccordionContent>
+                                                    </AccordionItem>
+                                                  </Accordion>
+                                                ))}
+                                              </div>
+
+                                              {/* Lesson Video - Always show this section */}
+                                              <div className="mt-4">
+                                                <FileUploadArea
+                                                  type="lessonVideo"
+                                                  label="Lesson Video * (10GB supported)"
+                                                  acceptedFiles="video/mp4,video/webm,video/ogg,video/quicktime,video/mov"
+                                                  maxSize="10GB"
+                                                  currentFile={lesson.video || null}
+                                                  onFileChange={(e) => handleLessonVideoChange(e, moduleIndex, chapterIndex, lessonIndex)}
+                                                  onSelectFromLibrary={(video) => handleVideoLibrarySelect(video, { 
+                                                    type: 'lessonVideo',
+                                                    moduleIndex,
+                                                    chapterIndex,
+                                                    lessonIndex
+                                                  })}
+                                                  moduleIndex={moduleIndex}
+                                                  chapterIndex={chapterIndex}
+                                                  lessonIndex={lessonIndex}
+                                                  uploadProgress={uploadProgress}
+                                                  onCancelUpload={cancelUpload}
+                                                  onRetryUpload={handleRetryUpload}
+                                                  onPauseUpload={pauseUpload}
+                                                  onResumeUpload={resumeUpload}
+                                                />
+                                                
+                                                <div className="mt-2 text-sm text-slate-500">
+                                                  {lesson.subLessons.length > 0 ? (
+                                                    <p>✓ This lesson has {lesson.subLessons.length} sub-lesson(s)</p>
+                                                  ) : (
+                                                    <p>✓ This is a standalone lesson video</p>
+                                                  )}
+                                                </div>
+                                              </div>
 
                                               <FormGroup label="Duration (minutes)" icon={Clock}>
                                                 <Input
@@ -4468,9 +6563,9 @@ export default function EditCoursePage() {
                       </p>
                     </div>
                     <div className="bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/20 p-3 rounded-xl">
-                      <p className="text-xs text-slate-600 dark:text-slate-400">Duration</p>
+                      <p className="text-xs text-slate-600 dark:text-slate-400">Sub-lessons</p>
                       <p className="text-base font-bold bg-gradient-to-r from-emerald-600 to-green-600 bg-clip-text text-transparent">
-                        {formatDuration(totalDuration)}
+                        {totalSubLessons}
                       </p>
                     </div>
                   </div>
@@ -4567,6 +6662,21 @@ export default function EditCoursePage() {
           onViewCourse={viewCourse}
         />
       </div>
+
+      {/* Mobile Upload Notification */}
+      <MobileUploadNotification
+        show={mobileUploadNotification.show}
+        message={mobileUploadNotification.message}
+        type={mobileUploadNotification.type}
+        onClose={() => setMobileUploadNotification(prev => ({ ...prev, show: false }))}
+      />
+
+      {/* iOS Upload Notification */}
+      <IOSUploadNotification
+        show={showIOSNotification}
+        uploadProgress={activeIOSUpload}
+        onDismiss={() => setShowIOSNotification(false)}
+      />
     </div>
   )
 }

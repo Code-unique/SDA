@@ -135,7 +135,7 @@ import {
 import UltraFastVideoPlayer from '@/components/ui/ultra-fast-video-player'
 import Image from 'next/image'
 
-// ==================== TYPES ====================
+// ==================== UPDATED TYPES ====================
 interface S3Asset {
   key: string
   url: string
@@ -146,6 +146,33 @@ interface S3Asset {
   height?: number
 }
 
+interface Resource {
+  title: string
+  url: string
+  type: string
+}
+
+interface SubLesson {
+  _id: string
+  title: string
+  description: string
+  content: string
+  duration: number
+  isPreview: boolean
+  order: number
+  video?: S3Asset
+  videoSource?: {
+    type: 'uploaded' | 'library'
+    videoLibraryId?: string
+    video: S3Asset
+    uploadedAt?: string
+    uploadedBy?: string
+  }
+  resources: Resource[]
+  isSubLesson?: boolean
+  parentLessonId?: string
+}
+
 interface Lesson {
   _id: string
   title: string
@@ -154,12 +181,18 @@ interface Lesson {
   isPreview: boolean
   order: number
   video?: S3Asset
+  videoSource?: {
+    type: 'uploaded' | 'library'
+    videoLibraryId?: string
+    video: S3Asset
+    uploadedAt?: string
+    uploadedBy?: string
+  }
   content?: string
-  resources: Array<{
-    title: string
-    url: string
-    type: string
-  }>
+  resources: Resource[]
+  subLessons: SubLesson[]
+  isSubLesson?: boolean
+  parentLessonId?: string
 }
 
 interface Chapter {
@@ -744,6 +777,7 @@ export default function CourseDetailPage() {
   const [isIOS, setIsIOS] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const videoContainerRef = useRef<HTMLDivElement>(null)
+  const [allContentItems, setAllContentItems] = useState<Lesson[]>([])
 
   const slug = params.slug as string
 
@@ -760,7 +794,7 @@ export default function CourseDetailPage() {
     return () => window.removeEventListener('resize', checkDevice)
   }, [])
 
-  // Updated extractVideoAsset function
+  // Extract video asset - FIXED for better performance
   const extractVideoAsset = useCallback((videoData: any): S3Asset | undefined => {
     if (!videoData) return undefined
     
@@ -819,7 +853,36 @@ export default function CourseDetailPage() {
     return undefined
   }, [])
 
-  // Fetch course data
+  // Create flat array of all content items (lessons + sub-lessons)
+  const createAllContentItems = useCallback((courseData: Course): Lesson[] => {
+    const items: Lesson[] = []
+    
+    if (!courseData?.modules) return items
+    
+    courseData.modules.forEach(module => {
+      module.chapters.forEach(chapter => {
+        chapter.lessons.forEach(lesson => {
+          // Add main lesson
+          items.push(lesson)
+          
+          // Add sub-lessons
+          if (lesson.subLessons && lesson.subLessons.length > 0) {
+            lesson.subLessons.forEach(subLesson => {
+              items.push({
+                ...subLesson,
+                isSubLesson: true,
+                parentLessonId: lesson._id
+              } as Lesson)
+            })
+          }
+        })
+      })
+    })
+    
+    return items
+  }, [])
+
+  // Fetch course data - OPTIMIZED
   const fetchCourseData = useCallback(async () => {
     try {
       setLoading(true)
@@ -860,7 +923,14 @@ export default function CourseDetailPage() {
               const videoAsset = extractVideoAsset(lesson.videoSource || lesson.video)
               return {
                 ...lesson,
-                video: videoAsset
+                video: videoAsset,
+                subLessons: lesson.subLessons?.map((subLesson: any) => {
+                  const subVideoAsset = extractVideoAsset(subLesson.videoSource || subLesson.video)
+                  return {
+                    ...subLesson,
+                    video: subVideoAsset
+                  }
+                }) || []
               }
             }) || []
           })) || []
@@ -869,6 +939,10 @@ export default function CourseDetailPage() {
       }
 
       setCourse(processedCourse)
+      
+      // Create flat array of all content items
+      const items = createAllContentItems(processedCourse)
+      setAllContentItems(items)
 
       if (progressResponse.ok) {
         const progressData = await progressResponse.json()
@@ -889,20 +963,23 @@ export default function CourseDetailPage() {
         setUserProgress(userProgressData)
         setCompletedLessons(new Set(userProgressData.completedLessons))
         
+        // Find and set active lesson
         if (userProgressData.currentLesson) {
-          const lesson = findLessonById(processedCourse, userProgressData.currentLesson)
-          if (lesson) {
-            setActiveLesson(lesson)
+          const foundItem = items.find(item => item._id === userProgressData.currentLesson)
+          if (foundItem) {
+            setActiveLesson(foundItem)
+          } else if (items.length > 0) {
+            setActiveLesson(items[0])
           }
-        } else if (processedCourse.modules[0]?.chapters[0]?.lessons[0]) {
-          setActiveLesson(processedCourse.modules[0].chapters[0].lessons[0])
+        } else if (items.length > 0) {
+          setActiveLesson(items[0])
         }
       } else {
         setUserProgress(null)
         setCompletedLessons(new Set())
         
-        if (processedCourse.modules[0]?.chapters[0]?.lessons[0]) {
-          setActiveLesson(processedCourse.modules[0].chapters[0].lessons[0])
+        if (items.length > 0) {
+          setActiveLesson(items[0])
         }
       }
       
@@ -917,20 +994,12 @@ export default function CourseDetailPage() {
     } finally {
       setLoading(false)
     }
-  }, [slug, toast, extractVideoAsset])
+  }, [slug, toast, extractVideoAsset, createAllContentItems])
 
-  const findLessonById = useCallback((courseData: Course, lessonId: string): Lesson | null => {
-    for (const module of courseData.modules) {
-      for (const chapter of module.chapters) {
-        for (const lesson of chapter.lessons) {
-          if (lesson._id === lessonId) {
-            return lesson
-          }
-        }
-      }
-    }
-    return null
-  }, [])
+  // Find lesson by ID - OPTIMIZED
+  const findLessonById = useCallback((lessonId: string): Lesson | null => {
+    return allContentItems.find(item => item._id === lessonId) || null
+  }, [allContentItems])
 
   useEffect(() => {
     if (slug) {
@@ -975,13 +1044,20 @@ export default function CourseDetailPage() {
           progress: result.progress?.progress || 0,
           completed: result.progress?.completed || false,
           completedLessons: result.progress?.completedLessons || [],
-          currentLesson: result.progress?.currentLesson || course.modules[0]?.chapters[0]?.lessons[0]?._id || null,
+          currentLesson: result.progress?.currentLesson || allContentItems[0]?._id || null,
           timeSpent: result.progress?.timeSpent || 0,
           lastAccessed: new Date()
         }
         
         setUserProgress(newProgress);
         setCompletedLessons(new Set(newProgress.completedLessons));
+        
+        if (newProgress.currentLesson) {
+          const lesson = findLessonById(newProgress.currentLesson)
+          if (lesson) {
+            setActiveLesson(lesson)
+          }
+        }
         
         toast({
           title: result.alreadyEnrolled ? 'Already Enrolled' : '🎉 Welcome to the Course!',
@@ -1024,9 +1100,9 @@ export default function CourseDetailPage() {
     } finally {
       setIsEnrolling(null);
     }
-  }, [course, isEnrolling, toast])
+  }, [course, isEnrolling, toast, allContentItems, findLessonById])
 
-  // Progress updates
+  // Progress updates - OPTIMIZED
   const updateProgress = useCallback(async (lessonId: string, completed: boolean = false, isCurrent: boolean = true) => {
     if (!course || !userProgress?.enrolled) return
 
@@ -1082,67 +1158,42 @@ export default function CourseDetailPage() {
     updateProgress(lessonId, true, false)
   }, [updateProgress])
 
+  // Get next/previous lesson - OPTIMIZED using flat array
   const getNextLesson = useCallback((): Lesson | null => {
-    if (!course || !activeLesson) return null
+    if (!activeLesson || allContentItems.length === 0) return null
 
-    let found = false
-    for (const module of course.modules) {
-      for (const chapter of module.chapters) {
-        for (const lesson of chapter.lessons) {
-          if (found) return lesson
-          if (lesson._id === activeLesson._id) found = true
-        }
-      }
+    const currentIndex = allContentItems.findIndex(item => item._id === activeLesson._id)
+    
+    if (currentIndex < allContentItems.length - 1) {
+      return allContentItems[currentIndex + 1]
     }
     return null
-  }, [course, activeLesson])
+  }, [activeLesson, allContentItems])
 
   const getPreviousLesson = useCallback((): Lesson | null => {
-    if (!course || !activeLesson) return null
+    if (!activeLesson || allContentItems.length === 0) return null
 
-    const allLessons: Lesson[] = []
-    course.modules.forEach(module => {
-      module.chapters.forEach(chapter => {
-        chapter.lessons.forEach(lesson => {
-          allLessons.push(lesson)
-        })
-      })
-    })
-
-    const currentIndex = allLessons.findIndex(lesson => lesson._id === activeLesson._id)
+    const currentIndex = allContentItems.findIndex(item => item._id === activeLesson._id)
     
     if (currentIndex > 0) {
-      return allLessons[currentIndex - 1]
+      return allContentItems[currentIndex - 1]
     }
     return null
-  }, [course, activeLesson])
+  }, [activeLesson, allContentItems])
 
   const navigateToLesson = useCallback((direction: 'next' | 'prev') => {
-    if (!course || !activeLesson) return
-
-    const allLessons: Lesson[] = []
-    course.modules.forEach(module => {
-      module.chapters.forEach(chapter => {
-        chapter.lessons.forEach(lesson => {
-          allLessons.push(lesson)
-        })
-      })
-    })
-
-    const currentIndex = allLessons.findIndex(lesson => lesson._id === activeLesson._id)
-
     let targetLesson: Lesson | null = null
 
-    if (direction === 'next' && currentIndex < allLessons.length - 1) {
-      targetLesson = allLessons[currentIndex + 1]
-    } else if (direction === 'prev' && currentIndex > 0) {
-      targetLesson = allLessons[currentIndex - 1]
+    if (direction === 'next') {
+      targetLesson = getNextLesson()
+    } else if (direction === 'prev') {
+      targetLesson = getPreviousLesson()
     }
 
     if (targetLesson) {
       handleLessonSelect(targetLesson)
     }
-  }, [course, activeLesson, handleLessonSelect])
+  }, [handleLessonSelect, getNextLesson, getPreviousLesson])
 
   // Keyboard shortcuts for learning mode
   useEffect(() => {
@@ -1232,31 +1283,74 @@ export default function CourseDetailPage() {
     }
   }, [])
 
+  // Progress calculation - OPTIMIZED
   const calculateModuleProgress = useCallback((module: Module) => {
     if (!userProgress || !module.chapters) return 0
     
-    const totalLessonsInModule = module.chapters.reduce((total, chapter) => 
-      total + (chapter.lessons?.length || 0), 0
-    )
+    let totalItems = 0
+    let completedItems = 0
     
-    if (totalLessonsInModule === 0) return 0
+    module.chapters.forEach(chapter => {
+      chapter.lessons.forEach(lesson => {
+        totalItems++ // Count lesson itself
+        totalItems += lesson.subLessons.length // Count sub-lessons
+        
+        // Check if lesson is completed
+        if (completedLessons.has(lesson._id)) {
+          completedItems++
+        }
+        
+        // Check sub-lessons completion
+        lesson.subLessons.forEach(subLesson => {
+          if (completedLessons.has(subLesson._id)) {
+            completedItems++
+          }
+        })
+      })
+    })
     
-    const completedInModule = module.chapters.reduce((total, chapter) => 
-      total + (chapter.lessons?.filter(lesson => 
-        completedLessons.has(lesson._id)
-      ).length || 0), 0
-    )
-    
-    return (completedInModule / totalLessonsInModule) * 100
+    if (totalItems === 0) return 0
+    return (completedItems / totalItems) * 100
   }, [userProgress, completedLessons])
 
   const calculateChapterProgress = useCallback((chapter: Chapter) => {
     if (!userProgress || chapter.lessons.length === 0) return 0
-    const completedInChapter = chapter.lessons.filter(lesson => 
-      completedLessons.has(lesson._id)
-    ).length
-    return (completedInChapter / chapter.lessons.length) * 100
+    
+    let totalItems = 0
+    let completedItems = 0
+    
+    chapter.lessons.forEach(lesson => {
+      totalItems++ // Count lesson itself
+      totalItems += lesson.subLessons.length // Count sub-lessons
+      
+      // Check if lesson is completed
+      if (completedLessons.has(lesson._id)) {
+        completedItems++
+      }
+      
+      // Check sub-lessons completion
+      lesson.subLessons.forEach(subLesson => {
+        if (completedLessons.has(subLesson._id)) {
+          completedItems++
+        }
+      })
+    })
+    
+    if (totalItems === 0) return 0
+    return (completedItems / totalItems) * 100
   }, [userProgress, completedLessons])
+
+  // Calculate total sub-lessons - OPTIMIZED
+  const totalSubLessons = useMemo(() => {
+    if (!course?.modules) return 0
+    return course.modules.reduce((total, module) => 
+      total + module.chapters.reduce((chapterTotal, chapter) => 
+        chapterTotal + chapter.lessons.reduce((lessonTotal, lesson) => 
+          lessonTotal + (lesson.subLessons?.length || 0), 0
+        ), 0
+      ), 0
+    )
+  }, [course])
 
   // Share functionality
   const handleShare = useCallback(async () => {
@@ -1356,6 +1450,8 @@ export default function CourseDetailPage() {
   if (isLearningMode && activeLesson) {
     const nextLesson = getNextLesson()
     const previousLesson = getPreviousLesson()
+    const currentIndex = allContentItems.findIndex(item => item._id === activeLesson._id)
+    const lessonNumber = currentIndex + 1
 
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-950">
@@ -1398,12 +1494,13 @@ export default function CourseDetailPage() {
         {/* Main Learning Content */}
         <div className="container px-4 py-6">
           <div className="space-y-6">
-            {/* Video Player - USING FIXED UltraFastVideoPlayer */}
+            {/* Video Player - IMPORTANT FIX: Add key prop for smooth transitions */}
             <div 
               ref={videoContainerRef}
               className="bg-gradient-to-br from-slate-900 to-black rounded-2xl overflow-hidden shadow-2xl"
             >
               <UltraFastVideoPlayer
+                key={activeLesson._id} // IMPORTANT: Key prop forces re-render for smooth playback
                 src={activeLesson.video?.url || ''}
                 poster={course?.thumbnail?.url}
                 autoplay={true}
@@ -1429,20 +1526,7 @@ export default function CourseDetailPage() {
                 <div className="mb-6">
                   <div className="flex items-center gap-2 mb-4">
                     <Badge className="bg-gradient-to-r from-red-600 to-orange-500 text-white border-0 px-3 py-1 rounded-full">
-                      Lesson {(() => {
-                        let lessonCount = 0
-                        for (const module of course!.modules) {
-                          for (const chapter of module.chapters) {
-                            for (const lesson of chapter.lessons) {
-                              lessonCount++
-                              if (lesson._id === activeLesson._id) {
-                                return lessonCount
-                              }
-                            }
-                          }
-                        }
-                        return lessonCount
-                      })()}
+                      {activeLesson.isSubLesson ? 'Sub-Lesson' : 'Lesson'} {lessonNumber}
                     </Badge>
                     {activeLesson.isPreview && (
                       <Badge className="bg-gradient-to-r from-amber-500 to-orange-500 text-white border-0 px-3 py-1 rounded-full">
@@ -1563,7 +1647,7 @@ export default function CourseDetailPage() {
           </div>
         </div>
 
-        {/* Mobile Curriculum Sidebar */}
+        {/* Mobile Curriculum Sidebar - OPTIMIZED */}
         {showMobileCurriculum && (
           <div className="fixed inset-0 z-50 bg-white dark:bg-slate-950 animate-in slide-in-from-right">
             <div className="sticky top-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 p-6 shadow-sm">
@@ -1632,44 +1716,92 @@ export default function CourseDetailPage() {
                                 const isActive = activeLesson?._id === lesson._id
                                 
                                 return (
-                                  <div
-                                    key={lesson._id}
-                                    className={`p-4 rounded-xl border cursor-pointer transition-all duration-300 ${
-                                      isActive 
-                                        ? 'bg-gradient-to-r from-red-600 to-orange-500 text-white border-transparent shadow-lg' 
-                                        : isCompleted
-                                        ? 'bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-green-200 dark:border-green-800'
-                                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-red-300 dark:hover:border-red-600 hover:shadow-md'
-                                    }`}
-                                    onClick={() => {
-                                      handleLessonSelect(lesson)
-                                      setShowMobileCurriculum(false)
-                                    }}
-                                  >
-                                    <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-3">
-                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                                          isActive ? 'bg-white/20' : isCompleted ? 'bg-green-100 dark:bg-green-900/30' : 'bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20'
-                                        }`}>
-                                          {isCompleted ? (
-                                            <Check className="w-5 h-5 text-green-600 dark:text-green-400" />
-                                          ) : (
-                                            <PlayCircle className={`w-5 h-5 ${isActive ? 'text-white' : 'text-red-600 dark:text-red-400'}`} />
-                                          )}
-                                        </div>
-                                        <div className="flex-1">
-                                          <p className={`font-medium ${isActive ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
-                                            {lessonIndex + 1}. {lesson.title}
-                                          </p>
-                                          <div className="flex items-center gap-2 mt-1">
-                                            <Clock className={`w-4 h-4 ${isActive ? 'text-white/80' : 'text-slate-400 dark:text-slate-500'}`} />
-                                            <span className={`text-sm ${isActive ? 'text-white/80' : 'text-slate-500 dark:text-slate-400'}`}>
-                                              {formatDuration(lesson.duration)}
-                                            </span>
+                                  <div key={lesson._id} className="space-y-2">
+                                    {/* Main Lesson */}
+                                    <div
+                                      className={`p-4 rounded-xl border cursor-pointer transition-all duration-300 ${
+                                        isActive && !activeLesson?.isSubLesson
+                                          ? 'bg-gradient-to-r from-red-600 to-orange-500 text-white border-transparent shadow-lg' 
+                                          : isCompleted
+                                          ? 'bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-green-200 dark:border-green-800'
+                                          : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-red-300 dark:hover:border-red-600 hover:shadow-md'
+                                      }`}
+                                      onClick={() => {
+                                        handleLessonSelect(lesson)
+                                        setShowMobileCurriculum(false)
+                                      }}
+                                    >
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                          <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                                            isActive && !activeLesson?.isSubLesson ? 'bg-white/20' : isCompleted ? 'bg-green-100 dark:bg-green-900/30' : 'bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20'
+                                          }`}>
+                                            {isCompleted ? (
+                                              <Check className="w-5 h-5 text-green-600 dark:text-green-400" />
+                                            ) : (
+                                              <PlayCircle className={`w-5 h-5 ${(isActive && !activeLesson?.isSubLesson) ? 'text-white' : 'text-red-600 dark:text-red-400'}`} />
+                                            )}
+                                          </div>
+                                          <div className="flex-1">
+                                            <p className={`font-medium ${(isActive && !activeLesson?.isSubLesson) ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
+                                              {lessonIndex + 1}. {lesson.title}
+                                            </p>
+                                            <div className="flex items-center gap-2 mt-1">
+                                              <Clock className={`w-4 h-4 ${(isActive && !activeLesson?.isSubLesson) ? 'text-white/80' : 'text-slate-400 dark:text-slate-500'}`} />
+                                              <span className={`text-sm ${(isActive && !activeLesson?.isSubLesson) ? 'text-white/80' : 'text-slate-500 dark:text-slate-400'}`}>
+                                                {formatDuration(lesson.duration)}
+                                              </span>
+                                            </div>
                                           </div>
                                         </div>
                                       </div>
                                     </div>
+
+                                    {/* Sub-lessons */}
+                                    {lesson.subLessons.length > 0 && (
+                                      <div className="ml-4 space-y-2">
+                                        {lesson.subLessons.map((subLesson, subLessonIndex) => {
+                                          const isSubCompleted = completedLessons.has(subLesson._id)
+                                          const isSubActive = activeLesson?._id === subLesson._id
+                                          
+                                          return (
+                                            <div
+                                              key={subLesson._id}
+                                              className={`ml-4 p-3 rounded-lg border cursor-pointer transition-all duration-300 ${
+                                                isSubActive 
+                                                  ? 'bg-gradient-to-r from-red-600 to-orange-500 text-white border-transparent shadow-lg' 
+                                                  : isSubCompleted
+                                                  ? 'bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-green-200 dark:border-green-800'
+                                                  : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-red-300 dark:hover:border-red-600 hover:shadow-md'
+                                              }`}
+                                              onClick={() => {
+                                                setActiveLesson({
+                                                  ...subLesson,
+                                                  isSubLesson: true,
+                                                  parentLessonId: lesson._id
+                                                } as Lesson)
+                                                setShowMobileCurriculum(false)
+                                              }}
+                                            >
+                                              <div className="flex items-center gap-2">
+                                                <div className={`w-6 h-6 rounded-md flex items-center justify-center ${
+                                                  isSubActive ? 'bg-white/20' : isSubCompleted ? 'bg-green-100 dark:bg-green-900/30' : 'bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20'
+                                                }`}>
+                                                  {isSubCompleted ? (
+                                                    <Check className="w-3 h-3 text-green-600 dark:text-green-400" />
+                                                  ) : (
+                                                    <PlayCircle className={`w-3 h-3 ${isSubActive ? 'text-white' : 'text-red-600 dark:text-red-400'}`} />
+                                                  )}
+                                                </div>
+                                                <span className={`text-sm font-medium ${isSubActive ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
+                                                  • {subLesson.title}
+                                                </span>
+                                              </div>
+                                            </div>
+                                          )
+                                        })}
+                                      </div>
+                                    )}
                                   </div>
                                 )
                               })}
@@ -1741,7 +1873,7 @@ export default function CourseDetailPage() {
         <div className="absolute inset-0 bg-gradient-to-r from-red-500/10 via-orange-500/10 to-amber-500/10" />
         
         <div className="relative px-4 pt-6 pb-8">
-          {/* Preview Video - USING FIXED UltraFastVideoPlayer */}
+          {/* Preview Video - IMPORTANT FIX: Add key prop */}
           {course.previewVideo && (
             <div className="mb-6">
               <div className="flex items-center gap-2 mb-3">
@@ -1753,6 +1885,7 @@ export default function CourseDetailPage() {
 
               <div className="rounded-2xl overflow-hidden shadow-2xl">
                 <UltraFastVideoPlayer
+                  key={`preview-${course._id}`} // Important for smooth playback
                   src={course.previewVideo.url}
                   poster={course.thumbnail?.url}
                   className="w-full aspect-video"
@@ -1932,7 +2065,7 @@ export default function CourseDetailPage() {
                     <div>
                       <h3 className="text-xl font-bold text-slate-900 dark:text-white">Course Curriculum</h3>
                       <p className="text-slate-600 dark:text-slate-400 mt-1">
-                        {course.totalLessons} lessons • {course.modules.length} modules
+                        {course.totalLessons + totalSubLessons} content items • {course.modules.length} modules
                       </p>
                     </div>
                   </div>
@@ -2016,64 +2149,141 @@ export default function CourseDetailPage() {
                                           const isCompleted = completedLessons.has(lesson._id)
                                           
                                           return (
-                                            <div
-                                              key={lesson._id}
-                                              className="p-4 bg-gradient-to-br from-white to-slate-50/50 dark:from-slate-800 dark:to-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700"
-                                            >
-                                              <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-3">
-                                                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                                                    isCompleted 
-                                                      ? 'bg-gradient-to-br from-green-100 to-emerald-100 dark:from-green-900/30 dark:to-emerald-900/30' 
-                                                      : 'bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20'
-                                                  }`}>
-                                                    {isCompleted ? (
-                                                      <Check className="w-5 h-5 text-green-600 dark:text-green-400" />
-                                                    ) : (
-                                                      <PlayCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
-                                                    )}
-                                                  </div>
-                                                  <div className="flex-1 min-w-0">
-                                                    <p className="font-semibold text-slate-900 dark:text-white">
-                                                      {lessonIndex + 1}. {lesson.title}
-                                                    </p>
-                                                    <div className="flex items-center gap-3 mt-1">
-                                                      <div className="flex items-center gap-1 text-sm text-slate-500 dark:text-slate-400">
-                                                        <Clock className="w-3.5 h-3.5" />
-                                                        <span>{formatDuration(lesson.duration)}</span>
-                                                      </div>
-                                                      {lesson.isPreview && (
-                                                        <Badge className="bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-900/30 dark:to-orange-900/30 text-amber-700 dark:text-amber-300 text-xs px-2 py-0.5 rounded-full">
-                                                          Preview
-                                                        </Badge>
+                                            <div key={lesson._id} className="space-y-2">
+                                              {/* Main Lesson */}
+                                              <div
+                                                className="p-4 bg-gradient-to-br from-white to-slate-50/50 dark:from-slate-800 dark:to-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700"
+                                              >
+                                                <div className="flex items-center justify-between">
+                                                  <div className="flex items-center gap-3">
+                                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                                                      isCompleted 
+                                                        ? 'bg-gradient-to-br from-green-100 to-emerald-100 dark:from-green-900/30 dark:to-emerald-900/30' 
+                                                        : 'bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20'
+                                                    }`}>
+                                                      {isCompleted ? (
+                                                        <Check className="w-5 h-5 text-green-600 dark:text-green-400" />
+                                                      ) : (
+                                                        <PlayCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
                                                       )}
                                                     </div>
+                                                    <div className="flex-1 min-w-0">
+                                                      <p className="font-semibold text-slate-900 dark:text-white">
+                                                        {lessonIndex + 1}. {lesson.title}
+                                                      </p>
+                                                      <div className="flex items-center gap-3 mt-1">
+                                                        <div className="flex items-center gap-1 text-sm text-slate-500 dark:text-slate-400">
+                                                          <Clock className="w-3.5 h-3.5" />
+                                                          <span>{formatDuration(lesson.duration)}</span>
+                                                        </div>
+                                                        {lesson.isPreview && (
+                                                          <Badge className="bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-900/30 dark:to-orange-900/30 text-amber-700 dark:text-amber-300 text-xs px-2 py-0.5 rounded-full">
+                                                            Preview
+                                                          </Badge>
+                                                        )}
+                                                      </div>
+                                                    </div>
                                                   </div>
+                                                  
+                                                  {userProgress?.enrolled ? (
+                                                    <Button 
+                                                      onClick={() => {
+                                                        setActiveLesson(lesson)
+                                                        setIsLearningMode(true)
+                                                      }}
+                                                      className={`rounded-lg px-4 py-2 h-auto ${
+                                                        isCompleted 
+                                                          ? 'bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800 hover:bg-gradient-to-r hover:from-green-100 hover:to-emerald-100 dark:hover:from-green-900/30 dark:hover:to-emerald-900/30' 
+                                                          : 'bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white'
+                                                      }`}
+                                                    >
+                                                      {isCompleted ? 'Review' : 'Start'}
+                                                    </Button>
+                                                  ) : lesson.isPreview && lesson.video ? (
+                                                    <Button 
+                                                      onClick={() => handlePreviewLesson(lesson)}
+                                                      className="rounded-lg bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-900/30 dark:to-orange-900/30 text-amber-700 dark:text-amber-300 hover:bg-gradient-to-r hover:from-amber-200 hover:to-orange-200 dark:hover:from-amber-900/40 dark:hover:to-orange-900/40 px-4 py-2 h-auto border border-amber-200 dark:border-amber-800"
+                                                    >
+                                                      Preview
+                                                    </Button>
+                                                  ) : null}
                                                 </div>
-                                                
-                                                {userProgress?.enrolled ? (
-                                                  <Button 
-                                                    onClick={() => {
-                                                      setActiveLesson(lesson)
-                                                      setIsLearningMode(true)
-                                                    }}
-                                                    className={`rounded-lg px-4 py-2 h-auto ${
-                                                      isCompleted 
-                                                        ? 'bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800 hover:bg-gradient-to-r hover:from-green-100 hover:to-emerald-100 dark:hover:from-green-900/30 dark:hover:to-emerald-900/30' 
-                                                        : 'bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white'
-                                                    }`}
-                                                  >
-                                                    {isCompleted ? 'Review' : 'Start'}
-                                                  </Button>
-                                                ) : lesson.isPreview && lesson.video ? (
-                                                  <Button 
-                                                    onClick={() => handlePreviewLesson(lesson)}
-                                                    className="rounded-lg bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-900/30 dark:to-orange-900/30 text-amber-700 dark:text-amber-300 hover:bg-gradient-to-r hover:from-amber-200 hover:to-orange-200 dark:hover:from-amber-900/40 dark:hover:to-orange-900/40 px-4 py-2 h-auto border border-amber-200 dark:border-amber-800"
-                                                  >
-                                                    Preview
-                                                  </Button>
-                                                ) : null}
                                               </div>
+
+                                              {/* Sub-lessons */}
+                                              {lesson.subLessons.length > 0 && (
+                                                <div className="mt-2 ml-4 space-y-2 animate-in fade-in duration-300">
+                                                  {lesson.subLessons.map((subLesson, subLessonIndex) => {
+                                                    const isSubCompleted = completedLessons.has(subLesson._id)
+                                                    
+                                                    return (
+                                                      <div
+                                                        key={subLesson._id}
+                                                        className="p-3 bg-gradient-to-br from-white/30 to-slate-50/20 dark:from-slate-800/10 dark:to-slate-900/5 rounded-lg border border-slate-200 dark:border-slate-700 ml-4"
+                                                      >
+                                                        <div className="flex items-center justify-between">
+                                                          <div className="flex items-center gap-3">
+                                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                                                              isSubCompleted 
+                                                                ? 'bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20' 
+                                                                : 'bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20'
+                                                            }`}>
+                                                              {isSubCompleted ? (
+                                                                <Check className="w-4 h-4 text-green-600 dark:text-green-400" />
+                                                              ) : (
+                                                                <PlayCircle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                                                              )}
+                                                            </div>
+                                                            <div className="flex-1 min-w-0">
+                                                              <p className="text-sm font-medium text-slate-900 dark:text-white">
+                                                                • {subLesson.title}
+                                                              </p>
+                                                              <div className="flex items-center gap-2 mt-0.5">
+                                                                <div className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                                                                  <Clock className="w-3 h-3" />
+                                                                  <span>{formatDuration(subLesson.duration)}</span>
+                                                                </div>
+                                                                {subLesson.isPreview && (
+                                                                  <Badge className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/10 dark:to-orange-900/10 text-amber-700 dark:text-amber-300 text-xs px-1.5 py-0 rounded-full">
+                                                                    Preview
+                                                                  </Badge>
+                                                                )}
+                                                              </div>
+                                                            </div>
+                                                          </div>
+                                                          
+                                                          {userProgress?.enrolled ? (
+                                                            <Button 
+                                                              onClick={() => {
+                                                                setActiveLesson({
+                                                                  ...subLesson,
+                                                                  isSubLesson: true,
+                                                                  parentLessonId: lesson._id
+                                                                } as Lesson)
+                                                                setIsLearningMode(true)
+                                                              }}
+                                                              className={`rounded-md px-3 py-1.5 h-auto text-xs ${
+                                                                isSubCompleted 
+                                                                  ? 'bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800 hover:bg-gradient-to-r hover:from-green-100 hover:to-emerald-100 dark:hover:from-green-900/30 dark:hover:to-emerald-900/30' 
+                                                                  : 'bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-700 hover:to-cyan-600 text-white'
+                                                              }`}
+                                                            >
+                                                              {isSubCompleted ? 'Review' : 'Start'}
+                                                            </Button>
+                                                          ) : subLesson.isPreview && subLesson.video ? (
+                                                            <Button 
+                                                              onClick={() => window.open(subLesson.video?.url, '_blank')}
+                                                              className="rounded-md bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/10 dark:to-orange-900/10 text-amber-700 dark:text-amber-300 hover:bg-gradient-to-r hover:from-amber-100 hover:to-orange-100 dark:hover:from-amber-900/20 dark:hover:to-orange-900/20 px-3 py-1.5 h-auto text-xs border border-amber-200 dark:border-amber-800"
+                                                            >
+                                                              Preview
+                                                            </Button>
+                                                          ) : null}
+                                                        </div>
+                                                      </div>
+                                                    )
+                                                  })}
+                                                </div>
+                                              )}
                                             </div>
                                           )
                                         })}

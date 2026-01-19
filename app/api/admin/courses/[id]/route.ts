@@ -1,8 +1,17 @@
+// app/api/admin/courses/[id]/route.ts - UPDATED WITH SUBLESSONS
 import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
-import Course, { IS3Asset, IModule, IChapter, ILesson, ILessonResource } from '@/lib/models/Course';
+import Course, { 
+  IS3Asset, 
+  IModule, 
+  IChapter, 
+  ILesson, 
+  ISubLesson, 
+  ILessonResource,
+  IVideoSource
+} from '@/lib/models/Course';
 import mongoose from 'mongoose';
 import "@/lib/loadmodels";
 
@@ -116,7 +125,7 @@ export async function DELETE(
   }
 }
 
-// PATCH - Update course
+// PATCH - Update course (UPDATED FOR SUBLESSONS)
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -150,15 +159,6 @@ export async function PATCH(
     }
 
     const body = await request.json();
-
-    // Log incoming data for debugging
-    console.log('=== INCOMING REQUEST DATA ===');
-    console.log('Body received:', {
-      title: body.title,
-      modulesCount: body.modules?.length || 0
-    });
-    console.log('First lesson videoSource:', body.modules?.[0]?.chapters?.[0]?.lessons?.[0]?.videoSource);
-    console.log('=============================');
 
     // Input validation
     if (body.price !== undefined && (typeof body.price !== 'number' || body.price < 0)) {
@@ -196,6 +196,41 @@ export async function PATCH(
         .substring(0, 100);
     }
 
+    // Helper function to create video source
+    const createVideoSource = (videoData: any, duration: number = 0): IVideoSource => {
+      if (!videoData || !videoData.key) {
+        return {
+          type: 'uploaded',
+          video: {
+            key: '',
+            url: '',
+            size: 0,
+            type: 'video',
+            duration: duration || 0
+          } as IS3Asset,
+          uploadedAt: new Date(),
+          uploadedBy: adminUser._id
+        };
+      }
+
+      return {
+        type: 'uploaded',
+        video: {
+          key: videoData.key || '',
+          url: videoData.url || '',
+          size: videoData.size || 0,
+          type: 'video',
+          duration: videoData.duration || duration || 0,
+          width: videoData.width,
+          height: videoData.height,
+          fileName: videoData.fileName || videoData.originalFileName || '',
+          originalFileName: videoData.originalFileName || videoData.fileName || ''
+        } as IS3Asset,
+        uploadedAt: new Date(),
+        uploadedBy: adminUser._id
+      };
+    };
+
     // Transform resources
     const transformResources = (resources: any[]): ILessonResource[] => {
       return resources.map((resource, resourceIndex) => ({
@@ -210,172 +245,106 @@ export async function PATCH(
       }));
     };
 
-    // Transform lessons - CORRECTED VERSION
-    const transformLessons = (lessons: any[], chapterIndex: number): Omit<ILesson, 'createdAt' | 'updatedAt'>[] => {
-      return lessons.map((lesson, lessonIndex) => {
-        console.log(`Transforming lesson ${lessonIndex + 1}:`, {
-          title: lesson.title,
-          hasVideoSource: !!lesson.videoSource,
-          hasVideo: !!lesson.video,
-          videoSourceType: lesson.videoSource?.type,
-          videoSourceStructure: Object.keys(lesson.videoSource || {})
-        });
-
-        // Create the videoSource structure expected by the model
-        let videoSource: any = null;
-
-        // Handle different cases
-        if (lesson.videoSource) {
-          console.log('Processing videoSource:', lesson.videoSource);
-          
-          // Case 1: videoSource already has nested video object (from video library)
-          if (lesson.videoSource.video) {
-            videoSource = {
-              type: 'uploaded' as const,
-              video: {
-                key: lesson.videoSource.video.key || '',
-                url: lesson.videoSource.video.url || '',
-                size: lesson.videoSource.video.size || 0,
-                type: 'video' as const,
-                duration: lesson.videoSource.video.duration || lesson.duration || 0,
-                width: lesson.videoSource.video.width,
-                height: lesson.videoSource.video.height,
-                uploadedAt: new Date(),
-                fileName: lesson.videoSource.video.fileName || lesson.videoSource.video.originalFileName || lesson.title || ''
-              },
-              uploadedAt: new Date(),
-              uploadedBy: adminUser._id
-            };
-          } 
-          // Case 2: videoSource is a flat S3 asset (from direct upload)
-          else if (lesson.videoSource.key && lesson.videoSource.url) {
-            videoSource = {
-              type: 'uploaded' as const,
-              video: {
-                key: lesson.videoSource.key || '',
-                url: lesson.videoSource.url || '',
-                size: lesson.videoSource.size || 0,
-                type: 'video' as const,
-                duration: lesson.videoSource.duration || lesson.duration || 0,
-                width: lesson.videoSource.width,
-                height: lesson.videoSource.height,
-                uploadedAt: new Date(),
-                fileName: lesson.videoSource.fileName || lesson.videoSource.originalFileName || lesson.title || ''
-              },
-              uploadedAt: new Date(),
-              uploadedBy: adminUser._id
-            };
-          }
-          // Case 3: videoSource has type: 's3' (incorrect format)
-          else if (lesson.videoSource.type === 's3') {
-            videoSource = {
-              type: 'uploaded' as const,
-              video: {
-                key: lesson.videoSource.key || '',
-                url: lesson.videoSource.url || '',
-                size: lesson.videoSource.size || 0,
-                type: 'video' as const,
-                duration: lesson.videoSource.duration || lesson.duration || 0,
-                width: lesson.videoSource.width,
-                height: lesson.videoSource.height,
-                uploadedAt: new Date(),
-                fileName: lesson.videoSource.originalFileName || lesson.title || ''
-              },
-              uploadedAt: new Date(),
-              uploadedBy: adminUser._id
-            };
-          }
-        }
-        // Case 4: Old video format (backward compatibility)
-        else if (lesson.video) {
-          console.log('Processing old video format:', lesson.video);
-          videoSource = {
-            type: 'uploaded' as const,
-            video: {
-              key: lesson.video.key || '',
-              url: lesson.video.url || '',
-              size: lesson.video.size || 0,
-              type: 'video' as const,
-              duration: lesson.video.duration || lesson.duration || 0,
-              width: lesson.video.width,
-              height: lesson.video.height,
-              uploadedAt: new Date(),
-              fileName: lesson.video.fileName || lesson.title || ''
-            },
-            uploadedAt: new Date(),
-            uploadedBy: adminUser._id
-          };
-        }
+    // Transform sub-lessons
+    const transformSubLessons = (subLessons: any[]): ISubLesson[] => {
+      return subLessons.map((subLesson, subLessonIndex) => {
+        let videoSource: IVideoSource;
         
-        // Case 5: No video data found
-        if (!videoSource) {
-          console.log('No video data found, creating empty structure');
-          videoSource = {
-            type: 'uploaded' as const,
-            video: {
-              key: '',
-              url: '',
-              size: 0,
-              type: 'video' as const,
-              duration: lesson.duration || 0,
-              uploadedAt: new Date(),
-              fileName: lesson.title || ''
-            },
-            uploadedAt: new Date(),
-            uploadedBy: adminUser._id
-          };
+        // Handle different video data formats
+        if (subLesson.video || subLesson.videoSource) {
+          const videoData = subLesson.video || subLesson.videoSource?.video || subLesson.videoSource;
+          videoSource = createVideoSource(videoData, subLesson.duration);
+        } else {
+          videoSource = createVideoSource(null, subLesson.duration);
         }
 
-        console.log(`Final videoSource for lesson ${lessonIndex + 1}:`, {
-          type: videoSource.type,
-          hasVideo: !!videoSource.video,
-          videoUrl: videoSource.video?.url
-        });
+        const subLessonData: ISubLesson = {
+          _id: subLesson._id && mongoose.Types.ObjectId.isValid(subLesson._id) 
+            ? new mongoose.Types.ObjectId(subLesson._id) 
+            : new mongoose.Types.ObjectId(),
+          title: subLesson.title?.substring(0, 200) || `Sub-lesson ${subLessonIndex + 1}`,
+          description: subLesson.description || '',
+          content: subLesson.content || '',
+          videoSource: videoSource,
+          duration: subLesson.duration || 0,
+          isPreview: subLesson.isPreview || false,
+          resources: transformResources(subLesson.resources || []),
+          order: typeof subLesson.order === 'number' ? subLesson.order : subLessonIndex,
+          createdAt: subLesson.createdAt || new Date(),
+          updatedAt: new Date()
+        };
 
-        return {
+        return subLessonData;
+      });
+    };
+
+    // Transform lessons (now with videoSource)
+    const transformLessons = (lessons: any[]): ILesson[] => {
+      return lessons.map((lesson, lessonIndex) => {
+        let videoSource: IVideoSource;
+        
+        // Create video source for lesson if provided
+        if (lesson.video || lesson.videoSource) {
+          const videoData = lesson.video || lesson.videoSource?.video || lesson.videoSource;
+          videoSource = createVideoSource(videoData, lesson.duration);
+        } else {
+          videoSource = createVideoSource(null, lesson.duration);
+        }
+
+        const lessonData: ILesson = {
           _id: lesson._id && mongoose.Types.ObjectId.isValid(lesson._id) 
             ? new mongoose.Types.ObjectId(lesson._id) 
             : new mongoose.Types.ObjectId(),
           title: lesson.title?.substring(0, 200) || `Lesson ${lessonIndex + 1}`,
           description: lesson.description || '',
-          content: lesson.content || '',
           videoSource: videoSource,
+          content: lesson.content || '',
+          subLessons: transformSubLessons(lesson.subLessons || []),
           duration: lesson.duration || 0,
-          isPreview: lesson.isPreview || false,
-          resources: transformResources(lesson.resources || []),
-          order: typeof lesson.order === 'number' ? lesson.order : lessonIndex
+          order: typeof lesson.order === 'number' ? lesson.order : lessonIndex,
+          createdAt: lesson.createdAt || new Date(),
+          updatedAt: new Date()
         };
+
+        return lessonData;
       });
     };
 
-    const transformChapters = (chapters: any[], moduleIndex: number): IChapter[] => {
-  return chapters.map((chapter, chapterIndex) => ({
-    _id: chapter._id && mongoose.Types.ObjectId.isValid(chapter._id) 
-      ? new mongoose.Types.ObjectId(chapter._id) 
-      : new mongoose.Types.ObjectId(),
-    title: chapter.title?.substring(0, 200) || `Chapter ${chapterIndex + 1}`,
-    description: chapter.description?.substring(0, 1000) || undefined,
-    order: typeof chapter.order === 'number' ? chapter.order : chapterIndex,
-    lessons: transformLessons(chapter.lessons || [], chapterIndex)
-      .map(lesson => ({
-        ...lesson,
-        createdAt: lesson._id.getTimestamp(), // Add createdAt
-        updatedAt: new Date() // Add updatedAt
-      }))
-  }));
-};
+    const transformChapters = (chapters: any[]): IChapter[] => {
+      return chapters.map((chapter, chapterIndex) => {
+        const chapterData: IChapter = {
+          _id: chapter._id && mongoose.Types.ObjectId.isValid(chapter._id) 
+            ? new mongoose.Types.ObjectId(chapter._id) 
+            : new mongoose.Types.ObjectId(),
+          title: chapter.title?.substring(0, 200) || `Chapter ${chapterIndex + 1}`,
+          description: chapter.description?.substring(0, 1000) || undefined,
+          order: typeof chapter.order === 'number' ? chapter.order : chapterIndex,
+          lessons: transformLessons(chapter.lessons || []),
+          createdAt: chapter.createdAt || new Date(),
+          updatedAt: new Date()
+        };
+
+        return chapterData;
+      });
+    };
 
     const transformModules = (modules: any[]): IModule[] => {
-      return modules.map((module, moduleIndex) => ({
-        _id: module._id && mongoose.Types.ObjectId.isValid(module._id) 
-          ? new mongoose.Types.ObjectId(module._id) 
-          : new mongoose.Types.ObjectId(),
-        title: module.title?.substring(0, 200) || `Module ${moduleIndex + 1}`,
-        description: module.description?.substring(0, 1000) || undefined,
-        thumbnailUrl: module.thumbnailUrl || undefined,
-        order: typeof module.order === 'number' ? module.order : moduleIndex,
-        chapters: transformChapters(module.chapters || [], moduleIndex)
-      }));
+      return modules.map((module, moduleIndex) => {
+        const moduleData: IModule = {
+          _id: module._id && mongoose.Types.ObjectId.isValid(module._id) 
+            ? new mongoose.Types.ObjectId(module._id) 
+            : new mongoose.Types.ObjectId(),
+          title: module.title?.substring(0, 200) || `Module ${moduleIndex + 1}`,
+          description: module.description?.substring(0, 1000) || undefined,
+          thumbnailUrl: module.thumbnailUrl || undefined,
+          order: typeof module.order === 'number' ? module.order : moduleIndex,
+          chapters: transformChapters(module.chapters || []),
+          createdAt: module.createdAt || new Date(),
+          updatedAt: new Date()
+        };
+
+        return moduleData;
+      });
     };
 
     // Transform modules data
@@ -395,7 +364,7 @@ export async function PATCH(
       ...(body.tags && { tags: body.tags.slice(0, 10).map((tag: string) => tag.substring(0, 30)) }),
       ...(body.thumbnail && { thumbnail: body.thumbnail as IS3Asset }),
       ...(body.previewVideo !== undefined && { previewVideo: body.previewVideo as IS3Asset }),
-      modules: transformedModules, // Always include modules, even if empty
+      modules: transformedModules,
       ...(body.requirements && { requirements: body.requirements.slice(0, 10).map((req: string) => req.substring(0, 200)) }),
       ...(body.learningOutcomes && { learningOutcomes: body.learningOutcomes.slice(0, 10).map((lo: string) => lo.substring(0, 200)) }),
       ...(body.isFeatured !== undefined && { isFeatured: !!body.isFeatured }),
@@ -403,16 +372,6 @@ export async function PATCH(
       ...(slug && { slug }),
       instructor: existingCourse.instructor
     };
-
-    console.log('Updating course with data:', {
-      id,
-      title: updateData.title,
-      modulesCount: updateData.modules?.length || 0,
-      chaptersCount: updateData.modules?.reduce((total: number, module: any) => total + (module.chapters?.length || 0), 0) || 0,
-      lessonsCount: updateData.modules?.reduce((total: number, module: any) => 
-        total + (module.chapters?.reduce((chapterTotal: number, chapter: any) => 
-          chapterTotal + (chapter.lessons?.length || 0), 0) || 0), 0) || 0
-    });
 
     const updatedCourse = await Course.findByIdAndUpdate(
       id,
@@ -427,15 +386,6 @@ export async function PATCH(
       );
     }
 
-    console.log('Course updated successfully:', {
-      id: updatedCourse._id,
-      title: updatedCourse.title,
-      modulesCount: updatedCourse.modules.length,
-      chaptersCount: updatedCourse.modules.reduce((total, module) => total + module.chapters.length, 0),
-      lessonsCount: updatedCourse.modules.reduce((total, module) => 
-        total + module.chapters.reduce((chapterTotal, chapter) => chapterTotal + chapter.lessons.length, 0), 0)
-    });
-
     return NextResponse.json(updatedCourse);
   } catch (error: any) {
     console.error('Error updating course:', error);
@@ -449,7 +399,6 @@ export async function PATCH(
 
     if (error.name === 'ValidationError') {
       const errors = Object.values(error.errors).map((err: any) => err.message);
-      console.error('Validation errors:', errors);
       return NextResponse.json(
         { error: 'Validation failed', details: errors },
         { status: 400 }

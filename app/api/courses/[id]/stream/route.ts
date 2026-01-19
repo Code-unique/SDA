@@ -1,9 +1,10 @@
-// app/api/courses/[id]/stream/route.ts
+// app/api/courses/[id]/stream/route.ts - UPDATED FOR LESSON AND SUBLESSON VIDEOS
 import { NextRequest } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import Course from '@/lib/models/Course'
 import mongoose from 'mongoose'
 import "@/lib/loadmodels";
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -74,7 +75,7 @@ export async function GET(
 
           await new Promise(resolve => setTimeout(resolve, 100))
 
-          // Stream modules
+          // Stream modules (UPDATED: Now includes lessons with videos and sub-lessons)
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({
               type: 'modules',
@@ -162,6 +163,35 @@ export async function GET(
 }
 
 function getBasicCourseInfo(course: any) {
+  // UPDATED: Calculate counts for the new structure with lesson videos
+  let totalLessons = 0
+  let totalSubLessons = 0
+  let totalDuration = 0
+  
+  if (course.modules) {
+    course.modules.forEach((module: any) => {
+      if (module.chapters) {
+        module.chapters.forEach((chapter: any) => {
+          if (chapter.lessons) {
+            totalLessons += chapter.lessons.length
+            chapter.lessons.forEach((lesson: any) => {
+              // Add lesson duration
+              totalDuration += lesson.duration || 0
+              
+              // Count and add sub-lessons
+              if (lesson.subLessons) {
+                totalSubLessons += lesson.subLessons.length
+                lesson.subLessons.forEach((subLesson: any) => {
+                  totalDuration += subLesson.duration || 0
+                })
+              }
+            })
+          }
+        })
+      }
+    })
+  }
+
   return {
     _id: course._id.toString(),
     title: course.title,
@@ -178,8 +208,9 @@ function getBasicCourseInfo(course: any) {
     totalStudents: course.totalStudents,
     averageRating: course.averageRating,
     totalReviews: course.ratings?.length || 0,
-    totalDuration: course.totalDuration,
-    totalLessons: course.totalLessons,
+    totalDuration,
+    totalLessons,
+    totalSubLessons,
     isFeatured: course.isFeatured,
     requirements: course.requirements,
     learningOutcomes: course.learningOutcomes,

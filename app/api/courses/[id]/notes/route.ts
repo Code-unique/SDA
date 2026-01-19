@@ -1,4 +1,4 @@
-// app/api/courses/[id]/notes/route.ts
+// app/api/courses/[id]/notes/route.ts - UPDATED FOR LESSON AND SUBLESSON VIDEOS
 import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';
@@ -7,6 +7,7 @@ import Course from '@/lib/models/Course';
 import UserProgress from '@/lib/models/UserProgress';
 import mongoose from 'mongoose';
 import "@/lib/loadmodels";
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -32,7 +33,7 @@ export async function POST(
 
     const { id } = await params;
     const body = await request.json();
-    const { lessonId, notes } = body;
+    const { lessonId, notes, contentType = 'sublesson' } = body;
 
     if (!lessonId || !mongoose.Types.ObjectId.isValid(lessonId)) {
       return NextResponse.json(
@@ -69,14 +70,44 @@ export async function POST(
       );
     }
 
-    // Verify lesson exists in course
-    const lessonExists = course.modules.some((module: any) =>
-      module.lessons.some((lesson: any) => lesson._id.toString() === lessonId)
-    );
+    // Verify content exists in course (could be lesson or sub-lesson)
+    let contentExists = false;
+    let isLessonContent = contentType === 'lesson';
 
-    if (!lessonExists) {
+    // Search through modules -> chapters -> lessons -> subLessons
+    if (course.modules) {
+      for (const module of course.modules) {
+        if (module.chapters) {
+          for (const chapter of module.chapters) {
+            if (chapter.lessons) {
+              for (const lesson of chapter.lessons) {
+                // Check lesson
+                if (lesson._id?.toString() === lessonId && isLessonContent) {
+                  contentExists = true;
+                  break;
+                }
+                
+                // Check sub-lessons
+                if (lesson.subLessons && !isLessonContent) {
+                  for (const subLesson of lesson.subLessons) {
+                    if (subLesson._id?.toString() === lessonId) {
+                      contentExists = true;
+                      break;
+                    }
+                  }
+                }
+              }
+              if (contentExists) break;
+            }
+          }
+          if (contentExists) break;
+        }
+      }
+    }
+
+    if (!contentExists) {
       return NextResponse.json(
-        { error: 'Lesson not found in this course' },
+        { error: 'Content not found in this course' },
         { status: 404 }
       );
     }
@@ -92,7 +123,8 @@ export async function POST(
         courseId: id,
         userId: currentUserDoc._id,
         completedLessons: [],
-        currentLesson: lessonId,
+        currentLesson: null,
+        contentType: 'sublesson',
         progress: 0,
         timeSpent: 0,
         lastAccessed: new Date(),
@@ -110,10 +142,12 @@ export async function POST(
       // Update existing note
       userProgress.notes[noteIndex].content = notes.substring(0, 5000);
       userProgress.notes[noteIndex].updatedAt = new Date();
+      userProgress.notes[noteIndex].contentType = contentType;
     } else {
       // Add new note
       userProgress.notes.push({
-        lessonId,
+        lessonId: new mongoose.Types.ObjectId(lessonId),
+        contentType: contentType,
         content: notes.substring(0, 5000),
         createdAt: new Date(),
         updatedAt: new Date()
@@ -158,6 +192,7 @@ export async function GET(
     const { id } = await params;
     const { searchParams } = new URL(request.url);
     const lessonId = searchParams.get('lessonId');
+    const contentType = searchParams.get('contentType') || 'sublesson';
 
     if (lessonId && !mongoose.Types.ObjectId.isValid(lessonId)) {
       return NextResponse.json(
@@ -178,7 +213,7 @@ export async function GET(
 
     if (lessonId) {
       const note = userProgress.notes.find((note: any) =>
-        note.lessonId.toString() === lessonId
+        note.lessonId.toString() === lessonId && note.contentType === contentType
       );
       return NextResponse.json({ note: note || null });
     }

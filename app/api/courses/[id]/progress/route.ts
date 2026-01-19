@@ -1,12 +1,14 @@
+// app/api/courses/[id]/progress/route.ts - UPDATED FOR LESSON AND SUBLESSON VIDEOS
 import { NextRequest, NextResponse } from 'next/server'
 import { currentUser } from '@clerk/nextjs/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import User from '@/lib/models/User'
-import Course, { ICourse } from '@/lib/models/Course'
+import Course, { ICourse, ILesson, ISubLesson } from '@/lib/models/Course'
 import UserProgress from '@/lib/models/UserProgress'
 import mongoose from 'mongoose'
 import { NotificationService } from '@/lib/services/notificationService'
 import "@/lib/loadmodels";
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -26,47 +28,69 @@ export async function GET(
 
     const { id } = await params
 
-    // Check if the ID is a valid MongoDB ObjectId
-    const isValidObjectId = mongoose.Types.ObjectId.isValid(id)
-    
+    // Handle both ObjectId and slug
     let course: ICourse | null = null
     
-    if (isValidObjectId) {
-      // Search by ObjectId
-      course = await Course.findOne({
-        _id: new mongoose.Types.ObjectId(id),
-        'students.user': currentUserDoc._id
-      })
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      course = await Course.findById(id)
+        .populate('instructor', 'firstName lastName username avatar bio rating totalStudents expertise')
     } else {
-      // Search by slug
-      course = await Course.findOne({
-        slug: id,
-        'students.user': currentUserDoc._id
-      })
+      course = await Course.findOne({ slug: id })
+        .populate('instructor', 'firstName lastName username avatar bio rating totalStudents expertise')
     }
 
     if (!course) {
-      return NextResponse.json({ error: 'Not enrolled in this course' }, { status: 403 })
+      return NextResponse.json({ error: 'Course not found' }, { status: 404 })
     }
 
-    // Get or create user progress using the course _id (not slug)
+    // Check if user is enrolled
+    const isEnrolled = course.students?.some(
+      (student: any) => student.user.toString() === currentUserDoc._id.toString()
+    )
+
+    if (!isEnrolled) {
+      return NextResponse.json({ 
+        error: 'Not enrolled in this course',
+        requiresEnrollment: true 
+      }, { status: 403 })
+    }
+
+    // Get or create user progress
     let userProgress = await UserProgress.findOne({
       courseId: course._id,
       userId: currentUserDoc._id
     })
 
-    // Find first lesson in the course for new users
-    let firstLessonId: mongoose.Types.ObjectId | null = null
+    // Find first content item for new users (check for lesson or sub-lesson)
+    let firstContentId: mongoose.Types.ObjectId | null = null
+    let contentType: 'lesson' | 'sublesson' | null = null
+    
     if (course.modules && course.modules.length > 0) {
-      for (const module of course.modules) {
+      outerLoop: for (const module of course.modules) {
         if (module.chapters && module.chapters.length > 0) {
           for (const chapter of module.chapters) {
             if (chapter.lessons && chapter.lessons.length > 0) {
-              firstLessonId = chapter.lessons[0]._id ?? null
-              break
+              for (const lesson of chapter.lessons as ILesson[]) {
+                // Check if lesson has video
+                if (lesson.videoSource) {
+                  firstContentId = lesson._id
+                  contentType = 'lesson'
+                  break outerLoop
+                }
+                
+                // Check for sub-lessons with videos
+                if (lesson.subLessons && lesson.subLessons.length > 0) {
+                  for (const subLesson of lesson.subLessons as ISubLesson[]) {
+                    if (subLesson.videoSource) {
+                      firstContentId = subLesson._id as mongoose.Types.ObjectId
+                      contentType = 'sublesson'
+                      break outerLoop
+                    }
+                  }
+                }
+              }
             }
           }
-          if (firstLessonId) break
         }
       }
     }
@@ -75,8 +99,10 @@ export async function GET(
       userProgress = await UserProgress.create({
         courseId: course._id,
         userId: currentUserDoc._id,
+        enrolled: true,
         completedLessons: [],
-        currentLesson: firstLessonId,
+        currentLesson: firstContentId,
+        contentType: contentType,
         progress: 0,
         timeSpent: 0,
         lastAccessed: new Date(),
@@ -93,6 +119,7 @@ export async function GET(
       courseId: (progressData.courseId as any)?.toString() || '',
       userId: (progressData.userId as any)?.toString() || '',
       currentLesson: (progressData.currentLesson as any)?.toString() || null,
+      contentType: progressData.contentType || null,
       completedLessons: (progressData.completedLessons || []).map((id: any) => id?.toString() || '')
     })
   } catch (error: any) {
@@ -123,88 +150,124 @@ export async function POST(
 
     const { id } = await params
     const body = await request.json()
-    const { lessonId, completed, current, timeSpent = 0 } = body
+    const { lessonId, completed, current, timeSpent = 0, contentType = 'sublesson' } = body
 
-    // Check if the ID is a valid MongoDB ObjectId
-    const isValidObjectId = mongoose.Types.ObjectId.isValid(id)
-    
+    if (!lessonId) {
+      return NextResponse.json({ error: 'lessonId is required' }, { status: 400 })
+    }
+
+    // Handle both ObjectId and slug
     let course: ICourse | null = null
     
-    if (isValidObjectId) {
-      // Search by ObjectId
-      course = await Course.findOne({
-        _id: new mongoose.Types.ObjectId(id),
-        'students.user': currentUserDoc._id
-      })
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      course = await Course.findById(id)
     } else {
-      // Search by slug
-      course = await Course.findOne({
-        slug: id,
-        'students.user': currentUserDoc._id
-      })
+      course = await Course.findOne({ slug: id })
     }
 
     if (!course) {
-      return NextResponse.json({ error: 'Not enrolled in this course' }, { status: 403 })
+      return NextResponse.json({ error: 'Course not found' }, { status: 404 })
     }
 
-    // Verify lesson exists in course and get its ObjectId
-    let lessonObjectId: mongoose.Types.ObjectId | null = null
-    let lessonExists = false
+    // Check if user is enrolled
+    const isEnrolled = course.students?.some(
+      (student: any) => student.user.toString() === currentUserDoc._id.toString()
+    )
 
-    // NEW: Search through modules -> chapters -> lessons
+    if (!isEnrolled) {
+      return NextResponse.json({ 
+        error: 'Not enrolled in this course',
+        requiresEnrollment: true 
+      }, { status: 403 })
+    }
+
+    // Verify content exists in course (could be lesson or sub-lesson)
+    let contentExists = false
+    let isLessonContent = false
+
+    // Search through the course structure
     if (course.modules) {
-      for (const module of course.modules) {
+      outerLoop: for (const module of course.modules) {
         if (module.chapters) {
           for (const chapter of module.chapters) {
             if (chapter.lessons) {
-              for (const lesson of chapter.lessons) {
+              for (const lesson of chapter.lessons as ILesson[]) {
+                // Check main lesson
                 if (lesson._id?.toString() === lessonId) {
-                  lessonExists = true
-                  lessonObjectId = lesson._id ?? null
-                  break
+                  contentExists = true
+                  isLessonContent = true
+                  break outerLoop
+                }
+                
+                // Check sub-lessons
+                if (lesson.subLessons) {
+                  for (const subLesson of lesson.subLessons as ISubLesson[]) {
+                    if (subLesson._id?.toString() === lessonId) {
+                      contentExists = true
+                      isLessonContent = false
+                      break outerLoop
+                    }
+                  }
                 }
               }
-              if (lessonExists) break
             }
           }
-          if (lessonExists) break
         }
       }
     }
 
-    if (!lessonExists) {
-      return NextResponse.json({ error: 'Lesson not found in course' }, { status: 404 })
+    if (!contentExists) {
+      return NextResponse.json({ error: 'Content not found in course' }, { status: 404 })
     }
 
-    // Get or create user progress using the course _id (not slug)
+    // Get or create user progress
     let userProgress = await UserProgress.findOne({
       courseId: course._id,
       userId: currentUserDoc._id
     })
 
-    // Find first lesson in the course for new users
-    let firstLessonId: mongoose.Types.ObjectId | null = null
-    if (course.modules && course.modules.length > 0) {
-      for (const module of course.modules) {
-        if (module.chapters && module.chapters.length > 0) {
-          for (const chapter of module.chapters) {
-            if (chapter.lessons && chapter.lessons.length > 0) {
-              firstLessonId = chapter.lessons[0]._id ?? null
-              break
+    if (!userProgress) {
+      // Find first content item for new users
+      let firstContentId: mongoose.Types.ObjectId | null = null
+      let firstContentType: 'lesson' | 'sublesson' | null = null
+      
+      if (course.modules && course.modules.length > 0) {
+        outerLoop: for (const module of course.modules) {
+          if (module.chapters && module.chapters.length > 0) {
+            for (const chapter of module.chapters) {
+              if (chapter.lessons && chapter.lessons.length > 0) {
+                for (const lesson of chapter.lessons as ILesson[]) {
+                  // Check if lesson has video
+                  if (lesson.videoSource) {
+                    firstContentId = lesson._id
+                    firstContentType = 'lesson'
+                    break outerLoop
+                  }
+                  
+                  // Check for sub-lessons with videos
+                  if (lesson.subLessons && lesson.subLessons.length > 0) {
+                    for (const subLesson of lesson.subLessons as ISubLesson[]) {
+                      if (subLesson.videoSource) {
+                        firstContentId = subLesson._id as mongoose.Types.ObjectId
+                        firstContentType = 'sublesson'
+                        break outerLoop
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
-          if (firstLessonId) break
         }
       }
-    }
 
-    if (!userProgress) {
       userProgress = await UserProgress.create({
         courseId: course._id,
         userId: currentUserDoc._id,
+        enrolled: true,
         completedLessons: [],
-        currentLesson: firstLessonId,
+        currentLesson: firstContentId,
+        contentType: firstContentType,
         progress: 0,
         timeSpent: 0,
         lastAccessed: new Date(),
@@ -212,12 +275,28 @@ export async function POST(
       })
     }
 
-    // Calculate total lessons - NEW: through modules -> chapters -> lessons
-    const totalLessons = course.modules?.reduce((total: number, module: any) => {
+    // Calculate total content items (lessons with videos + sub-lessons with videos)
+    const totalContentItems = course.modules?.reduce((total: number, module: any) => {
       if (!module.chapters) return total
       return total + module.chapters.reduce((chapterTotal: number, chapter: any) => {
         if (!chapter.lessons) return chapterTotal
-        return chapterTotal + (chapter.lessons.length || 0)
+        return chapterTotal + chapter.lessons.reduce((lessonTotal: number, lesson: ILesson) => {
+          let count = 0
+          
+          // Count lesson if it has video
+          if (lesson.videoSource) {
+            count += 1
+          }
+          
+          // Count sub-lessons with videos
+          if (lesson.subLessons) {
+            count += lesson.subLessons.filter((subLesson: ISubLesson) => 
+              subLesson.videoSource
+            ).length
+          }
+          
+          return lessonTotal + count
+        }, 0)
       }, 0)
     }, 0) || 0
 
@@ -227,28 +306,29 @@ export async function POST(
       timeSpent: (userProgress.timeSpent || 0) + timeSpent
     }
 
-    if (current && lessonObjectId) {
-      updates.currentLesson = lessonObjectId
+    if (current) {
+      updates.currentLesson = new mongoose.Types.ObjectId(lessonId)
+      updates.contentType = contentType
     }
 
     let completedLessons = [...(userProgress.completedLessons || [])]
     
-    if (completed && lessonObjectId && !completedLessons.some(id => 
-      (id as any)?.toString() === lessonObjectId?.toString()
+    if (completed && !completedLessons.some(id => 
+      (id as any)?.toString() === lessonId
     )) {
-      completedLessons.push(lessonObjectId)
+      completedLessons.push(new mongoose.Types.ObjectId(lessonId))
       updates.completedLessons = completedLessons
       
       // Calculate new progress
       const newCompletedCount = completedLessons.length
-      updates.progress = Math.min(newCompletedCount / totalLessons, 1)
+      updates.progress = totalContentItems > 0 ? Math.min(newCompletedCount / totalContentItems, 1) : 0
       
       // Check if course is completed
-      if (newCompletedCount >= totalLessons) {
+      if (newCompletedCount >= totalContentItems) {
         updates.completed = true
         updates.completedAt = new Date()
         
-        // CREATE COURSE COMPLETION NOTIFICATION
+        // Create notifications
         if (currentUserDoc.notificationPreferences?.achievements) {
           await NotificationService.createNotification({
             userId: currentUserDoc._id,
@@ -259,7 +339,6 @@ export async function POST(
           });
         }
         
-        // Also create a course completion notification
         if (currentUserDoc.notificationPreferences?.courses) {
           await NotificationService.createNotification({
             userId: currentUserDoc._id,
@@ -287,6 +366,7 @@ export async function POST(
       courseId: (progressData?.courseId as any)?.toString() || '',
       userId: (progressData?.userId as any)?.toString() || '',
       currentLesson: (progressData?.currentLesson as any)?.toString() || null,
+      contentType: progressData?.contentType || null,
       completedLessons: (progressData?.completedLessons || []).map((id: any) => id?.toString() || '')
     })
   } catch (error: any) {

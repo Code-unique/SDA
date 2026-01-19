@@ -1,5 +1,7 @@
+// lib/models/Course.ts - UPDATED WITH LESSON AND SUBLESSON VIDEOS
 import mongoose, { Document, Schema, Model } from 'mongoose';
 import { Types } from 'mongoose';
+
 // S3 Asset Interface
 export interface IS3Asset {
   key: string;
@@ -9,9 +11,11 @@ export interface IS3Asset {
   duration?: number;
   width?: number;
   height?: number;
+  fileName?: string;
+  originalFileName?: string;
 }
 
-// NEW: Video Source Interface
+// Video Source Interface
 export interface IVideoSource {
   type: 'uploaded' | 'library';
   videoLibraryId?: mongoose.Types.ObjectId;
@@ -27,20 +31,34 @@ export interface ILessonResource {
   type: 'pdf' | 'document' | 'link' | 'video';
 }
 
-export interface ILesson {
-  _id: Types.ObjectId;
+// SubLesson Interface
+export interface ISubLesson {
+  _id?: mongoose.Types.ObjectId;
   title: string;
-  description: string;
+  description?: string;
   content: string;
-  videoSource: IVideoSource;
-  video?: IS3Asset; // Optional for backward compatibility
+  videoSource: IVideoSource; // Sub-lesson can have video
   duration: number;
   isPreview: boolean;
   resources: ILessonResource[];
   order: number;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+export interface ILesson {
+  _id: Types.ObjectId;
+  title: string;
+  description: string;
+  videoSource: IVideoSource; // Lesson can have video too
+  content?: string;
+  subLessons: ISubLesson[];
+  duration: number;
+  order: number;
   createdAt: Date;
   updatedAt: Date;
 }
+
 export interface IChapter {
   _id?: mongoose.Types.ObjectId;
   title: string;
@@ -68,7 +86,7 @@ export interface IRating {
   rating: number;
   review?: string;
   createdAt: Date;
-  updatedAt?: Date;
+  updatedAt: Date;
 }
 
 export interface IStudentProgress {
@@ -104,6 +122,7 @@ export interface ICourse extends Document {
   averageRating: number;
   totalDuration: number;
   totalLessons: number;
+  totalSubLessons: number;
   totalChapters: number;
   isPublished: boolean;
   isFeatured: boolean;
@@ -122,7 +141,23 @@ const S3AssetSchema = new Schema<IS3Asset>({
   type: { type: String, enum: ['image', 'video'], required: true },
   duration: Number,
   width: Number,
-  height: Number
+  height: Number,
+  fileName: String,
+  originalFileName: String
+});
+
+// Video Source Schema
+const VideoSourceSchema = new Schema<IVideoSource>({
+  type: { 
+    type: String, 
+    enum: ['uploaded', 'library'], 
+    required: true,
+    default: 'uploaded'
+  },
+  videoLibraryId: { type: Schema.Types.ObjectId, ref: 'VideoLibrary' },
+  video: { type: S3AssetSchema, required: true },
+  uploadedAt: { type: Date, default: Date.now },
+  uploadedBy: { type: Schema.Types.ObjectId, ref: 'User' }
 });
 
 const LessonResourceSchema = new Schema<ILessonResource>({
@@ -131,26 +166,26 @@ const LessonResourceSchema = new Schema<ILessonResource>({
   type: { type: String, enum: ['pdf', 'document', 'link', 'video'], required: true }
 });
 
-// UPDATED: Lesson Schema with videoSource
-const LessonSchema = new Schema<ILesson>({
+// SubLesson Schema
+const SubLessonSchema = new Schema<ISubLesson>({
   title: { type: String, required: true, maxlength: 200 },
   description: { type: String, maxlength: 1000 },
   content: { type: String },
-  videoSource: {
-    type: {
-      type: String,
-      enum: ['uploaded', 'library'],
-      required: true,
-      default: 'uploaded'
-    },
-    videoLibraryId: { type: Schema.Types.ObjectId, ref: 'VideoLibrary' },
-    video: { type: S3AssetSchema, required: true },
-    uploadedAt: { type: Date, default: Date.now },
-    uploadedBy: { type: Schema.Types.ObjectId, ref: 'User' }
-  },
+  videoSource: { type: VideoSourceSchema, required: true },
   duration: { type: Number, default: 0, min: 0, max: 10000 },
   isPreview: { type: Boolean, default: false },
   resources: [LessonResourceSchema],
+  order: { type: Number, required: true, min: 0 }
+}, { timestamps: true });
+
+// UPDATED: Lesson Schema (now has videoSource and subLessons)
+const LessonSchema = new Schema<ILesson>({
+  title: { type: String, required: true, maxlength: 200 },
+  description: { type: String, maxlength: 1000 },
+  videoSource: { type: VideoSourceSchema }, // Lesson can have video
+  content: { type: String },
+  subLessons: [SubLessonSchema],
+  duration: { type: Number, default: 0, min: 0, max: 10000 },
   order: { type: Number, required: true, min: 0 }
 }, { timestamps: true });
 
@@ -275,6 +310,11 @@ const CourseSchema = new Schema<ICourse>(
       default: 0,
       min: 0
     },
+    totalSubLessons: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
     totalChapters: {
       type: Number,
       default: 0,
@@ -307,7 +347,7 @@ const CourseSchema = new Schema<ICourse>(
   }
 );
 
-// Pre-save middleware for auto-calculated fields
+// UPDATED: Pre-save middleware for auto-calculated fields
 CourseSchema.pre('save', function (next) {
   const course = this as ICourse;
 
@@ -316,21 +356,38 @@ CourseSchema.pre('save', function (next) {
     total + module.chapters.length, 0
   );
 
-  // Calculate total lessons across all chapters in all modules
+  // Calculate total lessons
   course.totalLessons = course.modules.reduce((total, module) =>
     total + module.chapters.reduce((chapterTotal, chapter) =>
       chapterTotal + chapter.lessons.length, 0
     ), 0
   );
 
-  // Calculate total duration across all lessons in all chapters in all modules
-  course.totalDuration = course.modules.reduce((total, module) =>
+  // Calculate total sub-lessons
+  course.totalSubLessons = course.modules.reduce((total, module) =>
     total + module.chapters.reduce((chapterTotal, chapter) =>
       chapterTotal + chapter.lessons.reduce((lessonTotal, lesson) =>
-        lessonTotal + (lesson.duration || 0), 0
+        lessonTotal + lesson.subLessons.length, 0
       ), 0
     ), 0
   );
+
+  // Calculate total duration (lesson duration + sum of all sub-lesson durations)
+  course.totalDuration = course.modules.reduce((total, module) =>
+    total + module.chapters.reduce((chapterTotal, chapter) =>
+      chapterTotal + chapter.lessons.reduce((lessonTotal, lesson) => {
+        // Add lesson duration
+        let duration = lesson.duration || 0;
+        
+        // Add all sub-lesson durations
+        duration += lesson.subLessons.reduce((subLessonTotal, subLesson) =>
+          subLessonTotal + (subLesson.duration || 0), 0
+        );
+        
+        return lessonTotal + duration;
+      }, 0
+    ), 0
+  ), 0);
 
   // Generate slug if not provided or title changed
   if (this.isModified('title') || !course.slug) {

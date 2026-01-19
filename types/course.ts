@@ -1,3 +1,4 @@
+// types/course.ts - UPDATED WITH LESSON AND SUBLESSON VIDEOS
 export interface S3Asset {
   key: string
   url: string
@@ -6,13 +7,22 @@ export interface S3Asset {
   duration?: number
   width?: number
   height?: number
+  fileName?: string
+  originalFileName?: string
+}
+
+export interface VideoSource {
+  type: 'uploaded' | 'library'
+  video: S3Asset
+  uploadedAt?: string
+  uploadedBy?: string
 }
 
 export interface UploadProgress {
   [key: string]: {
     progress: number
     fileName: string
-    type: 'thumbnail' | 'previewVideo' | 'lessonVideo' | 'moduleThumbnail'
+    type: 'thumbnail' | 'previewVideo' | 'lessonVideo' | 'subLessonVideo' | 'moduleThumbnail'
     status: 'generating-url' | 'uploading' | 'processing' | 'completed' | 'error'
     error?: string
   }
@@ -24,12 +34,13 @@ export interface LessonResource {
   type: 'pdf' | 'document' | 'link' | 'video'
 }
 
-export interface Lesson {
+// SubLesson Interface
+export interface SubLesson {
   _id?: string
   title: string
-  description?: string // Made optional
-  content?: string // Made optional
-  video?: S3Asset
+  description?: string
+  content?: string
+  videoSource?: VideoSource // Sub-lesson can have video
   duration: number
   isPreview: boolean
   resources: LessonResource[]
@@ -38,10 +49,24 @@ export interface Lesson {
   updatedAt?: string
 }
 
+// UPDATED: Lesson Interface (now has videoSource and subLessons)
+export interface Lesson {
+  _id?: string
+  title: string
+  description?: string
+  videoSource?: VideoSource // Lesson can have video too
+  content?: string
+  subLessons: SubLesson[]
+  duration: number
+  order: number
+  createdAt?: string
+  updatedAt?: string
+}
+
 export interface Chapter {
   _id?: string
   title: string
-  description?: string // Made optional
+  description?: string
   order: number
   lessons: Lesson[]
   createdAt?: string
@@ -51,7 +76,7 @@ export interface Chapter {
 export interface Module {
   _id?: string
   title: string
-  description?: string // Made optional
+  description?: string
   thumbnailUrl?: string
   chapters: Chapter[]
   order: number
@@ -77,7 +102,7 @@ export interface Course {
   price: number
   isFree: boolean
   level: 'beginner' | 'intermediate' | 'advanced'
-  category?: string // Made optional
+  category?: string
   tags: string[]
   thumbnail: S3Asset | null
   previewVideo: S3Asset | null
@@ -90,6 +115,7 @@ export interface Course {
   averageRating: number
   totalDuration: number
   totalLessons: number
+  totalSubLessons: number
   createdAt: string
   updatedAt: string
 }

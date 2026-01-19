@@ -1,8 +1,10 @@
+// app/api/courses/[id]/route.ts - UPDATED FOR LESSON AND SUBLESSON VIDEOS
 import { NextRequest, NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import Course from '@/lib/models/Course'
 import mongoose from 'mongoose'
 import "@/lib/loadmodels";
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -60,16 +62,30 @@ export async function GET(
     // Calculate total reviews
     const totalReviews = course.ratings?.length || 0
 
-    // Calculate total duration and lessons
+    // UPDATED: Calculate total duration, lessons, and sub-lessons
     let totalDuration = 0
     let totalLessons = 0
+    let totalSubLessons = 0
     
     if (course.modules) {
       course.modules.forEach((module: any) => {
-        if (module.lessons) {
-          totalLessons += module.lessons.length
-          module.lessons.forEach((lesson: any) => {
-            totalDuration += lesson.duration || 0
+        if (module.chapters) {
+          module.chapters.forEach((chapter: any) => {
+            if (chapter.lessons) {
+              totalLessons += chapter.lessons.length
+              chapter.lessons.forEach((lesson: any) => {
+                // Add lesson duration
+                totalDuration += lesson.duration || 0
+                
+                // Count and add sub-lessons
+                if (lesson.subLessons) {
+                  totalSubLessons += lesson.subLessons.length
+                  lesson.subLessons.forEach((subLesson: any) => {
+                    totalDuration += subLesson.duration || 0
+                  })
+                }
+              })
+            }
           })
         }
       })
@@ -79,6 +95,7 @@ export async function GET(
       ...course,
       totalDuration,
       totalLessons,
+      totalSubLessons,
       totalReviews,
       aiFeatures: {
         hasAIAssistant: Math.random() > 0.7,

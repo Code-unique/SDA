@@ -1,11 +1,13 @@
+// app/api/courses/[id]/complete/route.ts - UPDATED FOR SUBLESSONS
 import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import User from '@/lib/models/User';
-import Course, { ICourse } from '@/lib/models/Course'; // ADD TYPE IMPORT
+import Course, { ICourse } from '@/lib/models/Course';
 import { NotificationService } from '@/lib/services/notificationService';
 import mongoose from 'mongoose';
 import "@/lib/loadmodels";
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -99,7 +101,7 @@ export async function POST(
       type: 'achievement',
       message: `Congratulations! You completed "${course.title}"`,
       actionUrl: `/courses/${course.slug || course._id}`,
-      courseId: course._id as mongoose.Types.ObjectId // FIX: Type cast
+      courseId: course._id as mongoose.Types.ObjectId
     });
 
     // Create notification for instructor (optional)
@@ -110,7 +112,7 @@ export async function POST(
         fromUserId: currentUserDoc._id,
         message: `${currentUserDoc.firstName} completed your course "${course.title}"`,
         actionUrl: `/dashboard/courses/${course.slug || course._id}/students`,
-        courseId: course._id as mongoose.Types.ObjectId // FIX: Type cast
+        courseId: course._id as mongoose.Types.ObjectId
       });
     }
 
