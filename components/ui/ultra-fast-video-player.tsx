@@ -1,3 +1,4 @@
+// components/ui/ultra-fast-video-player.tsx
 'use client'
 
 import React, { 
@@ -111,11 +112,13 @@ const formatTime = (seconds: number): string => {
 
 // Browser detection
 const isSafari = typeof window !== 'undefined' && 
-  /^((?!chrome|android).)*safari/i.test(navigator.userAgent) &&
-  !/iPad|iPhone|iPod/.test(navigator.userAgent)
+  /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
 
 const isIOS = typeof window !== 'undefined' && 
-  /iPad|iPhone|iPod/.test(navigator.userAgent)
+  /iPad|iPhone|iPod/.test(navigator.userAgent) &&
+  !(window as any).MSStream
+
+const isIOSSafari = isIOS && isSafari
 
 // ==================== MAIN COMPONENT ====================
 const UltraFastVideoPlayer = memo(({
@@ -152,8 +155,8 @@ const UltraFastVideoPlayer = memo(({
   const lastInteractionRef = useRef<number>(Date.now())
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
   const rafRef = useRef<number | null>(null)
-  const videoDimensionsRef = useRef({ width: 0, height: 0 })
   const smoothTimeUpdateRef = useRef<number>(0)
+  const fullscreenChangeListenerRef = useRef<(() => void) | null>(null)
   
   // State
   const [state, setState] = useState<PlayerState>({
@@ -483,20 +486,20 @@ const UltraFastVideoPlayer = memo(({
     }
   }, [state.duration])
 
-  // Fullscreen handling with Safari support
+  // iOS Fullscreen handling - FIXED
   const toggleFullscreen = useCallback(async (): Promise<void> => {
     if (!isMountedRef.current || !containerRef.current) return
     
     try {
-      if (isSafari) {
-        // Safari uses webkit prefixed API with type assertions
+      // iOS specific handling
+      if (isIOS) {
         const video = videoRef.current as SafariVideoElement | null
         if (!video) return
         
         const safariDoc = document as SafariDocument
         
         if (!state.isFullscreen) {
-          // Enter fullscreen
+          // iOS requires calling webkitEnterFullscreen on the video element
           if (video.webkitEnterFullscreen) {
             await video.webkitEnterFullscreen()
           } else if (video.webkitRequestFullscreen) {
@@ -504,8 +507,16 @@ const UltraFastVideoPlayer = memo(({
           } else if (video.requestFullscreen) {
             await video.requestFullscreen()
           }
+          
+          // iOS doesn't trigger fullscreenchange event reliably, so we set state manually
+          setTimeout(() => {
+            if (isMountedRef.current) {
+              setState(prev => ({ ...prev, isFullscreen: true }))
+              onFullscreenChange?.(true)
+            }
+          }, 100)
         } else {
-          // Exit fullscreen
+          // Exit fullscreen for iOS
           if (safariDoc.webkitExitFullscreen) {
             await safariDoc.webkitExitFullscreen()
           } else if (document.exitFullscreen) {
@@ -513,7 +524,7 @@ const UltraFastVideoPlayer = memo(({
           }
         }
       } else {
-        // Standard fullscreen API
+        // Standard fullscreen API for non-iOS
         if (!document.fullscreenElement) {
           await containerRef.current.requestFullscreen()
         } else {
@@ -522,8 +533,17 @@ const UltraFastVideoPlayer = memo(({
       }
     } catch (err) {
       console.error('Fullscreen error:', err)
+      // Fallback for iOS Safari that doesn't support programmatic fullscreen
+      if (isIOS && err instanceof TypeError) {
+        // iOS Safari may require user gesture for fullscreen
+        // We'll show a message or use a different approach
+        setState(prev => ({ 
+          ...prev, 
+          error: 'Fullscreen requires a direct tap. Use the native fullscreen button in iOS.' 
+        }))
+      }
     }
-  }, [state.isFullscreen])
+  }, [state.isFullscreen, onFullscreenChange])
 
   // Check if element is in fullscreen mode
   const checkFullscreenElement = useCallback((): Element | null => {
@@ -533,6 +553,37 @@ const UltraFastVideoPlayer = memo(({
            (document as any).mozFullScreenElement ||
            (document as any).msFullscreenElement
   }, [])
+
+  // Setup fullscreen change listener
+  const setupFullscreenListeners = useCallback(() => {
+    const handleFullscreenChange = () => {
+      const isFullscreen = !!checkFullscreenElement()
+      
+      if (isMountedRef.current) {
+        setState(prev => ({ ...prev, isFullscreen }))
+        onFullscreenChange?.(isFullscreen)
+      }
+    }
+    
+    // Store reference for cleanup
+    fullscreenChangeListenerRef.current = handleFullscreenChange
+    
+    // Add all fullscreen change listeners
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange)
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange)
+    
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange)
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange)
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange)
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange)
+      
+      // Clear the ref
+      fullscreenChangeListenerRef.current = null
+    }
+  }, [checkFullscreenElement, onFullscreenChange])
 
   // Setup video element
   useEffect(() => {
@@ -561,6 +612,7 @@ const UltraFastVideoPlayer = memo(({
     video.style.backfaceVisibility = 'hidden'
     video.style.perspective = '1000px'
     video.style.willChange = 'transform'
+    video.style.webkitTransform = 'translateZ(0)' // For iOS
     
     // Event handlers
     const handleLoadStart = () => {
@@ -711,15 +763,6 @@ const UltraFastVideoPlayer = memo(({
       }
     }
     
-    const handleFullscreenChange = () => {
-      const isFullscreen = !!checkFullscreenElement()
-      
-      if (isMountedRef.current) {
-        setState(prev => ({ ...prev, isFullscreen }))
-        onFullscreenChange?.(isFullscreen)
-      }
-    }
-    
     // Add event listeners
     video.addEventListener('loadstart', handleLoadStart)
     video.addEventListener('loadedmetadata', handleLoadedMetadata)
@@ -733,17 +776,20 @@ const UltraFastVideoPlayer = memo(({
     video.addEventListener('error', handleError)
     video.addEventListener('resize', handleResize)
     
-    // Fullscreen change handlers
-    document.addEventListener('fullscreenchange', handleFullscreenChange)
-    document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
-    document.addEventListener('mozfullscreenchange', handleFullscreenChange)
-    document.addEventListener('MSFullscreenChange', handleFullscreenChange)
+    // Setup fullscreen listeners
+    const cleanupFullscreenListeners = setupFullscreenListeners()
     
     // Initialize HLS if needed, otherwise set src directly
     if (isHLS && Hls.isSupported()) {
       initHLS()
     } else {
-      video.src = videoSrc
+      // For iOS, we need to handle MP4 format specifically
+      if (isIOS && videoSrc.includes('.mp4')) {
+        // iOS prefers direct src for MP4
+        video.src = videoSrc
+      } else {
+        video.src = videoSrc
+      }
     }
     
     // Set up resize observer
@@ -788,10 +834,7 @@ const UltraFastVideoPlayer = memo(({
       }
       
       // Clean up fullscreen listeners
-      document.removeEventListener('fullscreenchange', handleFullscreenChange)
-      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange)
-      document.removeEventListener('mozfullscreenchange', handleFullscreenChange)
-      document.removeEventListener('MSFullscreenChange', handleFullscreenChange)
+      cleanupFullscreenListeners()
       
       // Clean up HLS
       if (hlsRef.current) {
@@ -812,6 +855,11 @@ const UltraFastVideoPlayer = memo(({
       if (rafRef.current) {
         cancelAnimationFrame(rafRef.current)
       }
+      
+      // Clean up fullscreen listener ref
+      if (fullscreenChangeListenerRef.current) {
+        fullscreenChangeListenerRef.current = null
+      }
     }
   }, [
     videoSrc,
@@ -829,11 +877,10 @@ const UltraFastVideoPlayer = memo(({
     onProgress,
     onEnded,
     onError,
-    onFullscreenChange,
     onAspectRatioChange,
     calculateOptimalAspectRatio,
     calculatedAspectRatio,
-    checkFullscreenElement
+    setupFullscreenListeners
   ])
 
   // Handle screen size changes
@@ -946,6 +993,10 @@ const UltraFastVideoPlayer = memo(({
         lastInteractionRef.current = Date.now()
         setShowControls(true)
       }}
+      onTouchStart={() => {
+        lastInteractionRef.current = Date.now()
+        setShowControls(true)
+      }}
       onClick={(e) => {
         // Prevent play/pause when clicking on controls
         if ((e.target as HTMLElement).closest('[data-controls]')) return
@@ -970,6 +1021,8 @@ const UltraFastVideoPlayer = memo(({
         autoPlay={autoplay}
         loop={loop}
         aria-label="Video content"
+        webkit-playsinline="true" // iOS specific
+        x-webkit-airplay="allow" // iOS AirPlay
       />
       
       {/* Loading overlay */}
