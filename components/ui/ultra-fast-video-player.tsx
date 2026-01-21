@@ -8,7 +8,8 @@ import React, {
   useCallback, 
   useMemo,
   memo,
-  CSSProperties
+  CSSProperties,
+  MouseEvent
 } from 'react'
 import { 
   Play, 
@@ -34,6 +35,16 @@ import { Button } from './button'
 import { cn } from '@/lib/utils'
 import Hls from 'hls.js'
 
+// Dynamically import flv.js only on client side
+let flvjs: any = null;
+if (typeof window !== 'undefined') {
+  import('flv.js').then(module => {
+    flvjs = module.default;
+  }).catch(() => {
+    console.warn('flv.js failed to load');
+  });
+}
+
 // ==================== TYPES ====================
 export interface VideoPlayerProps {
   src: string | string[]
@@ -58,6 +69,7 @@ export interface VideoPlayerProps {
   onAspectRatioChange?: (ratio: number) => void
   aspectRatio?: 'auto' | number
   style?: CSSProperties
+  videoKey?: string | number // Changed from 'key' to avoid React special prop
 }
 
 interface PlayerState {
@@ -97,6 +109,10 @@ const MOBILE_BREAKPOINT = 768
 const DEFAULT_ASPECT_RATIO = 16 / 9
 const ASPECT_RATIO_THRESHOLD = 0.1
 
+// Progressive loading chunk size (in MB)
+const CHUNK_SIZE = 2 * 1024 * 1024 // 2MB chunks
+const MAX_BUFFER_SIZE = 50 * 1024 * 1024 // 50MB max buffer
+
 const formatTime = (seconds: number): string => {
   if (isNaN(seconds) || !isFinite(seconds)) return '0:00'
   
@@ -119,6 +135,161 @@ const isIOS = typeof window !== 'undefined' &&
   !(window as any).MSStream
 
 const isIOSSafari = isIOS && isSafari
+
+// Video format detection
+const getVideoFormat = (url: string): 'mp4' | 'mov' | 'hls' | 'flv' | 'other' => {
+  if (!url) return 'other'
+  
+  const lowerUrl = url.toLowerCase()
+  
+  if (lowerUrl.includes('.m3u8') || lowerUrl.includes('.m3u')) return 'hls'
+  if (lowerUrl.includes('.flv')) return 'flv'
+  if (lowerUrl.includes('.mov')) return 'mov'
+  if (lowerUrl.includes('.mp4')) return 'mp4'
+  
+  return 'other'
+}
+
+// Optimized video URL for iOS
+const getOptimizedSourceForIOS = (url: string): string => {
+  const format = getVideoFormat(url)
+  
+  // iOS has specific requirements for smooth playback
+  if (isIOS) {
+    // For MOV files on iOS, we need to ensure proper encoding
+    if (format === 'mov') {
+      // iOS handles MOV natively but needs H.264 codec
+      return url
+    }
+    
+    // For MP4 on iOS, ensure it's H.264 encoded
+    if (format === 'mp4') {
+      return url
+    }
+    
+    // iOS doesn't support FLV, convert to MP4 or use HLS
+    if (format === 'flv') {
+      console.warn('FLV format not supported on iOS. Convert to MP4 or HLS.')
+      return url // Fallback, but will likely fail
+    }
+  }
+  
+  return url
+}
+
+// Progressive video loader for large files
+class ProgressiveVideoLoader {
+  private video: HTMLVideoElement
+  private url: string
+  private isDownloading: boolean = false
+  private abortController: AbortController | null = null
+  private startByte: number = 0
+  private totalBytes: number = 0
+  private buffer: ArrayBuffer[] = []
+  
+  constructor(video: HTMLVideoElement, url: string) {
+    this.video = video
+    this.url = url
+  }
+  
+  async load() {
+    try {
+      // First, get file size
+      await this.getFileSize()
+      
+      // Start progressive loading
+      await this.loadChunk(0, CHUNK_SIZE)
+      
+      // Continue loading in background
+      this.continueLoading()
+      
+    } catch (error) {
+      console.error('Progressive loading failed:', error)
+      throw error
+    }
+  }
+  
+  private async getFileSize(): Promise<void> {
+    const response = await fetch(this.url, { method: 'HEAD' })
+    this.totalBytes = parseInt(response.headers.get('Content-Length') || '0')
+  }
+  
+  private async loadChunk(start: number, length: number): Promise<void> {
+    if (this.isDownloading) return
+    
+    this.isDownloading = true
+    this.abortController = new AbortController()
+    
+    try {
+      const end = Math.min(start + length - 1, this.totalBytes - 1)
+      
+      const response = await fetch(this.url, {
+        headers: {
+          'Range': `bytes=${start}-${end}`
+        },
+        signal: this.abortController.signal
+      })
+      
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      
+      const arrayBuffer = await response.arrayBuffer()
+      this.buffer.push(arrayBuffer)
+      
+      // Update video source if first chunk
+      if (start === 0) {
+        const blob = new Blob([arrayBuffer], { type: 'video/mp4' })
+        const blobUrl = URL.createObjectURL(blob)
+        this.video.src = blobUrl
+      }
+      
+      this.startByte = end + 1
+      
+    } finally {
+      this.isDownloading = false
+    }
+  }
+  
+  private async continueLoading(): Promise<void> {
+    while (this.startByte < this.totalBytes) {
+      await this.loadChunk(this.startByte, CHUNK_SIZE)
+      
+      // Wait for video to play and buffer to be consumed
+      if (this.video.readyState >= 3) {
+        // Check if we need more buffer
+        const buffered = this.video.buffered
+        const currentTime = this.video.currentTime
+        
+        if (buffered.length > 0) {
+          const bufferedEnd = buffered.end(buffered.length - 1)
+          const bufferRemaining = bufferedEnd - currentTime
+          
+          // If buffer is running low, load next chunk
+          if (bufferRemaining < 30) { // 30 seconds threshold
+            await this.loadChunk(this.startByte, CHUNK_SIZE)
+          }
+        }
+      }
+      
+      // Small delay to prevent overwhelming the network
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+  }
+  
+  abort() {
+    if (this.abortController) {
+      this.abortController.abort()
+    }
+    this.isDownloading = false
+  }
+  
+  cleanup() {
+    this.abort()
+    this.buffer = []
+    if (this.video.src.startsWith('blob:')) {
+      URL.revokeObjectURL(this.video.src)
+    }
+  }
+}
 
 // ==================== MAIN COMPONENT ====================
 const UltraFastVideoPlayer = memo(({
@@ -143,12 +314,15 @@ const UltraFastVideoPlayer = memo(({
   onPlaybackRateChange,
   onAspectRatioChange,
   aspectRatio = 'auto',
-  style
+  style,
+  videoKey // Changed from 'key' to avoid React special prop
 }: VideoPlayerProps) => {
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const hlsRef = useRef<Hls | null>(null)
+  const flvRef = useRef<any>(null)
+  const loaderRef = useRef<ProgressiveVideoLoader | null>(null)
   const playAttemptRef = useRef<number>(0)
   const isMountedRef = useRef(true)
   const controlsTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -157,6 +331,7 @@ const UltraFastVideoPlayer = memo(({
   const rafRef = useRef<number | null>(null)
   const smoothTimeUpdateRef = useRef<number>(0)
   const fullscreenChangeListenerRef = useRef<(() => void) | null>(null)
+  const videoUrlRef = useRef<string>('')
   
   // State
   const [state, setState] = useState<PlayerState>({
@@ -182,6 +357,7 @@ const UltraFastVideoPlayer = memo(({
   const [calculatedAspectRatio, setCalculatedAspectRatio] = useState<number>(
     typeof aspectRatio === 'number' ? aspectRatio : DEFAULT_ASPECT_RATIO
   )
+  const [videoFormat, setVideoFormat] = useState<'mp4' | 'mov' | 'hls' | 'flv' | 'other'>('other')
 
   // Get the video source
   const videoSrc = useMemo(() => {
@@ -189,11 +365,17 @@ const UltraFastVideoPlayer = memo(({
     return src
   }, [src])
 
-  // Check if source is HLS
-  const isHLS = useMemo(() => {
-    if (!videoSrc) return false
-    return videoSrc.includes('.m3u8') || videoSrc.includes('.m3u')
+  // Optimize source for iOS
+  const optimizedSrc = useMemo(() => {
+    return getOptimizedSourceForIOS(videoSrc)
   }, [videoSrc])
+
+  // Detect video format
+  useEffect(() => {
+    const format = getVideoFormat(optimizedSrc)
+    setVideoFormat(format)
+    videoUrlRef.current = optimizedSrc
+  }, [optimizedSrc])
 
   // Calculate optimal aspect ratio
   const calculateOptimalAspectRatio = useCallback(() => {
@@ -230,42 +412,76 @@ const UltraFastVideoPlayer = memo(({
 
   // Initialize HLS if needed
   const initHLS = useCallback(() => {
-    if (!videoRef.current || !isHLS || !Hls.isSupported()) return
+    if (!videoRef.current || !Hls.isSupported() || videoFormat !== 'hls') return
+    
+    // Clean up existing HLS instance
+    if (hlsRef.current) {
+      hlsRef.current.destroy()
+      hlsRef.current = null
+    }
     
     const hls = new Hls({
-      enableWorker: true,
-      lowLatencyMode: true,
-      backBufferLength: 60,
-      maxBufferLength: 30,
-      maxMaxBufferLength: 60,
-      maxBufferSize: 60 * 1000 * 1000,
-      maxLoadingDelay: 4,
-      manifestLoadingTimeOut: 10000,
-      manifestLoadingMaxRetry: 3,
-      manifestLoadingRetryDelay: 500,
-      levelLoadingTimeOut: 10000,
-      levelLoadingMaxRetry: 3,
-      levelLoadingRetryDelay: 500,
-      fragLoadingTimeOut: 20000,
-      fragLoadingMaxRetry: 6,
-      fragLoadingRetryDelay: 500,
-      startFragPrefetch: true,
-      testBandwidth: true,
-      progressive: true,
-    })
+  enableWorker: true,
+  lowLatencyMode: true,
+  backBufferLength: 90,
+  maxBufferLength: 30,
+  maxMaxBufferLength: 60,
+  maxBufferSize: 60 * 1000 * 1000,
+  maxLoadingDelay: 4,
+  manifestLoadingTimeOut: 10000,
+  manifestLoadingMaxRetry: 4,
+  manifestLoadingRetryDelay: 1000,
+  levelLoadingTimeOut: 10000,
+  levelLoadingMaxRetry: 4,
+  levelLoadingRetryDelay: 1000,
+  fragLoadingTimeOut: 20000,
+  fragLoadingMaxRetry: 6,
+  fragLoadingRetryDelay: 500,
+  startFragPrefetch: true,
+  testBandwidth: true,
+  progressive: true,
+  maxBufferHole: 0.5,
+  maxFragLookUpTolerance: 0.25,
+  liveSyncDurationCount: 3,
+  liveMaxLatencyDurationCount: 10,
+  enableCEA708Captions: true,
+  captionsTextTrack1Label: 'English',
+  captionsTextTrack1LanguageCode: 'en',
+  stretchShortVideoTrack: true,
+  maxAudioFramesDrift: 1,
+  autoStartLoad: true,
+  startPosition: -1,
+  defaultAudioCodec: 'mp4a.40.2',
+  enableWebVTT: true,
+  enableIMSC1: true,
+  // Remove or comment out this line:
+  // enableManifestMerging: false,
+  audioStreamController: undefined,
+  timelineController: undefined,
+  audioTrackSelection: true,
+  subtitleTrackSelection: true,
+  seekHoleDelta: 0.5,
+  seekHoleLimit: 2.0,
+} as any) // Type assertion if needed
     
     hlsRef.current = hls
     
+    // Error handling
     hls.on(Hls.Events.ERROR, (event, data) => {
+      console.error('HLS Error:', data)
+      
       if (data.fatal) {
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
+            console.log('Network error, trying to recover...')
             hls.startLoad()
             break
           case Hls.ErrorTypes.MEDIA_ERROR:
+            console.log('Media error, trying to recover...')
             hls.recoverMediaError()
             break
           default:
+            console.log('Fatal HLS error, destroying...')
             hls.destroy()
             if (isMountedRef.current) {
               setState(prev => ({ 
@@ -279,11 +495,54 @@ const UltraFastVideoPlayer = memo(({
       }
     })
     
-    hls.loadSource(videoSrc)
+    // Load source
+    hls.loadSource(optimizedSrc)
     hls.attachMedia(videoRef.current!)
     
     return hls
-  }, [videoSrc, isHLS])
+  }, [optimizedSrc, videoFormat])
+
+  // Initialize FLV if needed
+  const initFLV = useCallback(() => {
+    if (!videoRef.current || !flvjs || !flvjs.isSupported() || videoFormat !== 'flv') return
+    
+    // Clean up existing FLV instance
+    if (flvRef.current) {
+      flvRef.current.destroy()
+      flvRef.current = null
+    }
+    
+    const flvPlayer = flvjs.createPlayer({
+      type: 'flv',
+      url: optimizedSrc,
+      isLive: false,
+      hasAudio: true,
+      hasVideo: true,
+      enableStashBuffer: true,
+      stashInitialSize: 384,
+      enableWorker: true,
+      enableCache: true,
+    })
+    
+    flvRef.current = flvPlayer
+    
+    flvPlayer.attachMediaElement(videoRef.current!)
+    flvPlayer.load()
+    
+    // Add type annotations for FLV.js error handler parameters
+    flvPlayer.on(flvjs.Events.ERROR, (errorType: any, errorDetail: any) => {
+      console.error('FLV Error:', errorType, errorDetail)
+      if (isMountedRef.current) {
+        setState(prev => ({ 
+          ...prev, 
+          error: 'FLV playback error. Please try again.',
+          isLoading: false 
+        }))
+      }
+    })
+    
+    return flvPlayer
+  }, [optimizedSrc, videoFormat])
 
   // Smooth time update using requestAnimationFrame
   const updateSmoothTime = useCallback(() => {
@@ -292,8 +551,8 @@ const UltraFastVideoPlayer = memo(({
     const video = videoRef.current
     const currentTime = video.currentTime
     
-    // Smooth interpolation
-    smoothTimeUpdateRef.current += (currentTime - smoothTimeUpdateRef.current) * 0.3
+    // Smooth interpolation for better UX
+    smoothTimeUpdateRef.current += (currentTime - smoothTimeUpdateRef.current) * 0.2
     
     setState(prev => ({ 
       ...prev, 
@@ -312,7 +571,7 @@ const UltraFastVideoPlayer = memo(({
     if (!video) return
     
     // Reset play attempt counter if it gets too high
-    if (playAttemptRef.current > 5) {
+    if (playAttemptRef.current > 3) {
       playAttemptRef.current = 0
       return
     }
@@ -322,29 +581,49 @@ const UltraFastVideoPlayer = memo(({
     try {
       // Check if video is ready to play
       if (video.readyState < 2) {
-        // Wait for video to be ready
-        await new Promise<void>((resolve) => {
+        // Wait for video to be ready with timeout
+        await new Promise<void>((resolve, reject) => {
           const handleCanPlay = () => {
             video.removeEventListener('canplay', handleCanPlay)
+            video.removeEventListener('error', handleError)
             resolve()
           }
           
-          video.addEventListener('canplay', handleCanPlay)
+          const handleError = () => {
+            video.removeEventListener('canplay', handleCanPlay)
+            video.removeEventListener('error', handleError)
+            reject(new Error('Video failed to load'))
+          }
           
-          // Timeout after 5 seconds
+          video.addEventListener('canplay', handleCanPlay)
+          video.addEventListener('error', handleError)
+          
+          // Timeout after 10 seconds
           setTimeout(() => {
             video.removeEventListener('canplay', handleCanPlay)
-            resolve()
-          }, 5000)
+            video.removeEventListener('error', handleError)
+            resolve() // Continue anyway
+          }, 10000)
         })
       }
       
-      // For iOS Safari, we need to handle muted autoplay
-      if (isIOS && video.muted === false) {
-        video.muted = true
-        setState(prev => ({ ...prev, isMuted: true, volume: 0 }))
+      // For iOS, we need to handle playback carefully
+      if (isIOS) {
+        // iOS requires muted autoplay for most cases
+        if (!video.muted) {
+          video.muted = true
+          setState(prev => ({ ...prev, isMuted: true, volume: 0 }))
+        }
+        
+        // iOS specific: ensure playsInline is set
+        video.playsInline = true
+        
+        // iOS specific: set webkit-playsinline attribute
+        video.setAttribute('webkit-playsinline', 'true')
+        video.setAttribute('x-webkit-airplay', 'allow')
       }
       
+      // Try to play
       const playPromise = video.play()
       
       if (playPromise !== undefined) {
@@ -374,9 +653,17 @@ const UltraFastVideoPlayer = memo(({
       let errorMsg = 'Playback failed. Tap to retry.'
       
       if (err.name === 'NotAllowedError') {
-        errorMsg = 'Tap to play. Browser requires user interaction.'
+        if (isIOS) {
+          errorMsg = 'Tap to play. iOS requires user interaction for video playback.'
+        } else {
+          errorMsg = 'Tap to play. Browser requires user interaction.'
+        }
       } else if (err.name === 'NotSupportedError') {
-        errorMsg = 'Video format not supported.'
+        if (videoFormat === 'mov') {
+          errorMsg = 'MOV format may not be supported. Try MP4 format for better compatibility.'
+        } else {
+          errorMsg = 'Video format not supported.'
+        }
       } else if (err.name === 'AbortError') {
         // Silently handle abort errors
         return
@@ -391,7 +678,7 @@ const UltraFastVideoPlayer = memo(({
         onError?.(errorMsg)
       }
     }
-  }, [onPlay, onError, updateSmoothTime])
+  }, [onPlay, onError, updateSmoothTime, videoFormat])
 
   const handlePause = useCallback((): void => {
     const video = videoRef.current
@@ -411,7 +698,11 @@ const UltraFastVideoPlayer = memo(({
     }
   }, [onPause])
 
-  const togglePlay = useCallback((): void => {
+  const togglePlay = useCallback((e?: React.MouseEvent): void => {
+    if (e) {
+      e.stopPropagation(); // Prevent event from bubbling up
+    }
+    
     lastInteractionRef.current = Date.now()
     setShowControls(true)
     
@@ -422,30 +713,45 @@ const UltraFastVideoPlayer = memo(({
     }
   }, [state.isPlaying, handlePause, handlePlay])
 
+  // Volume control with debounce
+  const volumeChangeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  
   const handleVolumeChange = useCallback((value: number): void => {
     const video = videoRef.current
     if (!video || !isMountedRef.current) return
     
     const newVolume = Math.max(0, Math.min(1, value))
+    
+    // Update video properties
     video.volume = newVolume
     video.muted = newVolume === 0
     
-    if (isMountedRef.current) {
-      setState(prev => ({ 
-        ...prev, 
-        volume: newVolume, 
-        isMuted: newVolume === 0 
-      }))
-      onVolumeChange?.(newVolume)
+    // Clear previous timeout
+    if (volumeChangeTimeoutRef.current) {
+      clearTimeout(volumeChangeTimeoutRef.current)
     }
+    
+    // Debounce state update
+    volumeChangeTimeoutRef.current = setTimeout(() => {
+      if (isMountedRef.current) {
+        setState(prev => ({ 
+          ...prev, 
+          volume: newVolume, 
+          isMuted: newVolume === 0 
+        }))
+        onVolumeChange?.(newVolume)
+      }
+    }, 100)
   }, [onVolumeChange])
 
-  const toggleMute = useCallback((): void => {
+  const toggleMute = useCallback((e: React.MouseEvent): void => {
+    e.stopPropagation(); // Prevent event from bubbling to parent container
+    
     lastInteractionRef.current = Date.now()
     const video = videoRef.current
     if (!video || !isMountedRef.current) return
     
-    const newMutedState = !video.muted
+    const newMutedState = !state.isMuted
     video.muted = newMutedState
     
     if (isMountedRef.current) {
@@ -456,7 +762,7 @@ const UltraFastVideoPlayer = memo(({
       }))
       onVolumeChange?.(video.volume)
     }
-  }, [onVolumeChange])
+  }, [state.isMuted, onVolumeChange])
 
   const handleSeek = useCallback((percentage: number): void => {
     lastInteractionRef.current = Date.now()
@@ -486,7 +792,7 @@ const UltraFastVideoPlayer = memo(({
     }
   }, [state.duration])
 
-  // iOS Fullscreen handling - FIXED
+  // iOS Fullscreen handling - OPTIMIZED
   const toggleFullscreen = useCallback(async (): Promise<void> => {
     if (!isMountedRef.current || !containerRef.current) return
     
@@ -508,7 +814,7 @@ const UltraFastVideoPlayer = memo(({
             await video.requestFullscreen()
           }
           
-          // iOS doesn't trigger fullscreenchange event reliably, so we set state manually
+          // iOS doesn't trigger fullscreenchange event reliably
           setTimeout(() => {
             if (isMountedRef.current) {
               setState(prev => ({ ...prev, isFullscreen: true }))
@@ -533,13 +839,11 @@ const UltraFastVideoPlayer = memo(({
       }
     } catch (err) {
       console.error('Fullscreen error:', err)
-      // Fallback for iOS Safari that doesn't support programmatic fullscreen
+      // Fallback for iOS Safari
       if (isIOS && err instanceof TypeError) {
-        // iOS Safari may require user gesture for fullscreen
-        // We'll show a message or use a different approach
         setState(prev => ({ 
           ...prev, 
-          error: 'Fullscreen requires a direct tap. Use the native fullscreen button in iOS.' 
+          error: 'Fullscreen may not be supported. Try landscape mode.' 
         }))
       }
     }
@@ -590,12 +894,22 @@ const UltraFastVideoPlayer = memo(({
     isMountedRef.current = true
     
     const video = videoRef.current
-    if (!video || !videoSrc) return
+    if (!video || !optimizedSrc) return
     
-    // Clean up previous HLS instance
+    // Clean up previous instances
     if (hlsRef.current) {
       hlsRef.current.destroy()
       hlsRef.current = null
+    }
+    
+    if (flvRef.current) {
+      flvRef.current.destroy()
+      flvRef.current = null
+    }
+    
+    if (loaderRef.current) {
+      loaderRef.current.cleanup()
+      loaderRef.current = null
     }
     
     // Set video properties
@@ -607,12 +921,25 @@ const UltraFastVideoPlayer = memo(({
     video.volume = muted ? 0 : 0.7
     video.poster = poster || ''
     
-    // Add CSS for smooth playback
+    // Add CSS for smooth playback on iOS
     video.style.transform = 'translateZ(0)'
     video.style.backfaceVisibility = 'hidden'
     video.style.perspective = '1000px'
     video.style.willChange = 'transform'
-    video.style.webkitTransform = 'translateZ(0)' // For iOS
+    video.style.webkitTransform = 'translateZ(0)'
+    video.style.webkitBackfaceVisibility = 'hidden'
+    video.style.webkitPerspective = '1000px'
+    
+    // iOS specific attributes
+    if (isIOS) {
+      video.setAttribute('webkit-playsinline', 'true')
+      video.setAttribute('playsinline', 'true')
+      video.setAttribute('x-webkit-airplay', 'allow')
+      video.setAttribute('x-airplay', 'allow')
+      
+      // Disable PiP for iOS
+      video.disablePictureInPicture = true
+    }
     
     // Event handlers
     const handleLoadStart = () => {
@@ -694,6 +1021,7 @@ const UltraFastVideoPlayer = memo(({
           ...prev, 
           currentTime: video.currentTime 
         }))
+        onTimeUpdate?.(video.currentTime)
       }
     }
     
@@ -704,9 +1032,9 @@ const UltraFastVideoPlayer = memo(({
     }
     
     const handleProgress = () => {
-      if (video.buffered.length > 0 && state.duration > 0) {
+      if (video.buffered.length > 0 && video.duration > 0) {
         const bufferedEnd = video.buffered.end(video.buffered.length - 1)
-        const bufferedPercent = (bufferedEnd / state.duration) * 100
+        const bufferedPercent = (bufferedEnd / video.duration) * 100
         if (isMountedRef.current) {
           setState(prev => ({ 
             ...prev, 
@@ -779,16 +1107,20 @@ const UltraFastVideoPlayer = memo(({
     // Setup fullscreen listeners
     const cleanupFullscreenListeners = setupFullscreenListeners()
     
-    // Initialize HLS if needed, otherwise set src directly
-    if (isHLS && Hls.isSupported()) {
+    // Initialize appropriate player based on format
+    if (videoFormat === 'hls' && Hls.isSupported()) {
       initHLS()
+    } else if (videoFormat === 'flv' && flvjs && flvjs.isSupported()) {
+      initFLV()
     } else {
-      // For iOS, we need to handle MP4 format specifically
-      if (isIOS && videoSrc.includes('.mp4')) {
-        // iOS prefers direct src for MP4
-        video.src = videoSrc
-      } else {
-        video.src = videoSrc
+      // For MP4, MOV, or other formats
+      video.src = optimizedSrc
+      
+      // For large files, use progressive loading
+      const fileSizeMatch = optimizedSrc.match(/\.(mp4|mov)$/i)
+      if (fileSizeMatch && !isIOS) {
+        // Don't use progressive loading on iOS as it handles large files well natively
+        console.log('Using direct src for video')
       }
     }
     
@@ -800,14 +1132,14 @@ const UltraFastVideoPlayer = memo(({
     
     // Handle autoplay
     if (autoplay) {
-      // Small delay to ensure everything is set up
+      // Delay for iOS to ensure everything is set up
       setTimeout(() => {
         if (isMountedRef.current && videoRef.current) {
           video.play().catch(() => {
             // Silent catch for autoplay restrictions
           })
         }
-      }, 100)
+      }, isIOS ? 300 : 100)
     }
     
     return () => {
@@ -842,12 +1174,24 @@ const UltraFastVideoPlayer = memo(({
         hlsRef.current = null
       }
       
+      // Clean up FLV
+      if (flvRef.current) {
+        flvRef.current.destroy()
+        flvRef.current = null
+      }
+      
+      // Clean up loader
+      if (loaderRef.current) {
+        loaderRef.current.cleanup()
+        loaderRef.current = null
+      }
+      
       // Clean up resize observer
       if (resizeObserverRef.current) {
         resizeObserverRef.current.disconnect()
       }
       
-      // Clean up timer and RAF
+      // Clean up timers and RAF
       if (controlsTimerRef.current) {
         clearTimeout(controlsTimerRef.current)
       }
@@ -856,21 +1200,26 @@ const UltraFastVideoPlayer = memo(({
         cancelAnimationFrame(rafRef.current)
       }
       
+      if (volumeChangeTimeoutRef.current) {
+        clearTimeout(volumeChangeTimeoutRef.current)
+      }
+      
       // Clean up fullscreen listener ref
       if (fullscreenChangeListenerRef.current) {
         fullscreenChangeListenerRef.current = null
       }
     }
   }, [
-    videoSrc,
+    optimizedSrc,
     poster,
     autoplay,
     preload,
     loop,
     muted,
     playsInline,
-    isHLS,
+    videoFormat,
     initHLS,
+    initFLV,
     onReady,
     onPause,
     onTimeUpdate,
@@ -880,7 +1229,8 @@ const UltraFastVideoPlayer = memo(({
     onAspectRatioChange,
     calculateOptimalAspectRatio,
     calculatedAspectRatio,
-    setupFullscreenListeners
+    setupFullscreenListeners,
+    videoKey // Add videoKey to dependencies to trigger re-initialization when it changes
   ])
 
   // Handle screen size changes
@@ -902,7 +1252,7 @@ const UltraFastVideoPlayer = memo(({
     }
     
     const hideControls = () => {
-      if (Date.now() - lastInteractionRef.current > 2000) {
+      if (Date.now() - lastInteractionRef.current > 3000) {
         setShowControls(false)
       }
     }
@@ -911,7 +1261,7 @@ const UltraFastVideoPlayer = memo(({
       clearTimeout(controlsTimerRef.current)
     }
     
-    controlsTimerRef.current = setTimeout(hideControls, 3000)
+    controlsTimerRef.current = setTimeout(hideControls, 4000)
     
     return () => {
       if (controlsTimerRef.current) {
@@ -971,6 +1321,12 @@ const UltraFastVideoPlayer = memo(({
               <RotateCw className="w-4 h-4 mr-2" />
               Retry Playback
             </Button>
+            
+            {isIOS && videoFormat === 'mov' && (
+              <p className="text-xs text-white/50 mt-3">
+                Tip: MOV files work best on iOS Safari. Ensure video uses H.264 codec.
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -997,11 +1353,7 @@ const UltraFastVideoPlayer = memo(({
         lastInteractionRef.current = Date.now()
         setShowControls(true)
       }}
-      onClick={(e) => {
-        // Prevent play/pause when clicking on controls
-        if ((e.target as HTMLElement).closest('[data-controls]')) return
-        togglePlay()
-      }}
+      onClick={togglePlay}
       tabIndex={0}
       role="region"
       aria-label="Video player"
@@ -1009,6 +1361,7 @@ const UltraFastVideoPlayer = memo(({
       {/* Video element */}
       <video
         ref={videoRef}
+        key={videoKey || videoUrlRef.current} // Use videoKey prop
         className={cn(
           "w-full h-full",
           getVideoObjectFit === 'contain' ? 'object-contain' : 'object-cover'
@@ -1021,8 +1374,13 @@ const UltraFastVideoPlayer = memo(({
         autoPlay={autoplay}
         loop={loop}
         aria-label="Video content"
-        webkit-playsinline="true" // iOS specific
-        x-webkit-airplay="allow" // iOS AirPlay
+        webkit-playsinline="true"
+        x-webkit-airplay="allow"
+        x-airplay="allow"
+        onClick={(e) => {
+          e.stopPropagation(); // Prevent double triggering
+          togglePlay();
+        }}
       />
       
       {/* Loading overlay */}
@@ -1033,6 +1391,9 @@ const UltraFastVideoPlayer = memo(({
             <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-cyan-500 blur-xl opacity-30"></div>
           </div>
           <div className="text-white text-sm mt-4">Loading video...</div>
+          {videoFormat === 'mov' && (
+            <div className="text-xs text-white/50 mt-2">Optimizing for smooth playback...</div>
+          )}
         </div>
       )}
       
@@ -1076,7 +1437,7 @@ const UltraFastVideoPlayer = memo(({
           <div 
             data-controls="true"
             className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 via-black/80 to-transparent pointer-events-auto"
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
           >
             <div className={isMobile ? "p-3" : "p-4"}>
               {/* Progress bar */}
@@ -1139,7 +1500,10 @@ const UltraFastVideoPlayer = memo(({
                   </Button>
                   
                   <Button
-                    onClick={() => handleSkip(-10)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSkip(-10);
+                    }}
                     className={cn(
                       "bg-black/70 hover:bg-black/90 text-white rounded-full p-0 transition-all active:scale-95",
                       isMobile ? "h-8 w-8" : "h-9 w-9"
@@ -1151,7 +1515,10 @@ const UltraFastVideoPlayer = memo(({
                   </Button>
                   
                   <Button
-                    onClick={() => handleSkip(10)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSkip(10);
+                    }}
                     className={cn(
                       "bg-black/70 hover:bg-black/90 text-white rounded-full p-0 transition-all active:scale-95",
                       isMobile ? "h-8 w-8" : "h-9 w-9"
@@ -1162,21 +1529,40 @@ const UltraFastVideoPlayer = memo(({
                     <SkipForward className={isMobile ? "h-3.5 w-3.5" : "h-4 w-4"} />
                   </Button>
                   
-                  <Button
-                    onClick={toggleMute}
-                    className={cn(
-                      "bg-black/70 hover:bg-black/90 text-white rounded-full p-0 transition-all active:scale-95",
-                      isMobile ? "h-8 w-8" : "h-9 w-9"
-                    )}
-                    aria-label={state.isMuted ? "Unmute" : "Mute"}
-                    type="button"
-                  >
-                    {state.isMuted || state.volume === 0 ? (
-                      <VolumeX className={isMobile ? "h-4 w-4" : "h-4 w-4"} />
-                    ) : (
-                      <Volume2 className={isMobile ? "h-4 w-4" : "h-4 w-4"} />
-                    )}
-                  </Button>
+                  <div className="relative group/volume">
+                    <Button
+                      onClick={toggleMute}
+                      className={cn(
+                        "bg-black/70 hover:bg-black/90 text-white rounded-full p-0 transition-all active:scale-95",
+                        isMobile ? "h-8 w-8" : "h-9 w-9"
+                      )}
+                      aria-label={state.isMuted ? "Unmute" : "Mute"}
+                      type="button"
+                    >
+                      {state.isMuted || state.volume === 0 ? (
+                        <VolumeX className={isMobile ? "h-4 w-4" : "h-4 w-4"} />
+                      ) : (
+                        <Volume2 className={isMobile ? "h-4 w-4" : "h-4 w-4"} />
+                      )}
+                    </Button>
+                    
+                    {/* Volume slider */}
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-black/90 backdrop-blur-md rounded-lg p-2 w-24 opacity-0 invisible group-hover/volume:opacity-100 group-hover/volume:visible transition-all duration-200">
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.1"
+                        value={state.volume}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          handleVolumeChange(parseFloat(e.target.value))
+                        }}
+                        className="w-full h-1.5 bg-white/20 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white"
+                        aria-label="Volume control"
+                      />
+                    </div>
+                  </div>
                 </div>
                 
                 {/* Right side */}
@@ -1184,7 +1570,10 @@ const UltraFastVideoPlayer = memo(({
                   {/* Settings */}
                   <div className="relative">
                     <Button
-                      onClick={() => setShowSettings(!showSettings)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowSettings(!showSettings);
+                      }}
                       className={cn(
                         "bg-black/70 hover:bg-black/90 text-white rounded-full p-0 transition-all active:scale-95",
                         isMobile ? "h-8 w-8" : "h-9 w-9"
@@ -1200,7 +1589,10 @@ const UltraFastVideoPlayer = memo(({
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-xs text-white/70">Playback Speed</div>
                           <button
-                            onClick={() => setShowSettings(false)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowSettings(false);
+                            }}
                             className="p-1 hover:bg-white/10 rounded transition-colors"
                             aria-label="Close settings"
                             type="button"
@@ -1213,7 +1605,8 @@ const UltraFastVideoPlayer = memo(({
                           {PLAYBACK_RATES.map(rate => (
                             <button
                               key={rate}
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 const video = videoRef.current
                                 if (video) {
                                   video.playbackRate = rate
@@ -1241,7 +1634,10 @@ const UltraFastVideoPlayer = memo(({
                   
                   {/* Fullscreen */}
                   <Button
-                    onClick={toggleFullscreen}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleFullscreen();
+                    }}
                     className={cn(
                       "bg-black/70 hover:bg-black/90 text-white rounded-full p-0 transition-all active:scale-95",
                       isMobile ? "h-8 w-8" : "h-9 w-9"
@@ -1269,6 +1665,13 @@ const UltraFastVideoPlayer = memo(({
             <Loader2 className="w-5 h-5 text-white animate-spin" />
             <span className="text-white text-sm font-medium">Buffering...</span>
           </div>
+        </div>
+      )}
+      
+      {/* Format indicator for debugging */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="absolute top-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded">
+          {videoFormat.toUpperCase()} {isIOS ? 'iOS' : ''}
         </div>
       )}
     </div>

@@ -1,3 +1,4 @@
+// app/courses/[slug]/page.tsx
 'use client'
 
 import { useState, useEffect, useMemo, useCallback, memo, useRef } from 'react'
@@ -1500,24 +1501,24 @@ export default function CourseDetailPage() {
               className="bg-gradient-to-br from-slate-900 to-black rounded-2xl overflow-hidden shadow-2xl"
             >
               <UltraFastVideoPlayer
-                key={activeLesson._id} // IMPORTANT: Key prop forces re-render for smooth playback
-                src={activeLesson.video?.url || ''}
-                poster={course?.thumbnail?.url}
-                autoplay={true}
-                playsInline={true}
-                muted={isIOS} // iOS requires muted autoplay
-                className="w-full aspect-video"
-                onError={(error) => {
-                  console.error('Video player error:', error)
-                  toast({
-                    title: 'Playback Error',
-                    description: isIOS 
-                      ? 'iOS requires MP4 format with H.264 codec. Try opening in Safari.'
-                      : 'Failed to play video. Please try again.',
-                    variant: 'destructive'
-                  })
-                }}
-              />
+  videoKey={activeLesson._id} // IMPORTANT: Changed from 'key' to 'videoKey' for smooth playback
+  src={activeLesson.video?.url || ''}
+  poster={course?.thumbnail?.url}
+  autoplay={true}
+  playsInline={true}
+  muted={isIOS} // iOS requires muted autoplay
+  className="w-full aspect-video"
+  onError={(error) => {
+    console.error('Video player error:', error)
+    toast({
+      title: 'Playback Error',
+      description: isIOS 
+        ? 'iOS requires MP4 format with H.264 codec. Try opening in Safari.'
+        : 'Failed to play video. Please try again.',
+      variant: 'destructive'
+    })
+  }}
+/>
             </div>
 
             {/* Lesson Content */}
@@ -1767,13 +1768,7 @@ export default function CourseDetailPage() {
                                           return (
                                             <div
                                               key={subLesson._id}
-                                              className={`ml-4 p-3 rounded-lg border cursor-pointer transition-all duration-300 ${
-                                                isSubActive 
-                                                  ? 'bg-gradient-to-r from-red-600 to-orange-500 text-white border-transparent shadow-lg' 
-                                                  : isSubCompleted
-                                                  ? 'bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-green-200 dark:border-green-800'
-                                                  : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-red-300 dark:hover:border-red-600 hover:shadow-md'
-                                              }`}
+                                              className="ml-4 p-3 rounded-lg border cursor-pointer transition-all duration-300"
                                               onClick={() => {
                                                 setActiveLesson({
                                                   ...subLesson,
@@ -1885,13 +1880,13 @@ export default function CourseDetailPage() {
 
               <div className="rounded-2xl overflow-hidden shadow-2xl">
                 <UltraFastVideoPlayer
-                  key={`preview-${course._id}`} // Important for smooth playback
-                  src={course.previewVideo.url}
-                  poster={course.thumbnail?.url}
-                  className="w-full aspect-video"
-                  playsInline={true}
-                  muted={isIOS} // iOS requires muted preview
-                />
+  videoKey={`preview-${course._id}`} // CORRECT - Changed from 'key' to 'videoKey'
+  src={course.previewVideo.url}
+  poster={course.thumbnail?.url}
+  className="w-full aspect-video"
+  playsInline={true}
+  muted={isIOS} // iOS requires muted preview
+/>
               </div>
             </div>
           )}
