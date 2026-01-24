@@ -1,9 +1,53 @@
-// app/api/courses/[id]/route.ts - UPDATED FOR LESSON AND SUBLESSON VIDEOS
+// app/api/courses/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import Course from '@/lib/models/Course'
 import mongoose from 'mongoose'
 import "@/lib/loadmodels";
+
+// CloudFront domain
+const CLOUDFRONT_DOMAIN = 'd2c1y2391adh81.cloudfront.net';
+
+// Helper to convert S3 URLs to CloudFront URLs
+function convertToCloudFrontUrl(s3Asset: any): any {
+  if (!s3Asset) return undefined;
+  
+  if (s3Asset.key && s3Asset.key.startsWith('courses/')) {
+    return {
+      ...s3Asset,
+      url: `https://${CLOUDFRONT_DOMAIN}/${s3Asset.key}`,
+      originalUrl: s3Asset.url
+    };
+  }
+  
+  if (s3Asset.url && s3Asset.url.includes(CLOUDFRONT_DOMAIN)) {
+    return s3Asset;
+  }
+  
+  return s3Asset;
+}
+
+// Helper to process lessons with CloudFront URLs
+function processLessonsWithCloudFront(lessons: any[]): any[] {
+  if (!lessons || !Array.isArray(lessons)) return [];
+  
+  return lessons.map(lesson => {
+    // Process main lesson video
+    const video = convertToCloudFrontUrl(lesson.video || lesson.videoSource?.video);
+    
+    // Process sub-lessons
+    const subLessons = lesson.subLessons?.map((subLesson: any) => ({
+      ...subLesson,
+      video: convertToCloudFrontUrl(subLesson.video || subLesson.videoSource?.video)
+    })) || [];
+    
+    return {
+      ...lesson,
+      video,
+      subLessons
+    };
+  });
+}
 
 export async function GET(
   request: NextRequest,
@@ -62,7 +106,7 @@ export async function GET(
     // Calculate total reviews
     const totalReviews = course.ratings?.length || 0
 
-    // UPDATED: Calculate total duration, lessons, and sub-lessons
+    // Calculate total duration, lessons, and sub-lessons
     let totalDuration = 0
     let totalLessons = 0
     let totalSubLessons = 0
@@ -91,8 +135,34 @@ export async function GET(
       })
     }
 
+    // Convert all video URLs to CloudFront
+    const thumbnail = convertToCloudFrontUrl(course.thumbnail);
+    const previewVideo = convertToCloudFrontUrl(course.previewVideo);
+    
+    // Process modules with CloudFront URLs
+    const modules = course.modules?.map((module: any) => ({
+      ...module,
+      chapters: module.chapters?.map((chapter: any) => ({
+        ...chapter,
+        lessons: processLessonsWithCloudFront(chapter.lessons)
+      })) || []
+    })) || [];
+
+    // Convert similar courses URLs
+    const similarCoursesWithUrls = similarCourses.map((c: any) => ({
+      ...c,
+      _id: c._id.toString(),
+      thumbnail: convertToCloudFrontUrl(c.thumbnail),
+      previewVideo: convertToCloudFrontUrl(c.previewVideo),
+      totalReviews: c.ratings?.length || 0
+    }));
+
     const enhancedCourse = {
       ...course,
+      _id: course._id.toString(),
+      thumbnail,
+      previewVideo,
+      modules,
       totalDuration,
       totalLessons,
       totalSubLessons,
@@ -107,10 +177,9 @@ export async function GET(
       completionRate: course.totalStudents > 0 
         ? Math.floor(Math.random() * 30) + 70
         : undefined,
-      similarCourses: similarCourses.map((c: any) => ({
-        ...c,
-        totalReviews: c.ratings?.length || 0
-      }))
+      similarCourses: similarCoursesWithUrls,
+      // Add CloudFront domain for frontend reference
+      cloudFrontDomain: CLOUDFRONT_DOMAIN
     }
 
     return NextResponse.json(enhancedCourse)

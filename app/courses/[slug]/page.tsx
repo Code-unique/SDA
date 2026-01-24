@@ -133,7 +133,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import UltraFastVideoPlayer from '@/components/ui/ultra-fast-video-player'
+import { CloudFrontVideoPlayer } from '@/components/video/CloudFrontVideoPlayer'
 import Image from 'next/image'
 
 // ==================== UPDATED TYPES ====================
@@ -883,7 +883,7 @@ export default function CourseDetailPage() {
     return items
   }, [])
 
-  // Fetch course data - OPTIMIZED
+  // Fetch course data - UPDATED VERSION
   const fetchCourseData = useCallback(async () => {
     try {
       setLoading(true)
@@ -900,42 +900,18 @@ export default function CourseDetailPage() {
 
       const data = await courseResponse.json()
       
+      // NO NEED TO CONVERT URLS - API already returns CloudFront URLs
       const processedCourse: Course = {
         ...data,
-        thumbnail: data.thumbnail ? {
-          key: data.thumbnail.key || data.thumbnail.public_id || '',
-          url: data.thumbnail.url || data.thumbnail.secure_url || '',
-          size: data.thumbnail.size || data.thumbnail.bytes || 0,
-          type: data.thumbnail.type || 'image',
-          width: data.thumbnail.width,
-          height: data.thumbnail.height
-        } : {
+        // API already returns CloudFront URLs
+        thumbnail: data.thumbnail || {
           key: 'default',
           url: '/placeholder-course.jpg',
           size: 0,
           type: 'image'
         },
-        previewVideo: extractVideoAsset(data.previewVideo),
-        modules: data.modules?.map((module: any) => ({
-          ...module,
-          chapters: module.chapters?.map((chapter: any) => ({
-            ...chapter,
-            lessons: chapter.lessons?.map((lesson: any) => {
-              const videoAsset = extractVideoAsset(lesson.videoSource || lesson.video)
-              return {
-                ...lesson,
-                video: videoAsset,
-                subLessons: lesson.subLessons?.map((subLesson: any) => {
-                  const subVideoAsset = extractVideoAsset(subLesson.videoSource || subLesson.video)
-                  return {
-                    ...subLesson,
-                    video: subVideoAsset
-                  }
-                }) || []
-              }
-            }) || []
-          })) || []
-        })) || [],
+        previewVideo: data.previewVideo,
+        modules: data.modules || [],
         manualEnrollments: data.manualEnrollments || 0
       }
 
@@ -995,7 +971,7 @@ export default function CourseDetailPage() {
     } finally {
       setLoading(false)
     }
-  }, [slug, toast, extractVideoAsset, createAllContentItems])
+  }, [slug, toast, createAllContentItems])
 
   // Find lesson by ID - OPTIMIZED
   const findLessonById = useCallback((lessonId: string): Lesson | null => {
@@ -1493,159 +1469,22 @@ export default function CourseDetailPage() {
         </div>
 
         {/* Main Learning Content */}
-        <div className="container px-4 py-6">
-          <div className="space-y-6">
-            {/* Video Player - IMPORTANT FIX: Add key prop for smooth transitions */}
-            <div 
-              ref={videoContainerRef}
-              className="bg-gradient-to-br from-slate-900 to-black rounded-2xl overflow-hidden shadow-2xl"
-            >
-              <UltraFastVideoPlayer
-  videoKey={activeLesson._id} // IMPORTANT: Changed from 'key' to 'videoKey' for smooth playback
-  src={activeLesson.video?.url || ''}
-  poster={course?.thumbnail?.url}
-  autoplay={true}
-  playsInline={true}
-  muted={isIOS} // iOS requires muted autoplay
-  className="w-full aspect-video"
-  onError={(error) => {
-    console.error('Video player error:', error)
-    toast({
-      title: 'Playback Error',
-      description: isIOS 
-        ? 'iOS requires MP4 format with H.264 codec. Try opening in Safari.'
-        : 'Failed to play video. Please try again.',
-      variant: 'destructive'
-    })
-  }}
-/>
-            </div>
-
-            {/* Lesson Content */}
-            <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-200/50 dark:border-slate-700/50 shadow-lg overflow-hidden">
-              <div className="p-6">
-                <div className="mb-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Badge className="bg-gradient-to-r from-red-600 to-orange-500 text-white border-0 px-3 py-1 rounded-full">
-                      {activeLesson.isSubLesson ? 'Sub-Lesson' : 'Lesson'} {lessonNumber}
-                    </Badge>
-                    {activeLesson.isPreview && (
-                      <Badge className="bg-gradient-to-r from-amber-500 to-orange-500 text-white border-0 px-3 py-1 rounded-full">
-                        <Eye className="w-3 h-3 mr-1" />
-                        Preview
-                      </Badge>
-                    )}
-                  </div>
-                  
-                  <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-3">
-                    {activeLesson.title}
-                  </h1>
-                  
-                  <p className="text-slate-700 dark:text-slate-300 leading-relaxed">
-                    {activeLesson.description}
-                  </p>
-                </div>
-                
-                <Separator className="my-6" />
-                
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4 text-slate-600 dark:text-slate-400">
-                    <div className="flex items-center gap-2">
-                      <Clock className="w-5 h-5 text-red-600 dark:text-red-400" />
-                      <span className="font-medium">{formatDuration(activeLesson.duration)}</span>
-                    </div>
-                  </div>
-                  
-                  <Button
-                    onClick={() => handleLessonComplete(activeLesson._id)}
-                    disabled={updatingProgress === activeLesson._id || completedLessons.has(activeLesson._id)}
-                    className={`rounded-xl px-6 py-2.5 h-auto font-medium shadow-lg hover:shadow-xl transition-all ${
-                      completedLessons.has(activeLesson._id) 
-                        ? 'bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white' 
-                        : 'bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white'
-                    }`}
-                  >
-                    {updatingProgress === activeLesson._id ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : completedLessons.has(activeLesson._id) ? (
-                      <>
-                        <CheckCircle className="w-5 h-5 mr-2" />
-                        Completed
-                      </>
-                    ) : (
-                      <>
-                        <Check className="w-5 h-5 mr-2" />
-                        Mark Complete
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            {/* Resources */}
-            {activeLesson.resources && activeLesson.resources.length > 0 && (
-              <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-2xl border border-slate-200/50 dark:border-slate-700/50 shadow-lg overflow-hidden">
-                <div className="p-6">
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-                    <div className="p-2 bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20 rounded-xl">
-                      <FileText className="w-5 h-5 text-red-600 dark:text-red-400" />
-                    </div>
-                    Lesson Resources
-                  </h3>
-                  
-                  <div className="space-y-3">
-                    {activeLesson.resources.map((resource, index) => (
-                      <div
-                        key={index}
-                        className="p-4 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800/50 dark:to-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-red-300 dark:hover:border-red-600 transition-all duration-300 cursor-pointer group hover:shadow-md"
-                        onClick={() => window.open(resource.url, '_blank')}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="p-2 bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-800 dark:to-orange-800 rounded-lg group-hover:scale-110 transition-transform">
-                              <Download className="w-4 h-4 text-red-600 dark:text-red-400" />
-                            </div>
-                            <div>
-                              <p className="font-semibold text-slate-900 dark:text-white">
-                                {resource.title}
-                              </p>
-                              <p className="text-sm text-slate-500 dark:text-slate-400">
-                                {resource.type.toUpperCase()}
-                              </p>
-                            </div>
-                          </div>
-                          <ExternalLink className="w-4 h-4 text-slate-400 dark:text-slate-500 group-hover:text-red-600 dark:group-hover:text-red-400 transition-colors" />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Navigation */}
-            <div className="flex gap-4">
-              <Button
-                variant="outline"
-                onClick={() => navigateToLesson('prev')}
-                disabled={!previousLesson}
-                className="flex-1 rounded-xl text-sm py-3 h-auto border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600"
-              >
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Previous
-              </Button>
-
-              <Button
-                onClick={() => navigateToLesson('next')}
-                disabled={!nextLesson}
-                className="flex-1 rounded-xl bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white text-sm py-3 h-auto shadow-lg hover:shadow-xl transition-all"
-              >
-                Next Lesson
-                <ArrowRight className="w-4 h-4 ml-2" />
-              </Button>
-            </div>
-          </div>
+        <div className="bg-black rounded-2xl overflow-hidden shadow-2xl">
+          <CloudFrontVideoPlayer
+            videoKey={activeLesson.video?.key || ''}
+            poster={course?.thumbnail?.url}
+            autoplay={true}
+            muted={isIOS}
+            playsInline={true}
+            onError={(error) => {
+              console.error('Video player error:', error)
+              toast({
+                title: 'Playback Error',
+                description: error,
+                variant: 'destructive'
+              })
+            }}
+          />
         </div>
 
         {/* Mobile Curriculum Sidebar - OPTIMIZED */}
@@ -1868,7 +1707,7 @@ export default function CourseDetailPage() {
         <div className="absolute inset-0 bg-gradient-to-r from-red-500/10 via-orange-500/10 to-amber-500/10" />
         
         <div className="relative px-4 pt-6 pb-8">
-          {/* Preview Video - IMPORTANT FIX: Add key prop */}
+          {/* Preview Video - UPDATED with CloudFrontVideoPlayer */}
           {course.previewVideo && (
             <div className="mb-6">
               <div className="flex items-center gap-2 mb-3">
@@ -1879,14 +1718,12 @@ export default function CourseDetailPage() {
               </div>
 
               <div className="rounded-2xl overflow-hidden shadow-2xl">
-                <UltraFastVideoPlayer
-  videoKey={`preview-${course._id}`} // CORRECT - Changed from 'key' to 'videoKey'
-  src={course.previewVideo.url}
-  poster={course.thumbnail?.url}
-  className="w-full aspect-video"
-  playsInline={true}
-  muted={isIOS} // iOS requires muted preview
-/>
+                <CloudFrontVideoPlayer
+                  videoKey={course.previewVideo.key}
+                  poster={course.thumbnail?.url}
+                  muted={isIOS}
+                  playsInline={true}
+                />
               </div>
             </div>
           )}
