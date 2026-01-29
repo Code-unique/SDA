@@ -17,6 +17,15 @@ const s3Client = new S3Client({
 const urlCache = new Map<string, { url: string; expires: number }>()
 const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
 
+// Function to handle .mov to .mp4 conversion in signed URLs
+const normalizeVideoKey = (videoKey: string): string => {
+  // Convert .mov to .mp4 for all requests
+  if (videoKey.toLowerCase().endsWith('.mov')) {
+    return videoKey.replace(/\.mov$/i, '.mp4')
+  }
+  return videoKey
+}
+
 export async function GET(request: NextRequest) {
   const startTime = Date.now()
   
@@ -51,13 +60,17 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // 4. Check cache first
-    const cacheKey = `${user.id}:${videoKey}`
+    // 4. Normalize the video key (convert .mov to .mp4)
+    const normalizedKey = normalizeVideoKey(videoKey)
+
+    // 5. Check cache first
+    const cacheKey = `${user.id}:${normalizedKey}`
     const cached = urlCache.get(cacheKey)
     
     if (cached && cached.expires > Date.now()) {
       console.log('✅ Serving from cache:', {
-        videoKey,
+        originalKey: videoKey,
+        normalizedKey,
         userId: user.id,
         duration: `${Date.now() - startTime}ms`
       })
@@ -67,20 +80,23 @@ export async function GET(request: NextRequest) {
         signedUrl: cached.url,
         expiresAt: cached.expires,
         cached: true,
+        originalKey: videoKey,
+        normalizedKey,
         duration: Date.now() - startTime
       })
     }
 
-    // 5. Generate signed URL
+    // 6. Generate signed URL
     console.log('🔐 Generating new signed URL:', {
-      videoKey,
+      originalKey: videoKey,
+      normalizedKey,
       userId: user.id,
       bucket: process.env.AWS_S3_BUCKET_NAME
     })
 
     const command = new GetObjectCommand({
       Bucket: process.env.AWS_S3_BUCKET_NAME!,
-      Key: videoKey,
+      Key: normalizedKey,
       ResponseContentType: 'video/mp4', // Force mp4 for .mov files
       ResponseContentDisposition: 'inline', // Play in browser, not download
     })
@@ -90,7 +106,7 @@ export async function GET(request: NextRequest) {
       expiresIn: 3600, // 1 hour
     })
 
-    // 6. Cache the URL
+    // 7. Cache the URL
     const expiresAt = Date.now() + CACHE_DURATION
     urlCache.set(cacheKey, { url: signedUrl, expires: expiresAt })
     
@@ -102,7 +118,8 @@ export async function GET(request: NextRequest) {
     }
 
     console.log('✅ Signed URL generated:', {
-      videoKey,
+      originalKey: videoKey,
+      normalizedKey,
       userId: user.id,
       expiresAt: new Date(expiresAt).toISOString(),
       duration: `${Date.now() - startTime}ms`
@@ -113,7 +130,8 @@ export async function GET(request: NextRequest) {
       signedUrl,
       expiresAt,
       cached: false,
-      videoKey,
+      originalKey: videoKey,
+      normalizedKey,
       bucket: process.env.AWS_S3_BUCKET_NAME,
       duration: Date.now() - startTime
     })

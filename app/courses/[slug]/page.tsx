@@ -796,63 +796,74 @@ export default function CourseDetailPage() {
   }, [])
 
   // Extract video asset - FIXED for better performance
-  const extractVideoAsset = useCallback((videoData: any): S3Asset | undefined => {
-    if (!videoData) return undefined
+ const extractVideoAsset = useCallback((videoData: any): S3Asset | undefined => {
+  if (!videoData) return undefined
+  
+  // Helper to FORCE .mov to .mp4 conversion
+  const forceMp4Extension = (url: string, key: string): { url: string; key: string } => {
+    let newUrl = url
+    let newKey = key
     
-    // Case 1: Direct S3Asset format
-    if (videoData.key || videoData.url) {
-      const url = videoData.url || videoData.secure_url || ''
-      return {
-        key: videoData.key || '',
-        url: url,
-        size: videoData.size || videoData.bytes || 0,
-        type: videoData.type || 'video',
-        duration: videoData.duration,
-        width: videoData.width,
-        height: videoData.height
-      }
+    // Convert .mov to .mp4 in URL
+    if (newUrl.toLowerCase().includes('.mov')) {
+      newUrl = newUrl.replace(/\.mov($|\?)/i, '.mp4$1')
+      console.log('Converted URL from .mov to .mp4:', newUrl)
     }
     
-    // Case 2: videoSource.video format
-    if (videoData.video && (videoData.video.key || videoData.video.url)) {
-      const url = videoData.video.url || videoData.video.secure_url || ''
-      return {
-        key: videoData.video.key || '',
-        url: url,
-        size: videoData.video.size || videoData.video.bytes || 0,
-        type: videoData.video.type || 'video',
-        duration: videoData.video.duration,
-        width: videoData.video.width,
-        height: videoData.video.height
-      }
+    // Convert .mov to .mp4 in key
+    if (newKey.toLowerCase().includes('.mov')) {
+      newKey = newKey.replace(/\.mov($|\?)/i, '.mp4$1')
+      console.log('Converted key from .mov to .mp4:', newKey)
     }
     
-    // Case 3: Cloudinary format
-    if (videoData.public_id || videoData.secure_url) {
-      const url = videoData.secure_url || videoData.url || ''
-      return {
-        key: videoData.public_id || '',
-        url: url,
-        size: videoData.bytes || videoData.size || 0,
-        type: videoData.resource_type || 'video',
-        duration: videoData.duration,
-        width: videoData.width,
-        height: videoData.height
-      }
+    return { url: newUrl, key: newKey }
+  }
+  
+  // Helper to convert S3 URL to CloudFront
+  const convertToCloudFrontUrl = (url: string, key: string): string => {
+    if (url.includes('cloudfront.net')) return url
+    
+    if (url.includes('amazonaws.com') && key) {
+      // Force .mov to .mp4 in the key
+      const fixedKey = key.toLowerCase().includes('.mov') 
+        ? key.replace(/\.mov$/i, '.mp4')
+        : key
+      
+      return `https://d2c1y2391adh81.cloudfront.net/${fixedKey}`
     }
     
-    // Case 4: Simple string URL
-    if (typeof videoData === 'string') {
-      return {
-        key: 'video',
-        url: videoData,
-        size: 0,
-        type: 'video'
-      }
-    }
-    
-    return undefined
-  }, [])
+    return url
+  }
+  
+  // Extract data from various formats
+  let key = ''
+  let url = ''
+  
+  if (videoData.key) key = videoData.key
+  if (videoData.url) url = videoData.url
+  if (videoData.video?.key) key = videoData.video.key
+  if (videoData.video?.url) url = videoData.video.url
+  if (videoData.videoSource?.video?.key) key = videoData.videoSource.video.key
+  if (videoData.videoSource?.video?.url) url = videoData.videoSource.video.url
+  
+  // FORCE .mp4 extension
+  const fixed = forceMp4Extension(url, key)
+  url = fixed.url
+  key = fixed.key
+  
+  // Convert to CloudFront if needed
+  const cloudFrontUrl = convertToCloudFrontUrl(url, key)
+  
+  return {
+    key: key,
+    url: cloudFrontUrl,
+    size: videoData.size || videoData.bytes || 0,
+    type: 'video', // Always video for these
+    duration: videoData.duration,
+    width: videoData.width,
+    height: videoData.height
+  }
+}, [])
 
   // Create flat array of all content items (lessons + sub-lessons)
   const createAllContentItems = useCallback((courseData: Course): Lesson[] => {
@@ -901,19 +912,20 @@ export default function CourseDetailPage() {
       const data = await courseResponse.json()
       
       // NO NEED TO CONVERT URLS - API already returns CloudFront URLs
-      const processedCourse: Course = {
-        ...data,
-        // API already returns CloudFront URLs
-        thumbnail: data.thumbnail || {
-          key: 'default',
-          url: '/placeholder-course.jpg',
-          size: 0,
-          type: 'image'
-        },
-        previewVideo: data.previewVideo,
-        modules: data.modules || [],
-        manualEnrollments: data.manualEnrollments || 0
-      }
+      // In the fetchCourseData function, update the course processing:
+const processedCourse: Course = {
+  ...data,
+  // Convert S3 URLs to CloudFront URLs
+  thumbnail: extractVideoAsset(data.thumbnail) || {
+    key: 'default',
+    url: '/placeholder-course.jpg',
+    size: 0,
+    type: 'image'
+  },
+  previewVideo: extractVideoAsset(data.previewVideo),
+  modules: data.modules || [],
+  manualEnrollments: data.manualEnrollments || 0
+}
 
       setCourse(processedCourse)
       
