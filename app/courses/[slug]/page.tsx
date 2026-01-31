@@ -908,41 +908,23 @@ const LearningMode = memo(({
               </div>
             </div>
 
-            {/* Video Player */}
-            <div className="mb-6 rounded-2xl overflow-hidden shadow-2xl bg-black">
-              <CloudFrontVideoPlayer
-                videoKey={activeLesson.video?.key || ''}
-                poster={course.thumbnail?.url}
-                autoplay={true}
-                muted={true} // Muted for autoplay compatibility
-                playsInline={true}
-                onReady={handleVideoReady}
-                onError={handleVideoError}
-                onTimeUpdate={handleTimeUpdate}
-                onLoadedMetadata={handleLoadedMetadata}
-                onEnded={handleVideoEnded}
-              />
-              
-              {videoError && (
-                <div className="p-6 bg-red-50 dark:bg-red-900/20 text-center">
-                  <AlertCircle className="w-8 h-8 text-red-500 mx-auto mb-2" />
-                  <p className="text-red-700 dark:text-red-300 font-medium mb-2">
-                    Video Playback Error
-                  </p>
-                  <p className="text-sm text-red-600 dark:text-red-400 mb-4">
-                    {videoError}
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => window.open(activeLesson.video?.url, '_blank')}
-                    className="border-red-300 text-red-600 hover:bg-red-50"
-                  >
-                    Open in New Tab
-                  </Button>
-                </div>
-              )}
-            </div>
+       
+{/* Video Player */}
+<div className="mb-6 rounded-2xl overflow-hidden shadow-2xl bg-black">
+  <CloudFrontVideoPlayer
+    key={`lesson-${activeLesson._id}`} // Use stable key based on lesson ID
+    videoKey={activeLesson.video?.key || ''}
+    poster={course.thumbnail?.url}
+    autoplay={true}
+    muted={true} // Muted for autoplay compatibility
+    playsInline={true}
+    onReady={handleVideoReady}
+    onError={handleVideoError}
+    onTimeUpdate={handleTimeUpdate}
+    onLoadedMetadata={handleLoadedMetadata}
+    onEnded={handleVideoEnded}
+  />
+</div>
 
             {/* Lesson Description */}
             <div className="mb-6">

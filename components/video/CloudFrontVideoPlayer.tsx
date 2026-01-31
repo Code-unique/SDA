@@ -1,9 +1,9 @@
-// components/video/CloudFrontVideoPlayer.tsx - FIXED FOR SAFARI & AUTOPLAY
+// components/video/CloudFrontVideoPlayer.tsx - FIXED VERSION
 'use client'
 
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { 
-  Play, Pause, Volume2, VolumeX, Maximize2, Loader2,
+  Play, Pause, Volume2, VolumeX, Maximize2, Minimize2, Loader2,
   SkipBack, SkipForward, RotateCw
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -50,9 +50,6 @@ export function CloudFrontVideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   
-  // Use a unique ID to prevent remounting issues
-  const playerId = useMemo(() => `video-player-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, [])
-  
   const [isPlaying, setIsPlaying] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -64,7 +61,16 @@ export function CloudFrontVideoPlayer({
   const [showControls, setShowControls] = useState(true)
   const [hasUserInteracted, setHasUserInteracted] = useState(false)
   const [isVideoLoaded, setIsVideoLoaded] = useState(false)
-  const [showPoster, setShowPoster] = useState(true)
+  
+  // Check if Safari
+  const isSafari = useMemo(() => {
+    return typeof window !== 'undefined' && /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
+  }, [])
+  
+  // Check if iOS
+  const isIOS = useMemo(() => {
+    return typeof window !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
+  }, [])
   
   // Build video URL with .mov to .mp4 conversion
   const videoUrl = useMemo(() => {
@@ -82,8 +88,6 @@ export function CloudFrontVideoPlayer({
     
     // FORCE .mov to .mp4 conversion for Safari compatibility
     if (url.toLowerCase().includes('.mov')) {
-      console.log('Converting .mov URL to .mp4 for Safari compatibility:', url)
-      // Replace .mov with .mp4 in the URL
       url = url.replace(/\.mov($|\?)/i, '.mp4$1')
       
       // Also check if the key has .mov and replace it
@@ -95,16 +99,6 @@ export function CloudFrontVideoPlayer({
     
     return url
   }, [videoKey])
-  
-  // Check if Safari
-  const isSafari = useMemo(() => {
-    return /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
-  }, [])
-  
-  // Check if iOS
-  const isIOS = useMemo(() => {
-    return /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
-  }, [])
   
   // Format time
   const formatTime = useCallback((seconds: number): string => {
@@ -118,7 +112,7 @@ export function CloudFrontVideoPlayer({
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }, [])
   
-  // Initialize video with SAFARI FIXES
+  // Initialize video with proper event handling
   useEffect(() => {
     // Skip if no video element or URL
     if (!videoRef.current || !videoUrl) {
@@ -134,8 +128,7 @@ export function CloudFrontVideoPlayer({
     // Store initial muted state for Safari workaround
     const initialMuted = muted || isSafari || isIOS
     
-    // Set video attributes
-    video.src = videoUrl
+    // CRITICAL: Set video attributes BEFORE setting src
     video.poster = poster || ''
     video.loop = loop
     video.playsInline = true
@@ -143,17 +136,12 @@ export function CloudFrontVideoPlayer({
     video.crossOrigin = 'anonymous'
     video.muted = initialMuted
     
-    // CRITICAL: Safari specific attributes
+    // Safari specific attributes
     if (isIOS || isSafari) {
       video.setAttribute('webkit-playsinline', 'true')
       video.setAttribute('playsinline', 'true')
       video.setAttribute('x-webkit-airplay', 'allow')
       video.setAttribute('preload', 'auto')
-      
-      // Safari needs muted for autoplay
-      if (autoplay) {
-        video.muted = true
-      }
     }
     
     // Event handlers
@@ -170,25 +158,11 @@ export function CloudFrontVideoPlayer({
       setIsLoading(false)
       setIsVideoLoaded(true)
       onReady?.()
-      
-      // For Safari/iOS, we need user interaction before autoplay
-      if (autoplay && !isSafari && !isIOS && !hasUserInteracted) {
-        const playPromise = video.play()
-        if (playPromise !== undefined) {
-          playPromise.catch(err => {
-            console.log('Autoplay prevented:', err)
-            if (!err.message.includes('user gesture')) {
-              setError('Autoplay blocked. Click play to start.')
-            }
-          })
-        }
-      }
     }
     
     const handleCanPlay = () => {
       if (!isMounted) return
       console.log('Video can play')
-      setShowPoster(false)
     }
     
     const handlePlaying = () => {
@@ -205,14 +179,18 @@ export function CloudFrontVideoPlayer({
     
     const handleTimeUpdate = () => {
       if (!isMounted || !video) return
-      setCurrentTime(video.currentTime)
-      onTimeUpdate?.(video.currentTime)
-      onProgress?.(video.duration ? video.currentTime / video.duration : 0)
+      const time = video.currentTime
+      setCurrentTime(time)
+      onTimeUpdate?.(time)
       
-      // Calculate buffered amount
-      if (video.buffered.length > 0 && video.duration > 0) {
-        const bufferedEnd = video.buffered.end(video.buffered.length - 1)
-        setBuffered((bufferedEnd / video.duration) * 100)
+      if (video.duration > 0) {
+        onProgress?.(time / video.duration)
+        
+        // Calculate buffered amount
+        if (video.buffered.length > 0) {
+          const bufferedEnd = video.buffered.end(video.buffered.length - 1)
+          setBuffered((bufferedEnd / video.duration) * 100)
+        }
       }
     }
     
@@ -226,6 +204,7 @@ export function CloudFrontVideoPlayer({
       if (!isMounted) return
       console.error('Video error:', e)
       setIsLoading(false)
+      setIsVideoLoaded(false)
       
       const videoError = video.error
       let errorMsg = 'Failed to load video'
@@ -259,6 +238,9 @@ export function CloudFrontVideoPlayer({
     video.addEventListener('error', handleError)
     video.addEventListener('volumechange', handleVolumeChange)
     
+    // Set src LAST, after event listeners are attached
+    video.src = videoUrl
+    
     // Auto-hide controls
     let controlsTimer: NodeJS.Timeout
     const resetControlsTimer = () => {
@@ -280,11 +262,19 @@ export function CloudFrontVideoPlayer({
     
     containerRef.current?.addEventListener('click', handleContainerClick)
     
-    // Cleanup function
+    // Fullscreen change listener
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement)
+    }
+    
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    
+    // Cleanup function - PROPERLY CLEAN UP
     return () => {
+      console.log('Cleaning up video player')
       isMounted = false
       
-      // Remove event listeners
+      // Remove event listeners from video
       video.removeEventListener('loadedmetadata', handleLoadedMetadata)
       video.removeEventListener('loadeddata', handleLoadedData)
       video.removeEventListener('canplay', handleCanPlay)
@@ -295,24 +285,26 @@ export function CloudFrontVideoPlayer({
       video.removeEventListener('error', handleError)
       video.removeEventListener('volumechange', handleVolumeChange)
       
+      // Remove container event listeners
       containerRef.current?.removeEventListener('mousemove', resetControlsTimer)
       containerRef.current?.removeEventListener('touchstart', resetControlsTimer)
       containerRef.current?.removeEventListener('click', handleContainerClick)
       
+      // Remove fullscreen listener
+      document.removeEventListener('fullscreenchange', handleFullscreenChange)
+      
       clearTimeout(controlsTimer)
       
-      // Pause video
-      if (!video.paused) {
-        video.pause()
-      }
+      // IMPORTANT: Don't pause or clear src if we're just toggling controls
+      // Only pause if we're actually unmounting the component
+      // This prevents black screen when clicking controls
       
-      // Clear video source
-      video.src = ''
-      video.load()
+      // Keep the video element alive - don't clear src
+      // This is key to preventing black screen
     }
-  }, [videoUrl, poster, autoplay, loop, hasUserInteracted, isSafari, isIOS, onReady, onPlay, onPause, onProgress, onEnded, onError, onTimeUpdate, onLoadedMetadata])
+  }, [videoUrl, poster, autoplay, loop, isSafari, isIOS, muted, onReady, onPlay, onPause, onProgress, onEnded, onError, onTimeUpdate, onLoadedMetadata])
   
-  // Handle autoplay/muted changes separately
+  // Handle autoplay/muted changes separately - FIXED
   useEffect(() => {
     const video = videoRef.current
     if (!video || !isVideoLoaded) return
@@ -324,18 +316,19 @@ export function CloudFrontVideoPlayer({
       video.muted = muted
     }
     
-    // Attempt autoplay if conditions are met
-    if (autoplay && hasUserInteracted && !isPlaying) {
+    // Only attempt autoplay if we have user interaction or it's specifically allowed
+    if (autoplay && (hasUserInteracted || !isSafari) && !isPlaying) {
       const playPromise = video.play()
       if (playPromise !== undefined) {
         playPromise.catch(err => {
-          console.log('Autoplay after interaction failed:', err)
+          console.log('Autoplay prevented:', err)
+          // Don't show error for autoplay restrictions
         })
       }
     }
   }, [autoplay, muted, isVideoLoaded, hasUserInteracted, isPlaying, isSafari, isIOS])
   
-  // Play/Pause toggle with Safari workaround
+  // Play/Pause toggle with proper error handling
   const togglePlay = useCallback(async () => {
     const video = videoRef.current
     if (!video) return
@@ -357,7 +350,7 @@ export function CloudFrontVideoPlayer({
         // After successful play on Safari/iOS, we can try to unmute
         if ((isSafari || isIOS) && !muted) {
           setTimeout(() => {
-            video.muted = false
+            if (video) video.muted = false
           }, 1000)
         }
       } catch (err: any) {
@@ -375,7 +368,7 @@ export function CloudFrontVideoPlayer({
     }
   }, [isPlaying, muted, isSafari, isIOS])
   
-  // Seek handler
+  // Seek handler - FIXED
   const handleSeek = useCallback((percentage: number) => {
     const video = videoRef.current
     if (!video || !duration) return
@@ -387,7 +380,7 @@ export function CloudFrontVideoPlayer({
     setHasUserInteracted(true)
   }, [duration])
   
-  // Volume control
+  // Volume control - FIXED
   const handleVolumeChange = useCallback((newVolume: number) => {
     const video = videoRef.current
     if (!video) return
@@ -400,7 +393,7 @@ export function CloudFrontVideoPlayer({
     setHasUserInteracted(true)
   }, [])
   
-  // Fullscreen
+  // Fullscreen - FIXED VERSION
   const toggleFullscreen = useCallback(async () => {
     if (!containerRef.current) return
     
@@ -414,6 +407,18 @@ export function CloudFrontVideoPlayer({
       }
     } catch (err) {
       console.error('Fullscreen error:', err)
+      // Fallback for browsers that don't support fullscreen API
+      if (videoRef.current) {
+        if (!videoRef.current.classList.contains('fullscreen')) {
+          videoRef.current.classList.add('fullscreen')
+          containerRef.current.classList.add('fullscreen')
+          setIsFullscreen(true)
+        } else {
+          videoRef.current.classList.remove('fullscreen')
+          containerRef.current.classList.remove('fullscreen')
+          setIsFullscreen(false)
+        }
+      }
     }
     setShowControls(true)
     setHasUserInteracted(true)
@@ -422,9 +427,11 @@ export function CloudFrontVideoPlayer({
   // Skip forward/backward
   const skip = useCallback((seconds: number) => {
     const video = videoRef.current
-    if (!video) return
+    if (!video || !duration) return
     
-    video.currentTime = Math.max(0, Math.min(duration, video.currentTime + seconds))
+    const newTime = Math.max(0, Math.min(duration, video.currentTime + seconds))
+    video.currentTime = newTime
+    setCurrentTime(newTime)
     setShowControls(true)
     setHasUserInteracted(true)
   }, [duration])
@@ -436,12 +443,25 @@ export function CloudFrontVideoPlayer({
     
     setError(null)
     setIsLoading(true)
+    setIsVideoLoaded(false)
     setHasUserInteracted(true)
     
     // Force reload
-    video.src = videoUrl
     video.load()
   }, [videoUrl])
+  
+  // Handle container click for play/pause
+  const handleContainerClick = useCallback((e: React.MouseEvent) => {
+    // Don't trigger if clicking on controls
+    if ((e.target as HTMLElement).closest('.video-controls')) {
+      return
+    }
+    
+    if (!isPlaying) {
+      togglePlay()
+    }
+    setShowControls(true)
+  }, [isPlaying, togglePlay])
   
   // Error state
   if (error) {
@@ -457,9 +477,6 @@ export function CloudFrontVideoPlayer({
           <div>
             <h3 className="text-white text-lg font-semibold mb-2">Video Error</h3>
             <p className="text-white/80 mb-4 max-w-md text-sm">{error}</p>
-            <p className="text-white/60 text-xs mb-6">
-              {isSafari || isIOS ? 'Safari/iOS may require user interaction to play videos.' : ''}
-            </p>
           </div>
           <div className="flex gap-3">
             <button
@@ -468,12 +485,6 @@ export function CloudFrontVideoPlayer({
             >
               <RotateCw className="w-4 h-4 inline mr-2" />
               Retry
-            </button>
-            <button
-              onClick={() => window.open(videoUrl, '_blank')}
-              className="px-4 py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors text-sm font-medium border border-white/20"
-            >
-              Open in New Tab
             </button>
           </div>
         </div>
@@ -484,12 +495,12 @@ export function CloudFrontVideoPlayer({
   return (
     <div
       ref={containerRef}
-      id={playerId}
       className={cn(
-        "relative bg-black rounded-xl overflow-hidden group aspect-video",
+        "relative bg-black rounded-xl overflow-hidden group aspect-video cursor-pointer",
         isFullscreen && "fixed inset-0 z-50",
         className
       )}
+      onClick={handleContainerClick}
       onMouseMove={() => {
         setShowControls(true)
         setHasUserInteracted(true)
@@ -497,14 +508,9 @@ export function CloudFrontVideoPlayer({
       onMouseLeave={() => {
         if (isPlaying) setTimeout(() => setShowControls(false), 2000)
       }}
-      onClick={() => {
-        setHasUserInteracted(true)
-        setShowControls(true)
-      }}
     >
-      {/* Video element */}
+      {/* SINGLE video element - don't recreate on re-render */}
       <video
-        key={`video-${playerId}`}
         ref={videoRef}
         className="w-full h-full object-contain"
         playsInline={true}
@@ -513,21 +519,8 @@ export function CloudFrontVideoPlayer({
         preload="metadata"
         disablePictureInPicture
         controls={false}
+        onDoubleClick={toggleFullscreen}
       />
-      
-      {/* Poster image overlay */}
-      {showPoster && poster && (
-        <div 
-          className="absolute inset-0 bg-black transition-opacity duration-300"
-          style={{ opacity: isPlaying ? 0 : 1 }}
-        >
-          <img 
-            src={poster} 
-            alt="Video poster" 
-            className="w-full h-full object-contain"
-          />
-        </div>
-      )}
       
       {/* Loading overlay */}
       {isLoading && (
@@ -538,9 +531,6 @@ export function CloudFrontVideoPlayer({
               <div className="absolute inset-0 bg-gradient-to-r from-red-500 to-orange-500 blur-xl opacity-20"></div>
             </div>
             <p className="text-white/80 text-sm">Loading video...</p>
-            {(isSafari || isIOS) && (
-              <p className="text-white/60 text-xs">Safari/iOS may require tap to play</p>
-            )}
           </div>
         </div>
       )}
@@ -550,11 +540,11 @@ export function CloudFrontVideoPlayer({
         <div className="absolute inset-0 flex items-center justify-center">
           <button
             onClick={togglePlay}
-            className="w-20 h-20 bg-black/60 rounded-full flex items-center justify-center hover:bg-black/80 transition-all hover:scale-105 group/play"
+            className="w-20 h-20 bg-black/60 rounded-full flex items-center justify-center hover:bg-black/80 transition-all hover:scale-105 z-20"
           >
             <div className="relative">
               <Play className="w-10 h-10 text-white ml-1" />
-              <div className="absolute inset-0 bg-gradient-to-r from-red-500 to-orange-500 blur-xl opacity-0 group-hover/play:opacity-30 transition-opacity"></div>
+              <div className="absolute inset-0 bg-gradient-to-r from-red-500 to-orange-500 blur-xl opacity-0 group-hover:opacity-30 transition-opacity"></div>
             </div>
           </button>
         </div>
@@ -567,7 +557,7 @@ export function CloudFrontVideoPlayer({
           <div className="absolute top-0 left-0 right-0 h-20 bg-gradient-to-b from-black/90 to-transparent pointer-events-none" />
           
           {/* Bottom controls */}
-          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 via-black/80 to-transparent p-4 pt-6">
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 via-black/80 to-transparent p-4 pt-6 video-controls">
             {/* Progress bar */}
             <div className="mb-4">
               <div className="relative h-2 bg-white/20 rounded-full overflow-hidden mb-1">
@@ -609,7 +599,7 @@ export function CloudFrontVideoPlayer({
                 </button>
                 <button
                   onClick={togglePlay}
-                  className="p-3 rounded-full bg-white hover:bg-white/90 text-black transition-all hover:scale-105"
+                  className="p-3 rounded-full bg-white hover:bg-white/90 text-black transition-all hover:scale-105 z-20"
                 >
                   {isPlaying ? (
                     <Pause className="w-6 h-6" />
@@ -676,18 +666,15 @@ export function CloudFrontVideoPlayer({
                   onClick={toggleFullscreen}
                   className="p-2 rounded-lg hover:bg-white/10 text-white transition-colors"
                 >
-                  <Maximize2 className="w-5 h-5" />
+                  {isFullscreen ? (
+                    <Minimize2 className="w-5 h-5" />
+                  ) : (
+                    <Maximize2 className="w-5 h-5" />
+                  )}
                 </button>
               </div>
             </div>
           </div>
-          
-          {/* Playback info overlay */}
-          {hasUserInteracted && (isSafari || isIOS) && volume === 0 && (
-            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 px-4 py-2 bg-black/80 text-white text-sm rounded-lg backdrop-blur-sm">
-              🔇 Video muted for autoplay. Tap to unmute.
-            </div>
-          )}
         </>
       )}
       
