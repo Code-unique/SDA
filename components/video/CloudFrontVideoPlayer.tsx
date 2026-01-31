@@ -1,4 +1,4 @@
-// components/video/CloudFrontVideoPlayer.tsx - FINAL FIXED VERSION
+// components/video/CloudFrontVideoPlayer.tsx - iOS FIXED VERSION
 'use client'
 
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
@@ -94,6 +94,18 @@ export function CloudFrontVideoPlayer({
     return typeof window !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
   }, [])
   
+  // Check for iOS WebKit presentation API support
+  const isWebKitPresentationModeSupported = useMemo(() => {
+    if (!videoRef.current) return false
+    const video = videoRef.current as any
+    return (
+      video.webkitEnterFullscreen !== undefined ||
+      video.webkitSupportsFullscreen !== undefined ||
+      video.webkitDisplayingFullscreen !== undefined ||
+      video.webkitSetPresentationMode !== undefined
+    )
+  }, [])
+  
   // Format time helper
   const formatTime = useCallback((seconds: number): string => {
     const hrs = Math.floor(seconds / 3600)
@@ -106,7 +118,7 @@ export function CloudFrontVideoPlayer({
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }, [])
   
-  // Initialize video - SIMPLIFIED
+  // Initialize video
   useEffect(() => {
     const video = videoRef.current
     if (!video || !videoUrl) return
@@ -125,6 +137,14 @@ export function CloudFrontVideoPlayer({
     if (isIOS || isSafari) {
       video.setAttribute('webkit-playsinline', 'true')
       video.setAttribute('x-webkit-airplay', 'allow')
+      video.setAttribute('playsinline', 'true')
+      
+      // Enable inline playback and allow fullscreen
+      video.setAttribute('webkit-playsinline', 'true')
+      video.setAttribute('playsinline', 'true')
+      
+      // For newer iOS versions
+      ;(video as any).playsInline = true
     }
     
     // Set source
@@ -203,6 +223,28 @@ export function CloudFrontVideoPlayer({
       setUiState(prev => ({ ...prev, volume: video.volume }))
     }
     
+    // iOS specific fullscreen events
+    const handleWebkitBeginFullscreen = () => {
+      console.log('iOS: Entering fullscreen')
+      setIsFullscreen(true)
+      setShowControls(true)
+    }
+    
+    const handleWebkitEndFullscreen = () => {
+      console.log('iOS: Exiting fullscreen')
+      setIsFullscreen(false)
+      setShowControls(true)
+    }
+    
+    const handleWebkitPresentationModeChanged = () => {
+      const video = videoRef.current as any
+      if (video.webkitPresentationMode === 'fullscreen') {
+        setIsFullscreen(true)
+      } else {
+        setIsFullscreen(false)
+      }
+    }
+    
     // Add listeners
     video.addEventListener('loadeddata', handleLoadedData)
     video.addEventListener('canplay', handleCanPlay)
@@ -213,6 +255,11 @@ export function CloudFrontVideoPlayer({
     video.addEventListener('error', handleError)
     video.addEventListener('loadedmetadata', handleLoadedMetadata)
     video.addEventListener('volumechange', handleVolumeChange)
+    
+    // Add iOS WebKit fullscreen events
+    video.addEventListener('webkitbeginfullscreen', handleWebkitBeginFullscreen)
+    video.addEventListener('webkitendfullscreen', handleWebkitEndFullscreen)
+    video.addEventListener('webkitpresentationmodechanged', handleWebkitPresentationModeChanged)
     
     // Start loading
     setUiState(prev => ({ ...prev, isLoading: true, error: null }))
@@ -240,21 +287,28 @@ export function CloudFrontVideoPlayer({
       video.removeEventListener('error', handleError)
       video.removeEventListener('loadedmetadata', handleLoadedMetadata)
       video.removeEventListener('volumechange', handleVolumeChange)
+      video.removeEventListener('webkitbeginfullscreen', handleWebkitBeginFullscreen)
+      video.removeEventListener('webkitendfullscreen', handleWebkitEndFullscreen)
+      video.removeEventListener('webkitpresentationmodechanged', handleWebkitPresentationModeChanged)
     }
   }, [videoUrl, poster, loop, muted, autoplay, isIOS, isSafari, onReady, onPlay, onPause, onTimeUpdate, onProgress, onEnded, onError, onLoadedMetadata])
   
-  // Handle fullscreen changes
+  // Handle fullscreen changes for non-iOS
   useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement)
     }
     
-    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    if (!isIOS) {
+      document.addEventListener('fullscreenchange', handleFullscreenChange)
+    }
     
     return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange)
+      if (!isIOS) {
+        document.removeEventListener('fullscreenchange', handleFullscreenChange)
+      }
     }
-  }, [])
+  }, [isIOS])
   
   // Play/Pause - DIRECT VIDEO CONTROL
   const togglePlay = useCallback(() => {
@@ -303,8 +357,23 @@ export function CloudFrontVideoPlayer({
     setShowControls(true)
   }, [])
   
-  // Fullscreen
-  const toggleFullscreen = useCallback(() => {
+  // Fullscreen handler for iOS
+  const toggleFullscreenIOS = useCallback(() => {
+    const video = videoRef.current as any
+    if (!video) return
+    
+    if (video.webkitDisplayingFullscreen) {
+      // Exit fullscreen
+      video.webkitExitFullscreen()
+    } else {
+      // Enter fullscreen
+      video.webkitEnterFullscreen()
+    }
+    setShowControls(true)
+  }, [])
+  
+  // Fullscreen handler for non-iOS
+  const toggleFullscreenStandard = useCallback(() => {
     if (!containerRef.current) return
     
     try {
@@ -320,6 +389,30 @@ export function CloudFrontVideoPlayer({
     }
     setShowControls(true)
   }, [])
+  
+  // Combined fullscreen handler
+  const toggleFullscreen = useCallback(() => {
+    const video = videoRef.current as any
+    
+    // iOS WebKit fullscreen
+    if (isIOS) {
+      toggleFullscreenIOS()
+      return
+    }
+    
+    // Safari on macOS
+    if (isSafari && video.webkitSupportsFullscreen) {
+      if (video.webkitDisplayingFullscreen) {
+        video.webkitExitFullscreen()
+      } else {
+        video.webkitEnterFullscreen()
+      }
+      return
+    }
+    
+    // Standard fullscreen
+    toggleFullscreenStandard()
+  }, [isIOS, isSafari, toggleFullscreenIOS, toggleFullscreenStandard])
   
   // Skip forward/backward
   const skip = useCallback((seconds: number) => {
@@ -583,6 +676,7 @@ export function CloudFrontVideoPlayer({
                   </select>
                 )}
                 
+                {/* Fullscreen button - Always show for iOS */}
                 <button
                   onClick={toggleFullscreen}
                   className="p-2 rounded-lg hover:bg-white/10 text-white transition-colors"

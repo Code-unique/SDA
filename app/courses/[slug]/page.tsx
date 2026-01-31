@@ -819,7 +819,7 @@ const LearningMode = memo(({
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-950">
-      {/* Learning Mode Header */}
+      {/* Learning Mode Header - SIMPLIFIED */}
       <div className="sticky top-0 z-50 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border-b border-slate-200 dark:border-slate-800 shadow-sm">
         <div className="px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -831,27 +831,13 @@ const LearningMode = memo(({
             >
               <ArrowLeft className="w-4 h-4" />
             </Button>
-            <div className="hidden sm:block">
+            <div>
               <h1 className="text-sm font-semibold text-slate-900 dark:text-white truncate max-w-xs">
                 {course.title}
               </h1>
-            </div>
-          </div>
-          
-          <div className="flex-1 mx-4 min-w-0">
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-gradient-to-r from-red-600 to-orange-500 transition-all duration-500"
-                  style={{ width: `${Math.round(progressPercentage)}%` }}
-                />
-              </div>
-              <span className="text-xs font-bold bg-gradient-to-r from-red-600 to-orange-500 bg-clip-text text-transparent whitespace-nowrap">
-                {Math.round(progressPercentage)}%
-              </span>
-            </div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 truncate">
-              Lesson {currentIndex + 1} of {totalItems}
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Lesson {currentIndex + 1} of {totalItems}
+              </p>
             </div>
           </div>
           
@@ -908,23 +894,22 @@ const LearningMode = memo(({
               </div>
             </div>
 
-       
-{/* Video Player */}
-<div className="mb-6 rounded-2xl overflow-hidden shadow-2xl bg-black">
-  <CloudFrontVideoPlayer
-    key={`lesson-${activeLesson._id}`} // Use stable key based on lesson ID
-    videoKey={activeLesson.video?.key || ''}
-    poster={course.thumbnail?.url}
-    autoplay={true}
-    muted={true} // Muted for autoplay compatibility
-    playsInline={true}
-    onReady={handleVideoReady}
-    onError={handleVideoError}
-    onTimeUpdate={handleTimeUpdate}
-    onLoadedMetadata={handleLoadedMetadata}
-    onEnded={handleVideoEnded}
-  />
-</div>
+            {/* Video Player */}
+            <div className="mb-6 rounded-2xl overflow-hidden shadow-2xl bg-black">
+              <CloudFrontVideoPlayer
+                key={`lesson-${activeLesson._id}`}
+                videoKey={activeLesson.video?.key || ''}
+                poster={course.thumbnail?.url}
+                autoplay={true}
+                muted={true}
+                playsInline={true}
+                onReady={handleVideoReady}
+                onError={handleVideoError}
+                onTimeUpdate={handleTimeUpdate}
+                onLoadedMetadata={handleLoadedMetadata}
+                onEnded={handleVideoEnded}
+              />
+            </div>
 
             {/* Lesson Description */}
             <div className="mb-6">
@@ -935,66 +920,69 @@ const LearningMode = memo(({
               </div>
             </div>
 
-            {/* Navigation Controls */}
-            <div className="flex items-center justify-between gap-4 mb-8">
-              <Button
-                onClick={handlePrevious}
-                disabled={currentIndex === 0}
-                variant="outline"
-                className="flex-1 sm:flex-none gap-2"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span className="hidden sm:inline">Previous</span>
-              </Button>
-              
-              <div className="text-center">
-                <div className="text-sm text-slate-500 dark:text-slate-400">
-                  Lesson {currentIndex + 1} of {totalItems}
+            {/* Navigation & Progress Section */}
+            <div className="space-y-6">
+              {/* Navigation Controls */}
+              <div className="flex items-center justify-between gap-4">
+                <Button
+                  onClick={handlePrevious}
+                  disabled={currentIndex === 0}
+                  variant="outline"
+                  className="flex-1 sm:flex-none gap-2"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span className="hidden sm:inline">Previous</span>
+                </Button>
+                
+                <div className="text-center">
+                  <div className="text-sm text-slate-500 dark:text-slate-400">
+                    Lesson {currentIndex + 1} of {totalItems}
+                  </div>
+                  <div className="text-xs text-slate-400 dark:text-slate-500">
+                    {activeLesson.isSubLesson ? 'Sub-lesson' : 'Main Lesson'}
+                  </div>
                 </div>
-                <div className="text-xs text-slate-400 dark:text-slate-500">
-                  {activeLesson.isSubLesson ? 'Sub-lesson' : 'Main Lesson'}
-                </div>
+                
+                <Button
+                  onClick={handleNext}
+                  disabled={currentIndex === totalItems - 1}
+                  variant={currentIndex === totalItems - 1 ? "default" : "outline"}
+                  className={`flex-1 sm:flex-none gap-2 ${
+                    currentIndex === totalItems - 1 
+                      ? 'bg-gradient-to-r from-green-600 to-emerald-500 hover:from-green-700 hover:to-emerald-600' 
+                      : ''
+                  }`}
+                >
+                  <span className="hidden sm:inline">
+                    {currentIndex === totalItems - 1 ? 'Complete Course' : 'Next'}
+                  </span>
+                  <span className="sm:hidden">
+                    {currentIndex === totalItems - 1 ? 'Finish' : 'Next'}
+                  </span>
+                  <ArrowRight className="w-4 h-4" />
+                </Button>
               </div>
-              
-              <Button
-                onClick={handleNext}
-                disabled={currentIndex === totalItems - 1}
-                variant={currentIndex === totalItems - 1 ? "default" : "outline"}
-                className={`flex-1 sm:flex-none gap-2 ${
-                  currentIndex === totalItems - 1 
-                    ? 'bg-gradient-to-r from-green-600 to-emerald-500 hover:from-green-700 hover:to-emerald-600' 
-                    : ''
-                }`}
-              >
-                <span className="hidden sm:inline">
-                  {currentIndex === totalItems - 1 ? 'Complete Course' : 'Next'}
-                </span>
-                <span className="sm:hidden">
-                  {currentIndex === totalItems - 1 ? 'Finish' : 'Next'}
-                </span>
-                <ArrowRight className="w-4 h-4" />
-              </Button>
-            </div>
 
-            {/* Progress Tracking */}
-            <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700 mb-6">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Course Progress
-                </span>
-                <span className="text-sm font-bold text-red-600 dark:text-red-400">
-                  {Math.round(progressPercentage)}%
-                </span>
-              </div>
-              <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-gradient-to-r from-red-600 to-orange-500 transition-all duration-500"
-                  style={{ width: `${progressPercentage}%` }}
-                />
-              </div>
-              <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 mt-2">
-                <span>{completedLessons.size} lessons completed</span>
-                <span>{totalItems - completedLessons.size} remaining</span>
+              {/* Progress Tracking */}
+              <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                    Course Progress
+                  </span>
+                  <span className="text-sm font-bold text-red-600 dark:text-red-400">
+                    {Math.round(progressPercentage)}%
+                  </span>
+                </div>
+                <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-r from-red-600 to-orange-500 transition-all duration-500"
+                    style={{ width: `${progressPercentage}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 mt-2">
+                  <span>{completedLessons.size} lessons completed</span>
+                  <span>{totalItems - completedLessons.size} remaining</span>
+                </div>
               </div>
             </div>
           </div>
@@ -1539,7 +1527,6 @@ const LearningMode = memo(({
   )
 })
 LearningMode.displayName = 'LearningMode'
-
 // ==================== HELPER FUNCTIONS ====================
 const formatDuration = (minutes: number): string => {
   const hours = Math.floor(minutes / 60)
