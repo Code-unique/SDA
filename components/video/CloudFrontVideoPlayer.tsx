@@ -1,10 +1,10 @@
-// components/video/CloudFrontVideoPlayer.tsx - UPDATED
+// components/video/CloudFrontVideoPlayer.tsx - FIXED FOR SAFARI & AUTOPLAY
 'use client'
 
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { 
   Play, Pause, Volume2, VolumeX, Maximize2, Loader2,
-  SkipBack, SkipForward
+  SkipBack, SkipForward, RotateCw
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -23,6 +23,8 @@ interface CloudFrontVideoPlayerProps {
   onPause?: () => void
   onProgress?: (progress: number) => void
   onEnded?: () => void
+  onTimeUpdate?: (time: number) => void
+  onLoadedMetadata?: (duration: number) => void
 }
 
 const CLOUDFRONT_DOMAIN = 'd2c1y2391adh81.cloudfront.net'
@@ -41,7 +43,9 @@ export function CloudFrontVideoPlayer({
   onPlay,
   onPause,
   onProgress,
-  onEnded
+  onEnded,
+  onTimeUpdate,
+  onLoadedMetadata
 }: CloudFrontVideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -58,37 +62,49 @@ export function CloudFrontVideoPlayer({
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [buffered, setBuffered] = useState(0)
   const [showControls, setShowControls] = useState(true)
+  const [hasUserInteracted, setHasUserInteracted] = useState(false)
+  const [isVideoLoaded, setIsVideoLoaded] = useState(false)
+  const [showPoster, setShowPoster] = useState(true)
   
-  // Build video URL
-  // In the videoUrl memo function, add this:
-const videoUrl = useMemo(() => {
-  if (!videoKey) return ''
-  
-  let url = ''
-  
-  // If already a URL
-  if (videoKey.startsWith('http')) {
-    url = videoKey
-  } else {
-    // CloudFront URL
-    url = `https://${CLOUDFRONT_DOMAIN}/${videoKey}`
-  }
-  
-  // FORCE .mov to .mp4 conversion
-  if (url.toLowerCase().includes('.mov')) {
-    console.log('Converting .mov URL to .mp4:', url)
-    // Replace .mov with .mp4 in the URL
-    url = url.replace(/\.mov($|\?)/i, '.mp4$1')
+  // Build video URL with .mov to .mp4 conversion
+  const videoUrl = useMemo(() => {
+    if (!videoKey) return ''
     
-    // Also check if the key has .mov and replace it
-    if (videoKey.toLowerCase().includes('.mov')) {
-      const fixedKey = videoKey.replace(/\.mov($|\?)/i, '.mp4$1')
-      url = `https://${CLOUDFRONT_DOMAIN}/${fixedKey}`
+    let url = ''
+    
+    // If already a URL
+    if (videoKey.startsWith('http')) {
+      url = videoKey
+    } else {
+      // CloudFront URL
+      url = `https://${CLOUDFRONT_DOMAIN}/${videoKey}`
     }
-  }
+    
+    // FORCE .mov to .mp4 conversion for Safari compatibility
+    if (url.toLowerCase().includes('.mov')) {
+      console.log('Converting .mov URL to .mp4 for Safari compatibility:', url)
+      // Replace .mov with .mp4 in the URL
+      url = url.replace(/\.mov($|\?)/i, '.mp4$1')
+      
+      // Also check if the key has .mov and replace it
+      if (videoKey.toLowerCase().includes('.mov')) {
+        const fixedKey = videoKey.replace(/\.mov($|\?)/i, '.mp4$1')
+        url = `https://${CLOUDFRONT_DOMAIN}/${fixedKey}`
+      }
+    }
+    
+    return url
+  }, [videoKey])
   
-  return url
-}, [videoKey])
+  // Check if Safari
+  const isSafari = useMemo(() => {
+    return /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
+  }, [])
+  
+  // Check if iOS
+  const isIOS = useMemo(() => {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
+  }, [])
   
   // Format time
   const formatTime = useCallback((seconds: number): string => {
@@ -102,7 +118,7 @@ const videoUrl = useMemo(() => {
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }, [])
   
-  // Initialize video - FIXED with proper cleanup
+  // Initialize video with SAFARI FIXES
   useEffect(() => {
     // Skip if no video element or URL
     if (!videoRef.current || !videoUrl) {
@@ -114,43 +130,65 @@ const videoUrl = useMemo(() => {
     
     const video = videoRef.current
     let isMounted = true
-    let playAttempted = false
+    
+    // Store initial muted state for Safari workaround
+    const initialMuted = muted || isSafari || isIOS
     
     // Set video attributes
     video.src = videoUrl
     video.poster = poster || ''
     video.loop = loop
-    video.playsInline = playsInline
+    video.playsInline = true
     video.preload = 'metadata'
     video.crossOrigin = 'anonymous'
+    video.muted = initialMuted
     
-    // iOS specific attributes
-    if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
+    // CRITICAL: Safari specific attributes
+    if (isIOS || isSafari) {
       video.setAttribute('webkit-playsinline', 'true')
       video.setAttribute('playsinline', 'true')
       video.setAttribute('x-webkit-airplay', 'allow')
+      video.setAttribute('preload', 'auto')
+      
+      // Safari needs muted for autoplay
+      if (autoplay) {
+        video.muted = true
+      }
     }
     
     // Event handlers
+    const handleLoadedMetadata = () => {
+      if (!isMounted) return
+      console.log('Video metadata loaded, duration:', video.duration)
+      setDuration(video.duration || 0)
+      onLoadedMetadata?.(video.duration || 0)
+    }
+    
     const handleLoadedData = () => {
       if (!isMounted) return
+      console.log('Video data loaded')
       setIsLoading(false)
+      setIsVideoLoaded(true)
       onReady?.()
       
-      // Only autoplay if not already attempted
-      if (autoplay && !playAttempted) {
-        playAttempted = true
-        video.play().catch(err => {
-          if (isMounted) {
+      // For Safari/iOS, we need user interaction before autoplay
+      if (autoplay && !isSafari && !isIOS && !hasUserInteracted) {
+        const playPromise = video.play()
+        if (playPromise !== undefined) {
+          playPromise.catch(err => {
             console.log('Autoplay prevented:', err)
-            // Don't show error for autoplay restrictions
             if (!err.message.includes('user gesture')) {
-              setError(err.message)
-              onError?.(err.message)
+              setError('Autoplay blocked. Click play to start.')
             }
-          }
-        })
+          })
+        }
       }
+    }
+    
+    const handleCanPlay = () => {
+      if (!isMounted) return
+      console.log('Video can play')
+      setShowPoster(false)
     }
     
     const handlePlaying = () => {
@@ -168,11 +206,11 @@ const videoUrl = useMemo(() => {
     const handleTimeUpdate = () => {
       if (!isMounted || !video) return
       setCurrentTime(video.currentTime)
-      setDuration(video.duration || 0)
-      onProgress?.(video.currentTime / (video.duration || 1))
+      onTimeUpdate?.(video.currentTime)
+      onProgress?.(video.duration ? video.currentTime / video.duration : 0)
       
       // Calculate buffered amount
-      if (video.buffered.length > 0) {
+      if (video.buffered.length > 0 && video.duration > 0) {
         const bufferedEnd = video.buffered.end(video.buffered.length - 1)
         setBuffered((bufferedEnd / video.duration) * 100)
       }
@@ -195,7 +233,7 @@ const videoUrl = useMemo(() => {
       if (videoError) {
         switch (videoError.code) {
           case 1: errorMsg = 'Video loading aborted'; break
-          case 2: errorMsg = 'Network error'; break
+          case 2: errorMsg = 'Network error. Please check your connection.'; break
           case 3: errorMsg = 'Video format not supported'; break
           case 4: errorMsg = 'Video corrupted or invalid'; break
         }
@@ -205,13 +243,21 @@ const videoUrl = useMemo(() => {
       onError?.(errorMsg)
     }
     
+    const handleVolumeChange = () => {
+      if (!isMounted) return
+      setVolume(video.volume)
+    }
+    
     // Add event listeners
+    video.addEventListener('loadedmetadata', handleLoadedMetadata)
     video.addEventListener('loadeddata', handleLoadedData)
+    video.addEventListener('canplay', handleCanPlay)
     video.addEventListener('playing', handlePlaying)
     video.addEventListener('pause', handlePauseEvent)
     video.addEventListener('timeupdate', handleTimeUpdate)
     video.addEventListener('ended', handleEnded)
     video.addEventListener('error', handleError)
+    video.addEventListener('volumechange', handleVolumeChange)
     
     // Auto-hide controls
     let controlsTimer: NodeJS.Timeout
@@ -226,70 +272,108 @@ const videoUrl = useMemo(() => {
     containerRef.current?.addEventListener('mousemove', resetControlsTimer)
     containerRef.current?.addEventListener('touchstart', resetControlsTimer)
     
+    // Add click handler for user interaction
+    const handleContainerClick = () => {
+      setHasUserInteracted(true)
+      resetControlsTimer()
+    }
+    
+    containerRef.current?.addEventListener('click', handleContainerClick)
+    
     // Cleanup function
     return () => {
       isMounted = false
-      playAttempted = false
       
       // Remove event listeners
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata)
       video.removeEventListener('loadeddata', handleLoadedData)
+      video.removeEventListener('canplay', handleCanPlay)
       video.removeEventListener('playing', handlePlaying)
       video.removeEventListener('pause', handlePauseEvent)
       video.removeEventListener('timeupdate', handleTimeUpdate)
       video.removeEventListener('ended', handleEnded)
       video.removeEventListener('error', handleError)
+      video.removeEventListener('volumechange', handleVolumeChange)
       
       containerRef.current?.removeEventListener('mousemove', resetControlsTimer)
       containerRef.current?.removeEventListener('touchstart', resetControlsTimer)
+      containerRef.current?.removeEventListener('click', handleContainerClick)
       
       clearTimeout(controlsTimer)
       
-      // Pause video and reset src
+      // Pause video
       if (!video.paused) {
         video.pause()
       }
       
-      // Only clear src if component is truly unmounting
-      // This prevents the "media removed from document" error
+      // Clear video source
       video.src = ''
       video.load()
     }
-  }, [videoUrl, poster, autoplay, loop, playsInline, onReady, onPlay, onPause, onProgress, onEnded, onError])
+  }, [videoUrl, poster, autoplay, loop, hasUserInteracted, isSafari, isIOS, onReady, onPlay, onPause, onProgress, onEnded, onError, onTimeUpdate, onLoadedMetadata])
   
-  // Separate effect for autoplay/muted changes
+  // Handle autoplay/muted changes separately
   useEffect(() => {
     const video = videoRef.current
-    if (!video) return
+    if (!video || !isVideoLoaded) return
     
-    video.muted = muted
-    
-    // If autoplay changes to true and we're not playing, attempt play
-    if (autoplay && !isPlaying && !video.paused) {
-      video.play().catch(err => {
-        console.log('Autoplay change prevented:', err)
-      })
+    // For Safari/iOS, we need muted for autoplay
+    if ((isSafari || isIOS) && autoplay) {
+      video.muted = true
+    } else {
+      video.muted = muted
     }
-  }, [autoplay, muted, isPlaying])
+    
+    // Attempt autoplay if conditions are met
+    if (autoplay && hasUserInteracted && !isPlaying) {
+      const playPromise = video.play()
+      if (playPromise !== undefined) {
+        playPromise.catch(err => {
+          console.log('Autoplay after interaction failed:', err)
+        })
+      }
+    }
+  }, [autoplay, muted, isVideoLoaded, hasUserInteracted, isPlaying, isSafari, isIOS])
   
-  // Play/Pause toggle
-  const togglePlay = useCallback(() => {
+  // Play/Pause toggle with Safari workaround
+  const togglePlay = useCallback(async () => {
     const video = videoRef.current
     if (!video) return
+    
+    setHasUserInteracted(true)
+    setShowControls(true)
     
     if (isPlaying) {
       video.pause()
     } else {
-      video.play().catch(err => {
+      try {
+        // For Safari/iOS, ensure video is muted for first play
+        if ((isSafari || isIOS) && video.muted === false) {
+          video.muted = true
+        }
+        
+        await video.play()
+        
+        // After successful play on Safari/iOS, we can try to unmute
+        if ((isSafari || isIOS) && !muted) {
+          setTimeout(() => {
+            video.muted = false
+          }, 1000)
+        }
+      } catch (err: any) {
         console.error('Play failed:', err)
-        // Try with muted for autoplay restrictions
-        if (err.name === 'NotAllowedError') {
+        
+        // Try with muted if autoplay restriction
+        if (err.name === 'NotAllowedError' || err.name === 'AbortError') {
           video.muted = true
           video.play().catch(console.error)
+          setError('Autoplay blocked. Video is muted. Click unmute after playback starts.')
+        } else {
+          setError(err.message || 'Failed to play video')
         }
-      })
+      }
     }
-    setShowControls(true)
-  }, [isPlaying])
+  }, [isPlaying, muted, isSafari, isIOS])
   
   // Seek handler
   const handleSeek = useCallback((percentage: number) => {
@@ -300,6 +384,7 @@ const videoUrl = useMemo(() => {
     video.currentTime = time
     setCurrentTime(time)
     setShowControls(true)
+    setHasUserInteracted(true)
   }, [duration])
   
   // Volume control
@@ -312,6 +397,7 @@ const videoUrl = useMemo(() => {
     video.muted = volumeValue === 0
     setVolume(volumeValue)
     setShowControls(true)
+    setHasUserInteracted(true)
   }, [])
   
   // Fullscreen
@@ -330,6 +416,7 @@ const videoUrl = useMemo(() => {
       console.error('Fullscreen error:', err)
     }
     setShowControls(true)
+    setHasUserInteracted(true)
   }, [])
   
   // Skip forward/backward
@@ -339,28 +426,56 @@ const videoUrl = useMemo(() => {
     
     video.currentTime = Math.max(0, Math.min(duration, video.currentTime + seconds))
     setShowControls(true)
+    setHasUserInteracted(true)
   }, [duration])
+  
+  // Retry loading
+  const retryLoad = useCallback(() => {
+    const video = videoRef.current
+    if (!video || !videoUrl) return
+    
+    setError(null)
+    setIsLoading(true)
+    setHasUserInteracted(true)
+    
+    // Force reload
+    video.src = videoUrl
+    video.load()
+  }, [videoUrl])
   
   // Error state
   if (error) {
     return (
-      <div className={cn("relative bg-black rounded-xl overflow-hidden flex flex-col items-center justify-center aspect-video p-6", className)}>
-        <div className="text-center">
-          <div className="text-red-400 mb-4 text-4xl">⚠️</div>
-          <h3 className="text-white text-lg font-semibold mb-2">Video Error</h3>
-          <p className="text-white/80 mb-6 max-w-md">{error}</p>
-          <button
-            onClick={() => {
-              setError(null)
-              setIsLoading(true)
-              if (videoRef.current) {
-                videoRef.current.load()
-              }
-            }}
-            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-          >
-            Retry
-          </button>
+      <div 
+        ref={containerRef}
+        className={cn("relative bg-black rounded-xl overflow-hidden flex flex-col items-center justify-center aspect-video p-6", className)}
+      >
+        <div className="text-center space-y-4">
+          <div className="w-16 h-16 bg-gradient-to-br from-red-500/20 to-orange-500/20 rounded-full flex items-center justify-center mx-auto">
+            <div className="text-red-400 text-2xl">⚠️</div>
+          </div>
+          <div>
+            <h3 className="text-white text-lg font-semibold mb-2">Video Error</h3>
+            <p className="text-white/80 mb-4 max-w-md text-sm">{error}</p>
+            <p className="text-white/60 text-xs mb-6">
+              {isSafari || isIOS ? 'Safari/iOS may require user interaction to play videos.' : ''}
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={retryLoad}
+              className="px-4 py-2 bg-gradient-to-r from-red-600 to-orange-500 text-white rounded-lg hover:from-red-700 hover:to-orange-600 transition-colors text-sm font-medium"
+            >
+              <RotateCw className="w-4 h-4 inline mr-2" />
+              Retry
+            </button>
+            <button
+              onClick={() => window.open(videoUrl, '_blank')}
+              className="px-4 py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors text-sm font-medium border border-white/20"
+            >
+              Open in New Tab
+            </button>
+          </div>
         </div>
       </div>
     )
@@ -375,40 +490,72 @@ const videoUrl = useMemo(() => {
         isFullscreen && "fixed inset-0 z-50",
         className
       )}
-      onMouseMove={() => setShowControls(true)}
+      onMouseMove={() => {
+        setShowControls(true)
+        setHasUserInteracted(true)
+      }}
       onMouseLeave={() => {
         if (isPlaying) setTimeout(() => setShowControls(false), 2000)
       }}
+      onClick={() => {
+        setHasUserInteracted(true)
+        setShowControls(true)
+      }}
     >
-      {/* Video element with key to prevent React reuse */}
+      {/* Video element */}
       <video
         key={`video-${playerId}`}
         ref={videoRef}
         className="w-full h-full object-contain"
-        playsInline={playsInline}
+        playsInline={true}
         webkit-playsinline="true"
         x-webkit-airplay="allow"
         preload="metadata"
+        disablePictureInPicture
+        controls={false}
       />
+      
+      {/* Poster image overlay */}
+      {showPoster && poster && (
+        <div 
+          className="absolute inset-0 bg-black transition-opacity duration-300"
+          style={{ opacity: isPlaying ? 0 : 1 }}
+        >
+          <img 
+            src={poster} 
+            alt="Video poster" 
+            className="w-full h-full object-contain"
+          />
+        </div>
+      )}
       
       {/* Loading overlay */}
       {isLoading && (
         <div className="absolute inset-0 bg-black/80 flex items-center justify-center">
-          <div className="text-center">
-            <Loader2 className="w-12 h-12 text-white animate-spin mx-auto mb-4" />
-            <p className="text-white/80">Loading video...</p>
+          <div className="text-center space-y-3">
+            <div className="relative">
+              <Loader2 className="w-10 h-10 text-white animate-spin mx-auto" />
+              <div className="absolute inset-0 bg-gradient-to-r from-red-500 to-orange-500 blur-xl opacity-20"></div>
+            </div>
+            <p className="text-white/80 text-sm">Loading video...</p>
+            {(isSafari || isIOS) && (
+              <p className="text-white/60 text-xs">Safari/iOS may require tap to play</p>
+            )}
           </div>
         </div>
       )}
       
-      {/* Center play button overlay */}
+      {/* Center play button overlay (for non-playing state) */}
       {!isPlaying && !isLoading && !error && (
         <div className="absolute inset-0 flex items-center justify-center">
           <button
             onClick={togglePlay}
-            className="w-20 h-20 bg-black/60 rounded-full flex items-center justify-center hover:bg-black/80 transition-all hover:scale-105"
+            className="w-20 h-20 bg-black/60 rounded-full flex items-center justify-center hover:bg-black/80 transition-all hover:scale-105 group/play"
           >
-            <Play className="w-10 h-10 text-white ml-1" />
+            <div className="relative">
+              <Play className="w-10 h-10 text-white ml-1" />
+              <div className="absolute inset-0 bg-gradient-to-r from-red-500 to-orange-500 blur-xl opacity-0 group-hover/play:opacity-30 transition-opacity"></div>
+            </div>
           </button>
         </div>
       )}
@@ -416,29 +563,32 @@ const videoUrl = useMemo(() => {
       {/* Custom Controls */}
       {controls && showControls && (
         <>
+          {/* Top gradient overlay */}
+          <div className="absolute top-0 left-0 right-0 h-20 bg-gradient-to-b from-black/90 to-transparent pointer-events-none" />
+          
           {/* Bottom controls */}
-          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-4">
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 via-black/80 to-transparent p-4 pt-6">
             {/* Progress bar */}
             <div className="mb-4">
               <div className="relative h-2 bg-white/20 rounded-full overflow-hidden mb-1">
                 {/* Buffered progress */}
                 <div 
-                  className="absolute top-0 left-0 h-full bg-white/30"
+                  className="absolute top-0 left-0 h-full bg-white/30 transition-all duration-300"
                   style={{ width: `${buffered}%` }}
                 />
                 {/* Played progress */}
                 <div 
-                  className="absolute top-0 left-0 h-full bg-red-500"
-                  style={{ width: `${(currentTime / duration) * 100}%` }}
+                  className="absolute top-0 left-0 h-full bg-gradient-to-r from-red-500 to-orange-500"
+                  style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%` }}
                 />
                 {/* Seekable track */}
                 <input
                   type="range"
                   min="0"
                   max="100"
-                  value={(currentTime / duration) * 100 || 0}
+                  value={duration ? (currentTime / duration) * 100 : 0}
                   onChange={(e) => handleSeek(parseFloat(e.target.value) / 100)}
-                  className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer"
+                  className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-10"
                 />
               </div>
               <div className="flex justify-between text-sm text-white/80">
@@ -449,17 +599,17 @@ const videoUrl = useMemo(() => {
             
             {/* Control buttons */}
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3">
                 <button
                   onClick={() => skip(-10)}
-                  className="p-2 rounded-lg hover:bg-white/10 text-white"
+                  className="p-2 rounded-lg hover:bg-white/10 text-white transition-colors"
                   title="Skip -10s"
                 >
                   <SkipBack className="w-5 h-5" />
                 </button>
                 <button
                   onClick={togglePlay}
-                  className="p-3 rounded-full bg-white hover:bg-white/90 text-black"
+                  className="p-3 rounded-full bg-white hover:bg-white/90 text-black transition-all hover:scale-105"
                 >
                   {isPlaying ? (
                     <Pause className="w-6 h-6" />
@@ -469,7 +619,7 @@ const videoUrl = useMemo(() => {
                 </button>
                 <button
                   onClick={() => skip(10)}
-                  className="p-2 rounded-lg hover:bg-white/10 text-white"
+                  className="p-2 rounded-lg hover:bg-white/10 text-white transition-colors"
                   title="Skip +10s"
                 >
                   <SkipForward className="w-5 h-5" />
@@ -478,8 +628,8 @@ const videoUrl = useMemo(() => {
                 {/* Volume control */}
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => handleVolumeChange(volume === 0 ? 1 : 0)}
-                    className="p-2 rounded-lg hover:bg-white/10 text-white"
+                    onClick={() => handleVolumeChange(volume === 0 ? 0.5 : 0)}
+                    className="p-2 rounded-lg hover:bg-white/10 text-white transition-colors"
                   >
                     {volume === 0 ? (
                       <VolumeX className="w-5 h-5" />
@@ -487,26 +637,65 @@ const videoUrl = useMemo(() => {
                       <Volume2 className="w-5 h-5" />
                     )}
                   </button>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={volume * 100}
-                    onChange={(e) => handleVolumeChange(parseFloat(e.target.value) / 100)}
-                    className="w-20 accent-red-500"
-                  />
+                  <div className="w-20 hidden sm:block">
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={volume * 100}
+                      onChange={(e) => handleVolumeChange(parseFloat(e.target.value) / 100)}
+                      className="w-full accent-red-500"
+                    />
+                  </div>
                 </div>
               </div>
               
-              <button
-                onClick={toggleFullscreen}
-                className="p-2 rounded-lg hover:bg-white/10 text-white"
-              >
-                <Maximize2 className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Speed control for non-mobile */}
+                {!isIOS && (
+                  <select 
+                    className="bg-white/10 text-white text-sm rounded-lg px-2 py-1 border border-white/20 hover:bg-white/20 transition-colors"
+                    onChange={(e) => {
+                      const video = videoRef.current
+                      if (video) {
+                        video.playbackRate = parseFloat(e.target.value)
+                      }
+                    }}
+                    defaultValue="1"
+                  >
+                    <option value="0.5">0.5x</option>
+                    <option value="0.75">0.75x</option>
+                    <option value="1">1x</option>
+                    <option value="1.25">1.25x</option>
+                    <option value="1.5">1.5x</option>
+                    <option value="2">2x</option>
+                  </select>
+                )}
+                
+                <button
+                  onClick={toggleFullscreen}
+                  className="p-2 rounded-lg hover:bg-white/10 text-white transition-colors"
+                >
+                  <Maximize2 className="w-5 h-5" />
+                </button>
+              </div>
             </div>
           </div>
+          
+          {/* Playback info overlay */}
+          {hasUserInteracted && (isSafari || isIOS) && volume === 0 && (
+            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 px-4 py-2 bg-black/80 text-white text-sm rounded-lg backdrop-blur-sm">
+              🔇 Video muted for autoplay. Tap to unmute.
+            </div>
+          )}
         </>
+      )}
+      
+      {/* iOS/Safari autoplay hint */}
+      {(isIOS || isSafari) && !hasUserInteracted && !isPlaying && !isLoading && (
+        <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2 px-4 py-2 bg-black/80 text-white text-sm rounded-lg backdrop-blur-sm">
+          Tap video to play
+        </div>
       )}
     </div>
   )

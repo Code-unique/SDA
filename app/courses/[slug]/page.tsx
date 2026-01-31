@@ -1,98 +1,42 @@
-// app/courses/[slug]/page.tsx
+// app/courses/[slug]/page.tsx - FIXED VERSION
 'use client'
 
 import { useState, useEffect, useMemo, useCallback, memo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
-  Star, 
-  Clock, 
-  PlayCircle, 
-  BookOpen, 
-  ChevronDown,
-  Upload,
-  Heart,
-  Share2,
-  Download,
-  Award,
-  CheckCircle,
-  Loader2,
-  ArrowLeft,
-  ArrowRight,
-  Video,
-  Play,
-  Users,
-  Check,
-  FileText,
-  Menu,
-  X,
-  Bookmark,
-  GraduationCap,
-  Target,
-  Zap,
-  Shield,
-  TrendingUp,
-  Eye,
-  ChevronRight,
-  ExternalLink,
-  UserCheck,
-  Crown,
-  Rocket,
-  Sparkles,
-  BarChart3,
-  Brain,
-  Globe2,
-  Users2,
-  ShieldCheck,
-  CheckSquare,
-  BookmarkCheck,
-  ThumbsUp,
-  Sparkle,
-  Heart as HeartIcon,
-  TrendingUp as TrendingUpIcon,
-  Zap as ZapIcon,
-  BookCheck,
-  Calendar,
-  MessageCircle,
-  Globe,
-  Lock,
-  Palette,
-  Gem,
-  Feather,
-  Layers,
-  Target as TargetIcon,
-  Brain as BrainIcon,
-  Trophy,
-  Briefcase,
-  Lightbulb,
-  Cpu,
-  Network,
-  Infinity as InfinityIcon,
-  Shield as ShieldIcon,
-  DownloadCloud,
-  Headphones,
-  HelpCircle,
-  ThumbsUp as ThumbsUpIcon,
-  Send,
-  MoreVertical,
-  Copy,
-  Facebook,
-  Twitter,
-  Linkedin,
-  Link as LinkIcon,
-  Mail,
-  Check as CheckIcon,
-  AlertCircle,
-  RefreshCw,
-  DollarSign,
-  CreditCard,
-  AlertTriangle,
-  FileCheck,
-  Building,
-  MapPin,
-  Phone,
-  User,
-  Maximize2
+  Star, Clock, PlayCircle, BookOpen, ChevronDown,
+  Upload, Heart, Share2, Download, Award, CheckCircle,
+  Loader2, ArrowLeft, ArrowRight, Video, Play, Users,
+  Check, FileText, Menu, X, Bookmark, GraduationCap,
+  Target, Zap, Shield, TrendingUp, Eye, ChevronRight,
+  ExternalLink, UserCheck, Crown, Rocket, Sparkles,
+  BarChart3, Brain, Globe2, Users2, ShieldCheck, CheckSquare,
+  BookmarkCheck, ThumbsUp, Sparkle, Calendar, MessageCircle,
+  Globe, Lock, Palette, Gem, Feather, Layers, Trophy,
+  Briefcase, Lightbulb, Cpu, Network, Infinity as InfinityIcon,
+  DownloadCloud, Headphones, HelpCircle, Send, MoreVertical,
+  Copy, Facebook, Twitter, Linkedin, Link as LinkIcon, Mail,
+  AlertCircle, RefreshCw, DollarSign, CreditCard, AlertTriangle,
+  FileCheck, Building, MapPin, Phone, User, Maximize2,
+  ChevronUp, Home, Settings, Bell, Search, Filter, Grid,
+  List, Book, Folder, Package, ShoppingCart, Tag, Percent,
+  Gift, Camera, Mic, Music, Film, Image as ImageIcon, File, FolderOpen,
+  HardDrive, Cloud, Wifi, Battery, Power, RotateCcw, EyeOff,
+  Trash2, Edit, Save, Plus, Minus, MoreHorizontal, PieChart,
+  LineChart, BarChart, TrendingDown, Wallet, Coins,
+  ShoppingBag, Store, Truck, PackageCheck, QrCode, Smartphone,
+  Tablet, Monitor, Server, Database, CloudRain, Sun, Moon,
+  CloudSun, Wind, Thermometer, Droplets, Umbrella, Leaf,
+  Volume2, VolumeX, BellOff, MessageSquare, Paperclip,
+  Hash, Archive, Keyboard,
+  Mouse, Scan, Fingerprint, Key, Unlock, Bluetooth,
+  Signal, Flashlight, CloudOff, Flame, Sunrise, Sunset,
+  Coffee, Pizza, Cake,
+  IceCream, Egg, Utensils,
+  Martini, Beer, Wine,
+  ChefHat, Apple, Banana, Carrot,
+   Milk, Fish, Drumstick, Soup, Sandwich, Cookie, Croissant
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -134,7 +78,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { CloudFrontVideoPlayer } from '@/components/video/CloudFrontVideoPlayer'
-import Image from 'next/image'
+import NextImage from 'next/image'
 
 // ==================== UPDATED TYPES ====================
 interface S3Asset {
@@ -360,7 +304,7 @@ const ErrorState = memo(({ error, onRetry }: { error: string, onRetry: () => voi
 ))
 ErrorState.displayName = 'ErrorState'
 
-// ==================== UPDATED PAYMENT REQUEST MODAL ====================
+// ==================== PAYMENT REQUEST MODAL ====================
 const PaymentRequestModal = memo(({
   course,
   isOpen,
@@ -515,7 +459,7 @@ const PaymentRequestModal = memo(({
               <div className="flex flex-col items-center mb-4">
                 <div className="bg-white p-2 rounded-lg shadow-sm mb-3">
                   <div className="relative w-48 h-48">
-                    <Image
+                    <NextImage
                       src="/images/paymentqr.jpeg"
                       alt="Payment QR Code"
                       fill
@@ -731,6 +675,889 @@ const PaymentRequestModal = memo(({
 })
 PaymentRequestModal.displayName = 'PaymentRequestModal'
 
+// ==================== LEARNING MODE COMPONENT ====================
+const LearningMode = memo(({
+  course,
+  activeLesson,
+  userProgress,
+  completedLessons,
+  allContentItems,
+  onExit,
+  onLessonSelect,
+  onLessonComplete,
+  onNavigate,
+}: {
+  course: Course
+  activeLesson: Lesson | null
+  userProgress: UserProgress | null
+  completedLessons: Set<string>
+  allContentItems: Lesson[]
+  onExit: () => void
+  onLessonSelect: (lesson: Lesson) => void
+  onLessonComplete: (lessonId: string) => void
+  onNavigate: (direction: 'next' | 'prev') => void
+}) => {
+  const [showMobileCurriculum, setShowMobileCurriculum] = useState(false)
+  const [showResources, setShowResources] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [videoDuration, setVideoDuration] = useState(0)
+  const [isVideoLoaded, setIsVideoLoaded] = useState(false)
+  const [expandedModules, setExpandedModules] = useState<Set<number>>(new Set([0]))
+  const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set())
+  const [videoError, setVideoError] = useState<string | null>(null)
+  const [isMobile, setIsMobile] = useState(false)
+
+  // Device detection
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+
+  // Find current position in course
+  const currentIndex = useMemo(() => {
+    if (!activeLesson) return 0
+    return allContentItems.findIndex(item => item._id === activeLesson._id)
+  }, [activeLesson, allContentItems])
+
+  const totalItems = allContentItems.length
+  const progressPercentage = userProgress ? userProgress.progress * 100 : 0
+
+  // Navigation handlers
+  const handleNext = useCallback(() => {
+    if (currentIndex < totalItems - 1) {
+      onNavigate('next')
+    }
+  }, [currentIndex, totalItems, onNavigate])
+
+  const handlePrevious = useCallback(() => {
+    if (currentIndex > 0) {
+      onNavigate('prev')
+    }
+  }, [currentIndex, onNavigate])
+
+  // Video event handlers
+  const handleVideoReady = useCallback(() => {
+    setIsVideoLoaded(true)
+    setVideoError(null)
+  }, [])
+
+  const handleVideoError = useCallback((error: string) => {
+    console.error('Video error in learning mode:', error)
+    setVideoError(error)
+    setIsVideoLoaded(false)
+  }, [])
+
+  const handleTimeUpdate = useCallback((time: number) => {
+    setCurrentTime(time)
+  }, [])
+
+  const handleLoadedMetadata = useCallback((duration: number) => {
+    setVideoDuration(duration)
+  }, [])
+
+  const handleVideoEnded = useCallback(() => {
+    if (activeLesson && !completedLessons.has(activeLesson._id)) {
+      onLessonComplete(activeLesson._id)
+    }
+    // Auto-advance to next lesson after delay
+    setTimeout(() => {
+      if (currentIndex < totalItems - 1) {
+        onNavigate('next')
+      }
+    }, 2000)
+  }, [activeLesson, completedLessons, currentIndex, totalItems, onLessonComplete, onNavigate])
+
+  // Toggle modules/chapters
+  const toggleModule = useCallback((moduleIndex: number) => {
+    setExpandedModules(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(moduleIndex)) {
+        newSet.delete(moduleIndex)
+      } else {
+        newSet.add(moduleIndex)
+      }
+      return newSet
+    })
+  }, [])
+
+  const toggleChapter = useCallback((chapterId: string) => {
+    setExpandedChapters(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(chapterId)) {
+        newSet.delete(chapterId)
+      } else {
+        newSet.add(chapterId)
+      }
+      return newSet
+    })
+  }, [])
+
+  // Format time
+  const formatTime = useCallback((seconds: number): string => {
+    const hrs = Math.floor(seconds / 3600)
+    const mins = Math.floor((seconds % 3600) / 60)
+    const secs = Math.floor(seconds % 60)
+    
+    if (hrs > 0) {
+      return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+    }
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }, [])
+
+  if (!activeLesson) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-950 flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <Loader2 className="w-12 h-12 animate-spin mx-auto text-red-500" />
+          <p className="text-slate-600 dark:text-slate-400">Loading lesson...</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-950">
+      {/* Learning Mode Header */}
+      <div className="sticky top-0 z-50 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border-b border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onExit}
+              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </Button>
+            <div className="hidden sm:block">
+              <h1 className="text-sm font-semibold text-slate-900 dark:text-white truncate max-w-xs">
+                {course.title}
+              </h1>
+            </div>
+          </div>
+          
+          <div className="flex-1 mx-4 min-w-0">
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-red-600 to-orange-500 transition-all duration-500"
+                  style={{ width: `${Math.round(progressPercentage)}%` }}
+                />
+              </div>
+              <span className="text-xs font-bold bg-gradient-to-r from-red-600 to-orange-500 bg-clip-text text-transparent whitespace-nowrap">
+                {Math.round(progressPercentage)}%
+              </span>
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 truncate">
+              Lesson {currentIndex + 1} of {totalItems}
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowMobileCurriculum(!showMobileCurriculum)}
+              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 sm:hidden"
+            >
+              <Menu className="w-4 h-4" />
+            </Button>
+            
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowResources(!showResources)}
+              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              <FileText className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content Area */}
+      <div className="flex">
+        {/* Video Player - Main Content */}
+        <div className="flex-1">
+          <div className="p-4 sm:p-6">
+            {/* Lesson Title */}
+            <div className="mb-4 sm:mb-6">
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
+                  {activeLesson.title}
+                </h2>
+                {completedLessons.has(activeLesson._id) && (
+                  <Badge className="bg-gradient-to-r from-green-500 to-emerald-500 text-white">
+                    <Check className="w-3 h-3 mr-1" />
+                    Completed
+                  </Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-4 text-sm text-slate-500 dark:text-slate-400">
+                <div className="flex items-center gap-1">
+                  <Clock className="w-4 h-4" />
+                  <span>{formatTime(activeLesson.duration * 60)}</span>
+                </div>
+                {activeLesson.isPreview && (
+                  <Badge variant="outline" className="text-amber-600 border-amber-300">
+                    Preview
+                  </Badge>
+                )}
+              </div>
+            </div>
+
+            {/* Video Player */}
+            <div className="mb-6 rounded-2xl overflow-hidden shadow-2xl bg-black">
+              <CloudFrontVideoPlayer
+                videoKey={activeLesson.video?.key || ''}
+                poster={course.thumbnail?.url}
+                autoplay={true}
+                muted={true} // Muted for autoplay compatibility
+                playsInline={true}
+                onReady={handleVideoReady}
+                onError={handleVideoError}
+                onTimeUpdate={handleTimeUpdate}
+                onLoadedMetadata={handleLoadedMetadata}
+                onEnded={handleVideoEnded}
+              />
+              
+              {videoError && (
+                <div className="p-6 bg-red-50 dark:bg-red-900/20 text-center">
+                  <AlertCircle className="w-8 h-8 text-red-500 mx-auto mb-2" />
+                  <p className="text-red-700 dark:text-red-300 font-medium mb-2">
+                    Video Playback Error
+                  </p>
+                  <p className="text-sm text-red-600 dark:text-red-400 mb-4">
+                    {videoError}
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => window.open(activeLesson.video?.url, '_blank')}
+                    className="border-red-300 text-red-600 hover:bg-red-50"
+                  >
+                    Open in New Tab
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* Lesson Description */}
+            <div className="mb-6">
+              <div className="prose prose-sm dark:prose-invert max-w-none">
+                <p className="text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-line">
+                  {activeLesson.description || activeLesson.content || 'No description available.'}
+                </p>
+              </div>
+            </div>
+
+            {/* Navigation Controls */}
+            <div className="flex items-center justify-between gap-4 mb-8">
+              <Button
+                onClick={handlePrevious}
+                disabled={currentIndex === 0}
+                variant="outline"
+                className="flex-1 sm:flex-none gap-2"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span className="hidden sm:inline">Previous</span>
+              </Button>
+              
+              <div className="text-center">
+                <div className="text-sm text-slate-500 dark:text-slate-400">
+                  Lesson {currentIndex + 1} of {totalItems}
+                </div>
+                <div className="text-xs text-slate-400 dark:text-slate-500">
+                  {activeLesson.isSubLesson ? 'Sub-lesson' : 'Main Lesson'}
+                </div>
+              </div>
+              
+              <Button
+                onClick={handleNext}
+                disabled={currentIndex === totalItems - 1}
+                variant={currentIndex === totalItems - 1 ? "default" : "outline"}
+                className={`flex-1 sm:flex-none gap-2 ${
+                  currentIndex === totalItems - 1 
+                    ? 'bg-gradient-to-r from-green-600 to-emerald-500 hover:from-green-700 hover:to-emerald-600' 
+                    : ''
+                }`}
+              >
+                <span className="hidden sm:inline">
+                  {currentIndex === totalItems - 1 ? 'Complete Course' : 'Next'}
+                </span>
+                <span className="sm:hidden">
+                  {currentIndex === totalItems - 1 ? 'Finish' : 'Next'}
+                </span>
+                <ArrowRight className="w-4 h-4" />
+              </Button>
+            </div>
+
+            {/* Progress Tracking */}
+            <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700 mb-6">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Course Progress
+                </span>
+                <span className="text-sm font-bold text-red-600 dark:text-red-400">
+                  {Math.round(progressPercentage)}%
+                </span>
+              </div>
+              <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-red-600 to-orange-500 transition-all duration-500"
+                  style={{ width: `${progressPercentage}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 mt-2">
+                <span>{completedLessons.size} lessons completed</span>
+                <span>{totalItems - completedLessons.size} remaining</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Sidebar - Desktop Curriculum */}
+        {!isMobile && (
+          <div className="w-80 border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-y-auto hidden lg:block">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="p-2 bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20 rounded-xl">
+                  <BookOpen className="w-5 h-5 text-red-600 dark:text-red-400" />
+                </div>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Course Content</h3>
+              </div>
+
+              <div className="space-y-4">
+                {course.modules.map((module, moduleIndex) => {
+                  const moduleItems = module.chapters.reduce((total, chapter) => 
+                    total + chapter.lessons.reduce((lessonTotal, lesson) => 
+                      lessonTotal + 1 + (lesson.subLessons?.length || 0), 0
+                    ), 0
+                  )
+                  
+                  const completedModuleItems = module.chapters.reduce((total, chapter) => 
+                    total + chapter.lessons.reduce((lessonTotal, lesson) => {
+                      let completed = completedLessons.has(lesson._id) ? 1 : 0
+                      completed += lesson.subLessons.filter(sub => 
+                        completedLessons.has(sub._id)
+                      ).length
+                      return lessonTotal + completed
+                    }, 0), 0
+                  )
+                  
+                  const moduleProgress = moduleItems > 0 ? (completedModuleItems / moduleItems) * 100 : 0
+                  
+                  return (
+                    <div key={module._id} className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+                      <div 
+                        className="p-4 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800/50 dark:to-slate-900/50 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        onClick={() => toggleModule(moduleIndex)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-orange-500 rounded-xl flex items-center justify-center">
+                              <span className="font-bold text-white text-sm">{moduleIndex + 1}</span>
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-slate-900 dark:text-white">{module.title}</h4>
+                              <div className="flex items-center gap-2 mt-1">
+                                <div className="text-xs text-slate-500 dark:text-slate-400">
+                                  {completedModuleItems}/{moduleItems} items
+                                </div>
+                                <div className="w-16 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                                  <div 
+                                    className="h-full bg-gradient-to-r from-red-500 to-orange-400"
+                                    style={{ width: `${moduleProgress}%` }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          <ChevronDown className={`w-5 h-5 text-slate-500 dark:text-slate-400 transition-transform ${
+                            expandedModules.has(moduleIndex) ? 'rotate-180' : ''
+                          }`} />
+                        </div>
+                      </div>
+                      
+                      {expandedModules.has(moduleIndex) && (
+                        <div className="border-t border-slate-200 dark:border-slate-700 p-4 space-y-4">
+                          {module.chapters.map((chapter, chapterIndex) => {
+                            const chapterItems = chapter.lessons.reduce((total, lesson) => 
+                              total + 1 + (lesson.subLessons?.length || 0), 0
+                            )
+                            
+                            const completedChapterItems = chapter.lessons.reduce((total, lesson) => {
+                              let completed = completedLessons.has(lesson._id) ? 1 : 0
+                              completed += lesson.subLessons.filter(sub => 
+                                completedLessons.has(sub._id)
+                              ).length
+                              return total + completed
+                            }, 0)
+                            
+                            const chapterProgress = chapterItems > 0 ? (completedChapterItems / chapterItems) * 100 : 0
+                            
+                            return (
+                              <div key={chapter._id} className="space-y-2">
+                                <div 
+                                  className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                                  onClick={() => toggleChapter(chapter._id)}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-8 h-8 bg-gradient-to-br from-red-500 to-orange-400 rounded-lg flex items-center justify-center">
+                                        <span className="font-bold text-white text-xs">{chapterIndex + 1}</span>
+                                      </div>
+                                      <div>
+                                        <h5 className="font-semibold text-slate-900 dark:text-white text-sm">{chapter.title}</h5>
+                                        <div className="flex items-center gap-2 mt-0.5">
+                                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                                            {completedChapterItems}/{chapterItems}
+                                          </span>
+                                          <div className="w-12 h-1 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                                            <div 
+                                              className="h-full bg-gradient-to-r from-red-400 to-orange-400"
+                                              style={{ width: `${chapterProgress}%` }}
+                                            />
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <ChevronDown className={`w-4 h-4 text-slate-500 dark:text-slate-400 transition-transform ${
+                                      expandedChapters.has(chapter._id) ? 'rotate-180' : ''
+                                    }`} />
+                                  </div>
+                                </div>
+                                
+                                {expandedChapters.has(chapter._id) && (
+                                  <div className="ml-4 space-y-2">
+                                    {chapter.lessons.map((lesson, lessonIndex) => {
+                                      const isCompleted = completedLessons.has(lesson._id)
+                                      const isActive = activeLesson?._id === lesson._id
+                                      
+                                      return (
+                                        <div key={lesson._id} className="space-y-2">
+                                          {/* Main Lesson */}
+                                          <div
+                                            className={`p-3 rounded-lg cursor-pointer transition-all ${
+                                              isActive && !activeLesson?.isSubLesson
+                                                ? 'bg-gradient-to-r from-red-600 to-orange-500 text-white shadow-md' 
+                                                : isCompleted
+                                                ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
+                                                : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-red-300 dark:hover:border-red-600'
+                                            }`}
+                                            onClick={() => onLessonSelect(lesson)}
+                                          >
+                                            <div className="flex items-center justify-between">
+                                              <div className="flex items-center gap-2">
+                                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                                                  isActive && !activeLesson?.isSubLesson ? 'bg-white/20' : 
+                                                  isCompleted ? 'bg-green-100 dark:bg-green-900/30' : 
+                                                  'bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20'
+                                                }`}>
+                                                  {isCompleted ? (
+                                                    <Check className="w-4 h-4 text-green-600 dark:text-green-400" />
+                                                  ) : (
+                                                    <PlayCircle className={`w-4 h-4 ${
+                                                      (isActive && !activeLesson?.isSubLesson) ? 'text-white' : 'text-red-600 dark:text-red-400'
+                                                    }`} />
+                                                  )}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                  <p className={`text-sm font-medium ${
+                                                    (isActive && !activeLesson?.isSubLesson) ? 'text-white' : 'text-slate-900 dark:text-white'
+                                                  }`}>
+                                                    {lessonIndex + 1}. {lesson.title}
+                                                  </p>
+                                                  <div className="flex items-center gap-2 mt-0.5">
+                                                    <Clock className={`w-3 h-3 ${
+                                                      (isActive && !activeLesson?.isSubLesson) ? 'text-white/80' : 'text-slate-400 dark:text-slate-500'
+                                                    }`} />
+                                                    <span className={`text-xs ${
+                                                      (isActive && !activeLesson?.isSubLesson) ? 'text-white/80' : 'text-slate-500 dark:text-slate-400'
+                                                    }`}>
+                                                      {Math.floor(lesson.duration)} min
+                                                    </span>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            </div>
+                                          </div>
+
+                                          {/* Sub-lessons */}
+                                          {lesson.subLessons.length > 0 && (
+                                            <div className="ml-4 space-y-1">
+                                              {lesson.subLessons.map((subLesson, subLessonIndex) => {
+                                                const isSubCompleted = completedLessons.has(subLesson._id)
+                                                const isSubActive = activeLesson?._id === subLesson._id
+                                                
+                                                return (
+                                                  <div
+                                                    key={subLesson._id}
+                                                    className={`p-2 rounded-lg cursor-pointer transition-all ${
+                                                      isSubActive
+                                                        ? 'bg-gradient-to-r from-red-600 to-orange-500 text-white shadow-md' 
+                                                        : isSubCompleted
+                                                        ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
+                                                        : 'bg-white/50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 hover:border-red-300 dark:hover:border-red-600'
+                                                    }`}
+                                                    onClick={() => onLessonSelect({
+                                                      ...subLesson,
+                                                      isSubLesson: true,
+                                                      parentLessonId: lesson._id
+                                                    } as Lesson)}
+                                                  >
+                                                    <div className="flex items-center justify-between">
+                                                      <div className="flex items-center gap-2">
+                                                        <div className={`w-6 h-6 rounded-md flex items-center justify-center ${
+                                                          isSubActive ? 'bg-white/20' : 
+                                                          isSubCompleted ? 'bg-green-100 dark:bg-green-900/30' : 
+                                                          'bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20'
+                                                        }`}>
+                                                          {isSubCompleted ? (
+                                                            <Check className="w-3 h-3 text-green-600 dark:text-green-400" />
+                                                          ) : (
+                                                            <PlayCircle className={`w-3 h-3 ${
+                                                              isSubActive ? 'text-white' : 'text-red-600 dark:text-red-400'
+                                                            }`} />
+                                                          )}
+                                                        </div>
+                                                        <span className={`text-xs font-medium ${
+                                                          isSubActive ? 'text-white' : 'text-slate-900 dark:text-white'
+                                                        }`}>
+                                                          • {subLesson.title}
+                                                        </span>
+                                                      </div>
+                                                    </div>
+                                                  </div>
+                                                )
+                                              })}
+                                            </div>
+                                          )}
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Mobile Curriculum Sidebar */}
+        <AnimatePresence>
+          {showMobileCurriculum && isMobile && (
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'tween' }}
+              className="fixed inset-0 z-50 bg-white dark:bg-slate-950"
+            >
+              <div className="sticky top-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 p-6 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20 rounded-xl">
+                      <BookOpen className="w-5 h-5 text-red-600 dark:text-red-400" />
+                    </div>
+                    <h2 className="text-xl font-bold text-slate-900 dark:text-white">Course Content</h2>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowMobileCurriculum(false)}
+                    className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    <X className="w-5 h-5" />
+                  </Button>
+                </div>
+              </div>
+              
+              <div className="h-[calc(100vh-80px)] overflow-y-auto p-6">
+                {course.modules.map((module, moduleIndex) => (
+                  <div key={module._id} className="mb-4">
+                    <div 
+                      className="p-4 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800/50 dark:to-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer hover:border-red-300 dark:hover:border-red-600 transition-all duration-300"
+                      onClick={() => toggleModule(moduleIndex)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-orange-500 rounded-lg flex items-center justify-center">
+                            <span className="font-bold text-white text-sm">{moduleIndex + 1}</span>
+                          </div>
+                          <div>
+                            <h3 className="font-bold text-slate-900 dark:text-white">{module.title}</h3>
+                          </div>
+                        </div>
+                        <ChevronDown className={`w-5 h-5 text-slate-500 dark:text-slate-400 transition-transform ${
+                          expandedModules.has(moduleIndex) ? 'rotate-180' : ''
+                        }`} />
+                      </div>
+                    </div>
+                    
+                    {expandedModules.has(moduleIndex) && (
+                      <div className="mt-3 space-y-3 animate-in fade-in">
+                        {module.chapters.map((chapter, chapterIndex) => (
+                          <div key={chapter._id} className="ml-4">
+                            <div 
+                              className="p-4 bg-gradient-to-br from-slate-50/50 to-white/50 dark:from-slate-800/30 dark:to-slate-900/30 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer hover:border-red-300 dark:hover:border-red-600 transition-all duration-300"
+                              onClick={() => toggleChapter(chapter._id)}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 bg-gradient-to-br from-red-500 to-orange-400 rounded-lg flex items-center justify-center">
+                                    <span className="font-bold text-white text-xs">{chapterIndex + 1}</span>
+                                  </div>
+                                  <div>
+                                    <h4 className="font-semibold text-slate-900 dark:text-white">{chapter.title}</h4>
+                                  </div>
+                                </div>
+                                <ChevronDown className={`w-5 h-5 text-slate-500 dark:text-slate-400 transition-transform ${
+                                  expandedChapters.has(chapter._id) ? 'rotate-180' : ''
+                                }`} />
+                              </div>
+                            </div>
+                            
+                            {expandedChapters.has(chapter._id) && (
+                              <div className="mt-2 ml-4 space-y-2 animate-in fade-in">
+                                {chapter.lessons.map((lesson, lessonIndex) => {
+                                  const isCompleted = completedLessons.has(lesson._id)
+                                  const isActive = activeLesson?._id === lesson._id
+                                  
+                                  return (
+                                    <div key={lesson._id} className="space-y-2">
+                                      {/* Main Lesson */}
+                                      <div
+                                        className={`p-4 rounded-xl border cursor-pointer transition-all duration-300 ${
+                                          isActive && !activeLesson?.isSubLesson
+                                            ? 'bg-gradient-to-r from-red-600 to-orange-500 text-white border-transparent shadow-lg' 
+                                            : isCompleted
+                                            ? 'bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-green-200 dark:border-green-800'
+                                            : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-red-300 dark:hover:border-red-600 hover:shadow-md'
+                                        }`}
+                                        onClick={() => {
+                                          onLessonSelect(lesson)
+                                          setShowMobileCurriculum(false)
+                                        }}
+                                      >
+                                        <div className="flex items-center justify-between">
+                                          <div className="flex items-center gap-3">
+                                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                                              isActive && !activeLesson?.isSubLesson ? 'bg-white/20' : 
+                                              isCompleted ? 'bg-green-100 dark:bg-green-900/30' : 
+                                              'bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20'
+                                            }`}>
+                                              {isCompleted ? (
+                                                <Check className="w-5 h-5 text-green-600 dark:text-green-400" />
+                                              ) : (
+                                                <PlayCircle className={`w-5 h-5 ${
+                                                  (isActive && !activeLesson?.isSubLesson) ? 'text-white' : 'text-red-600 dark:text-red-400'
+                                                }`} />
+                                              )}
+                                            </div>
+                                            <div className="flex-1">
+                                              <p className={`font-medium ${
+                                                (isActive && !activeLesson?.isSubLesson) ? 'text-white' : 'text-slate-900 dark:text-white'
+                                              }`}>
+                                                {lessonIndex + 1}. {lesson.title}
+                                              </p>
+                                              <div className="flex items-center gap-2 mt-1">
+                                                <Clock className={`w-4 h-4 ${
+                                                  (isActive && !activeLesson?.isSubLesson) ? 'text-white/80' : 'text-slate-400 dark:text-slate-500'
+                                                }`} />
+                                                <span className={`text-sm ${
+                                                  (isActive && !activeLesson?.isSubLesson) ? 'text-white/80' : 'text-slate-500 dark:text-slate-400'
+                                                }`}>
+                                                  {Math.floor(lesson.duration)} min
+                                                </span>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      {/* Sub-lessons */}
+                                      {lesson.subLessons.length > 0 && (
+                                        <div className="ml-4 space-y-2">
+                                          {lesson.subLessons.map((subLesson, subLessonIndex) => {
+                                            const isSubCompleted = completedLessons.has(subLesson._id)
+                                            const isSubActive = activeLesson?._id === subLesson._id
+                                            
+                                            return (
+                                              <div
+                                                key={subLesson._id}
+                                                className="ml-4 p-3 rounded-lg border cursor-pointer transition-all duration-300"
+                                                onClick={() => {
+                                                  onLessonSelect({
+                                                    ...subLesson,
+                                                    isSubLesson: true,
+                                                    parentLessonId: lesson._id
+                                                  } as Lesson)
+                                                  setShowMobileCurriculum(false)
+                                                }}
+                                              >
+                                                <div className="flex items-center gap-2">
+                                                  <div className={`w-6 h-6 rounded-md flex items-center justify-center ${
+                                                    isSubActive ? 'bg-white/20' : 
+                                                    isSubCompleted ? 'bg-green-100 dark:bg-green-900/30' : 
+                                                    'bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20'
+                                                  }`}>
+                                                    {isSubCompleted ? (
+                                                      <Check className="w-3 h-3 text-green-600 dark:text-green-400" />
+                                                    ) : (
+                                                      <PlayCircle className={`w-3 h-3 ${
+                                                        isSubActive ? 'text-white' : 'text-red-600 dark:text-red-400'
+                                                      }`} />
+                                                    )}
+                                                  </div>
+                                                  <span className={`text-sm font-medium ${
+                                                    isSubActive ? 'text-white' : 'text-slate-900 dark:text-white'
+                                                  }`}>
+                                                    • {subLesson.title}
+                                                  </span>
+                                                </div>
+                                              </div>
+                                            )
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Resources Panel */}
+        <AnimatePresence>
+          {showResources && activeLesson.resources.length > 0 && (
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'tween' }}
+              className="fixed inset-0 z-50 bg-white dark:bg-slate-950"
+            >
+              <div className="sticky top-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 p-6 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-gradient-to-br from-blue-100 to-cyan-100 dark:from-blue-900/20 dark:to-cyan-900/20 rounded-xl">
+                      <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                    </div>
+                    <h2 className="text-xl font-bold text-slate-900 dark:text-white">Lesson Resources</h2>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowResources(false)}
+                    className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    <X className="w-5 h-5" />
+                  </Button>
+                </div>
+              </div>
+              
+              <div className="p-6 space-y-4">
+                {activeLesson.resources.map((resource, index) => (
+                  <div
+                    key={index}
+                    className="p-4 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800/50 dark:to-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600 transition-all duration-300"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-gradient-to-br from-blue-100 to-cyan-100 dark:from-blue-900/20 dark:to-cyan-900/20 rounded-lg flex items-center justify-center">
+                          <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                        </div>
+                        <div>
+                          <h4 className="font-semibold text-slate-900 dark:text-white">{resource.title}</h4>
+                          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                            {resource.type.toUpperCase()}
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => window.open(resource.url, '_blank')}
+                        className="p-2 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                      >
+                        <Download className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Keyboard Shortcuts Help */}
+      <div className="fixed bottom-4 right-4 z-40">
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-full w-8 h-8 p-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm"
+              >
+                <HelpCircle className="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left" className="bg-slate-900 text-white">
+              <div className="space-y-2">
+                <p className="font-semibold">Keyboard Shortcuts:</p>
+                <div className="space-y-1 text-sm">
+                  <div className="flex justify-between gap-4">
+                    <span>← →</span>
+                    <span>Navigate lessons</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span>Space</span>
+                    <span>Play/Pause</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span>F</span>
+                    <span>Fullscreen</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span>M</span>
+                    <span>Mute/Unmute</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span>Esc</span>
+                    <span>Exit learning mode</span>
+                  </div>
+                </div>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+    </div>
+  )
+})
+LearningMode.displayName = 'LearningMode'
+
 // ==================== HELPER FUNCTIONS ====================
 const formatDuration = (minutes: number): string => {
   const hours = Math.floor(minutes / 60)
@@ -777,95 +1604,82 @@ export default function CourseDetailPage() {
   const [copied, setCopied] = useState(false)
   const [isIOS, setIsIOS] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
-  const videoContainerRef = useRef<HTMLDivElement>(null)
   const [allContentItems, setAllContentItems] = useState<Lesson[]>([])
 
   const slug = params.slug as string
 
-  // Detect iOS and mobile
+  // Device detection
   useEffect(() => {
-    const checkDevice = () => {
-      const userAgent = navigator.userAgent
-      setIsIOS(/iPad|iPhone|iPod/.test(userAgent) && !(window as any).MSStream)
-      setIsMobile(window.innerWidth < 768)
-    }
+    const userAgent = navigator.userAgent
+    setIsIOS(/iPad|iPhone|iPod/.test(userAgent) && !(window as any).MSStream)
+    setIsMobile(window.innerWidth < 768)
     
-    checkDevice()
-    window.addEventListener('resize', checkDevice)
-    return () => window.removeEventListener('resize', checkDevice)
+    const handleResize = () => setIsMobile(window.innerWidth < 768)
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  // Extract video asset - FIXED for better performance
- const extractVideoAsset = useCallback((videoData: any): S3Asset | undefined => {
-  if (!videoData) return undefined
-  
-  // Helper to FORCE .mov to .mp4 conversion
-  const forceMp4Extension = (url: string, key: string): { url: string; key: string } => {
-    let newUrl = url
-    let newKey = key
+  // Extract video asset
+  const extractVideoAsset = useCallback((videoData: any): S3Asset | undefined => {
+    if (!videoData) return undefined
     
-    // Convert .mov to .mp4 in URL
-    if (newUrl.toLowerCase().includes('.mov')) {
-      newUrl = newUrl.replace(/\.mov($|\?)/i, '.mp4$1')
-      console.log('Converted URL from .mov to .mp4:', newUrl)
-    }
-    
-    // Convert .mov to .mp4 in key
-    if (newKey.toLowerCase().includes('.mov')) {
-      newKey = newKey.replace(/\.mov($|\?)/i, '.mp4$1')
-      console.log('Converted key from .mov to .mp4:', newKey)
-    }
-    
-    return { url: newUrl, key: newKey }
-  }
-  
-  // Helper to convert S3 URL to CloudFront
-  const convertToCloudFrontUrl = (url: string, key: string): string => {
-    if (url.includes('cloudfront.net')) return url
-    
-    if (url.includes('amazonaws.com') && key) {
-      // Force .mov to .mp4 in the key
-      const fixedKey = key.toLowerCase().includes('.mov') 
-        ? key.replace(/\.mov$/i, '.mp4')
-        : key
+    const forceMp4Extension = (url: string, key: string): { url: string; key: string } => {
+      let newUrl = url
+      let newKey = key
       
-      return `https://d2c1y2391adh81.cloudfront.net/${fixedKey}`
+      if (newUrl.toLowerCase().includes('.mov')) {
+        newUrl = newUrl.replace(/\.mov($|\?)/i, '.mp4$1')
+      }
+      
+      if (newKey.toLowerCase().includes('.mov')) {
+        newKey = newKey.replace(/\.mov($|\?)/i, '.mp4$1')
+      }
+      
+      return { url: newUrl, key: newKey }
     }
     
-    return url
-  }
-  
-  // Extract data from various formats
-  let key = ''
-  let url = ''
-  
-  if (videoData.key) key = videoData.key
-  if (videoData.url) url = videoData.url
-  if (videoData.video?.key) key = videoData.video.key
-  if (videoData.video?.url) url = videoData.video.url
-  if (videoData.videoSource?.video?.key) key = videoData.videoSource.video.key
-  if (videoData.videoSource?.video?.url) url = videoData.videoSource.video.url
-  
-  // FORCE .mp4 extension
-  const fixed = forceMp4Extension(url, key)
-  url = fixed.url
-  key = fixed.key
-  
-  // Convert to CloudFront if needed
-  const cloudFrontUrl = convertToCloudFrontUrl(url, key)
-  
-  return {
-    key: key,
-    url: cloudFrontUrl,
-    size: videoData.size || videoData.bytes || 0,
-    type: 'video', // Always video for these
-    duration: videoData.duration,
-    width: videoData.width,
-    height: videoData.height
-  }
-}, [])
+    const convertToCloudFrontUrl = (url: string, key: string): string => {
+      if (url.includes('cloudfront.net')) return url
+      
+      if (url.includes('amazonaws.com') && key) {
+        const fixedKey = key.toLowerCase().includes('.mov') 
+          ? key.replace(/\.mov$/i, '.mp4')
+          : key
+        
+        return `https://d2c1y2391adh81.cloudfront.net/${fixedKey}`
+      }
+      
+      return url
+    }
+    
+    let key = ''
+    let url = ''
+    
+    if (videoData.key) key = videoData.key
+    if (videoData.url) url = videoData.url
+    if (videoData.video?.key) key = videoData.video.key
+    if (videoData.video?.url) url = videoData.video.url
+    if (videoData.videoSource?.video?.key) key = videoData.videoSource.video.key
+    if (videoData.videoSource?.video?.url) url = videoData.videoSource.video.url
+    
+    const fixed = forceMp4Extension(url, key)
+    url = fixed.url
+    key = fixed.key
+    
+    const cloudFrontUrl = convertToCloudFrontUrl(url, key)
+    
+    return {
+      key: key,
+      url: cloudFrontUrl,
+      size: videoData.size || videoData.bytes || 0,
+      type: 'video',
+      duration: videoData.duration,
+      width: videoData.width,
+      height: videoData.height
+    }
+  }, [])
 
-  // Create flat array of all content items (lessons + sub-lessons)
+  // Create flat array of all content items
   const createAllContentItems = useCallback((courseData: Course): Lesson[] => {
     const items: Lesson[] = []
     
@@ -874,10 +1688,8 @@ export default function CourseDetailPage() {
     courseData.modules.forEach(module => {
       module.chapters.forEach(chapter => {
         chapter.lessons.forEach(lesson => {
-          // Add main lesson
           items.push(lesson)
           
-          // Add sub-lessons
           if (lesson.subLessons && lesson.subLessons.length > 0) {
             lesson.subLessons.forEach(subLesson => {
               items.push({
@@ -894,7 +1706,7 @@ export default function CourseDetailPage() {
     return items
   }, [])
 
-  // Fetch course data - UPDATED VERSION
+  // Fetch course data
   const fetchCourseData = useCallback(async () => {
     try {
       setLoading(true)
@@ -911,25 +1723,21 @@ export default function CourseDetailPage() {
 
       const data = await courseResponse.json()
       
-      // NO NEED TO CONVERT URLS - API already returns CloudFront URLs
-      // In the fetchCourseData function, update the course processing:
-const processedCourse: Course = {
-  ...data,
-  // Convert S3 URLs to CloudFront URLs
-  thumbnail: extractVideoAsset(data.thumbnail) || {
-    key: 'default',
-    url: '/placeholder-course.jpg',
-    size: 0,
-    type: 'image'
-  },
-  previewVideo: extractVideoAsset(data.previewVideo),
-  modules: data.modules || [],
-  manualEnrollments: data.manualEnrollments || 0
-}
+      const processedCourse: Course = {
+        ...data,
+        thumbnail: extractVideoAsset(data.thumbnail) || {
+          key: 'default',
+          url: '/placeholder-course.jpg',
+          size: 0,
+          type: 'image'
+        },
+        previewVideo: extractVideoAsset(data.previewVideo),
+        modules: data.modules || [],
+        manualEnrollments: data.manualEnrollments || 0
+      }
 
       setCourse(processedCourse)
       
-      // Create flat array of all content items
       const items = createAllContentItems(processedCourse)
       setAllContentItems(items)
 
@@ -952,7 +1760,6 @@ const processedCourse: Course = {
         setUserProgress(userProgressData)
         setCompletedLessons(new Set(userProgressData.completedLessons))
         
-        // Find and set active lesson
         if (userProgressData.currentLesson) {
           const foundItem = items.find(item => item._id === userProgressData.currentLesson)
           if (foundItem) {
@@ -983,12 +1790,7 @@ const processedCourse: Course = {
     } finally {
       setLoading(false)
     }
-  }, [slug, toast, createAllContentItems])
-
-  // Find lesson by ID - OPTIMIZED
-  const findLessonById = useCallback((lessonId: string): Lesson | null => {
-    return allContentItems.find(item => item._id === lessonId) || null
-  }, [allContentItems])
+  }, [slug, toast, createAllContentItems, extractVideoAsset])
 
   useEffect(() => {
     if (slug) {
@@ -996,7 +1798,12 @@ const processedCourse: Course = {
     }
   }, [slug, fetchCourseData])
 
-  // Enrollment handler with manual payment flow
+  // Find lesson by ID
+  const findLessonById = useCallback((lessonId: string): Lesson | null => {
+    return allContentItems.find(item => item._id === lessonId) || null
+  }, [allContentItems])
+
+  // Enrollment handler
   const enrollInCourse = useCallback(async () => {
     if (!course || isEnrolling) return
     
@@ -1091,7 +1898,7 @@ const processedCourse: Course = {
     }
   }, [course, isEnrolling, toast, allContentItems, findLessonById])
 
-  // Progress updates - OPTIMIZED
+  // Progress updates
   const updateProgress = useCallback(async (lessonId: string, completed: boolean = false, isCurrent: boolean = true) => {
     if (!course || !userProgress?.enrolled) return
 
@@ -1147,7 +1954,7 @@ const processedCourse: Course = {
     updateProgress(lessonId, true, false)
   }, [updateProgress])
 
-  // Get next/previous lesson - OPTIMIZED using flat array
+  // Get next/previous lesson
   const getNextLesson = useCallback((): Lesson | null => {
     if (!activeLesson || allContentItems.length === 0) return null
 
@@ -1189,12 +1996,22 @@ const processedCourse: Course = {
     if (!isLearningMode) return
 
     const handleKeyPress = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight') {
-        navigateToLesson('next')
+      if (e.key === 'ArrowRight' || e.key === ' ') {
+        e.preventDefault()
+        if (e.key === 'ArrowRight') {
+          navigateToLesson('next')
+        } else if (e.key === ' ') {
+          // Space for play/pause handled in video player
+        }
       } else if (e.key === 'ArrowLeft') {
+        e.preventDefault()
         navigateToLesson('prev')
       } else if (e.key === 'Escape') {
         setIsLearningMode(false)
+      } else if (e.key === 'f' || e.key === 'F') {
+        // Fullscreen handled in video player
+      } else if (e.key === 'm' || e.key === 'M') {
+        // Mute handled in video player
       }
     }
 
@@ -1272,7 +2089,7 @@ const processedCourse: Course = {
     }
   }, [])
 
-  // Progress calculation - OPTIMIZED
+  // Progress calculation
   const calculateModuleProgress = useCallback((module: Module) => {
     if (!userProgress || !module.chapters) return 0
     
@@ -1329,7 +2146,7 @@ const processedCourse: Course = {
     return (completedItems / totalItems) * 100
   }, [userProgress, completedLessons])
 
-  // Calculate total sub-lessons - OPTIMIZED
+  // Calculate total sub-lessons
   const totalSubLessons = useMemo(() => {
     if (!course?.modules) return 0
     return course.modules.reduce((total, module) => 
@@ -1367,7 +2184,7 @@ const processedCourse: Course = {
     }
   }, [course, toast])
 
-  // Payment success handler for manual requests
+  // Payment success handler
   const handlePaymentRequestSuccess = useCallback((requestId: string) => {
     setShowPaymentRequestModal(false)
     
@@ -1433,236 +2250,22 @@ const processedCourse: Course = {
         <Sparkles className="w-3 h-3 ml-2" />
       </Button>
     )
-  }, [userProgress, isEnrolling, course, enrollInCourse, router, setIsLearningMode])
+  }, [userProgress, isEnrolling, course, enrollInCourse, router])
 
-  // Learning Mode View
-  if (isLearningMode && activeLesson) {
-    const nextLesson = getNextLesson()
-    const previousLesson = getPreviousLesson()
-    const currentIndex = allContentItems.findIndex(item => item._id === activeLesson._id)
-    const lessonNumber = currentIndex + 1
-
+  // Show Learning Mode
+  if (isLearningMode && activeLesson && course) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-950">
-        {/* Learning Mode Header */}
-        <div className="sticky top-0 z-50 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border-b border-slate-200 dark:border-slate-800 shadow-sm">
-          <div className="px-4 py-3 flex items-center justify-between">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsLearningMode(false)}
-              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </Button>
-            <div className="flex-1 mx-4 min-w-0">
-              <h1 className="text-sm font-semibold text-slate-900 dark:text-white truncate">{course?.title}</h1>
-              <div className="flex items-center gap-2 mt-1">
-                <div className="flex-1 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-gradient-to-r from-red-600 to-orange-500 transition-all duration-500"
-                    style={{ width: `${Math.round((userProgress?.progress || 0) * 100)}%` }}
-                  />
-                </div>
-                <span className="text-xs font-bold bg-gradient-to-r from-red-600 to-orange-500 bg-clip-text text-transparent">
-                  {Math.round((userProgress?.progress || 0) * 100)}%
-                </span>
-              </div>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowMobileCurriculum(!showMobileCurriculum)}
-              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-            >
-              <Menu className="w-4 h-4" />
-            </Button>
-          </div>
-        </div>
-
-        {/* Main Learning Content */}
-        <div className="bg-black rounded-2xl overflow-hidden shadow-2xl">
-          <CloudFrontVideoPlayer
-            videoKey={activeLesson.video?.key || ''}
-            poster={course?.thumbnail?.url}
-            autoplay={true}
-            muted={isIOS}
-            playsInline={true}
-            onError={(error) => {
-              console.error('Video player error:', error)
-              toast({
-                title: 'Playback Error',
-                description: error,
-                variant: 'destructive'
-              })
-            }}
-          />
-        </div>
-
-        {/* Mobile Curriculum Sidebar - OPTIMIZED */}
-        {showMobileCurriculum && (
-          <div className="fixed inset-0 z-50 bg-white dark:bg-slate-950 animate-in slide-in-from-right">
-            <div className="sticky top-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 p-6 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20 rounded-xl">
-                    <BookOpen className="w-5 h-5 text-red-600 dark:text-red-400" />
-                  </div>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-white">Course Content</h2>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowMobileCurriculum(false)}
-                  className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-                >
-                  <X className="w-5 h-5" />
-                </Button>
-              </div>
-            </div>
-            <div className="h-[calc(100vh-80px)] overflow-y-auto p-6">
-              {course?.modules.map((module, moduleIndex) => (
-                <div key={module._id} className="mb-4">
-                  <div 
-                    className="p-4 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800/50 dark:to-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer hover:border-red-300 dark:hover:border-red-600 transition-all duration-300"
-                    onClick={() => toggleModule(moduleIndex)}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-orange-500 rounded-lg flex items-center justify-center">
-                          <span className="font-bold text-white text-sm">{moduleIndex + 1}</span>
-                        </div>
-                        <div>
-                          <h3 className="font-bold text-slate-900 dark:text-white">{module.title}</h3>
-                        </div>
-                      </div>
-                      <ChevronDown className={`w-5 h-5 text-slate-500 dark:text-slate-400 transition-transform ${expandedModules.has(moduleIndex) ? 'rotate-180' : ''}`} />
-                    </div>
-                  </div>
-                  
-                  {expandedModules.has(moduleIndex) && (
-                    <div className="mt-3 space-y-3 animate-in fade-in">
-                      {module.chapters.map((chapter, chapterIndex) => (
-                        <div key={chapter._id} className="ml-4">
-                          <div 
-                            className="p-4 bg-gradient-to-br from-slate-50/50 to-white/50 dark:from-slate-800/30 dark:to-slate-900/30 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer hover:border-red-300 dark:hover:border-red-600 transition-all duration-300"
-                            onClick={() => toggleChapter(chapter._id)}
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 bg-gradient-to-br from-red-500 to-orange-400 rounded-lg flex items-center justify-center">
-                                  <span className="font-bold text-white text-xs">{chapterIndex + 1}</span>
-                                </div>
-                                <div>
-                                  <h4 className="font-semibold text-slate-900 dark:text-white">{chapter.title}</h4>
-                                </div>
-                              </div>
-                              <ChevronDown className={`w-5 h-5 text-slate-500 dark:text-slate-400 transition-transform ${expandedChapters.has(chapter._id) ? 'rotate-180' : ''}`} />
-                            </div>
-                          </div>
-                          
-                          {expandedChapters.has(chapter._id) && (
-                            <div className="mt-2 ml-4 space-y-2 animate-in fade-in">
-                              {chapter.lessons.map((lesson, lessonIndex) => {
-                                const isCompleted = completedLessons.has(lesson._id)
-                                const isActive = activeLesson?._id === lesson._id
-                                
-                                return (
-                                  <div key={lesson._id} className="space-y-2">
-                                    {/* Main Lesson */}
-                                    <div
-                                      className={`p-4 rounded-xl border cursor-pointer transition-all duration-300 ${
-                                        isActive && !activeLesson?.isSubLesson
-                                          ? 'bg-gradient-to-r from-red-600 to-orange-500 text-white border-transparent shadow-lg' 
-                                          : isCompleted
-                                          ? 'bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-green-200 dark:border-green-800'
-                                          : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-red-300 dark:hover:border-red-600 hover:shadow-md'
-                                      }`}
-                                      onClick={() => {
-                                        handleLessonSelect(lesson)
-                                        setShowMobileCurriculum(false)
-                                      }}
-                                    >
-                                      <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-3">
-                                          <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                                            isActive && !activeLesson?.isSubLesson ? 'bg-white/20' : isCompleted ? 'bg-green-100 dark:bg-green-900/30' : 'bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20'
-                                          }`}>
-                                            {isCompleted ? (
-                                              <Check className="w-5 h-5 text-green-600 dark:text-green-400" />
-                                            ) : (
-                                              <PlayCircle className={`w-5 h-5 ${(isActive && !activeLesson?.isSubLesson) ? 'text-white' : 'text-red-600 dark:text-red-400'}`} />
-                                            )}
-                                          </div>
-                                          <div className="flex-1">
-                                            <p className={`font-medium ${(isActive && !activeLesson?.isSubLesson) ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
-                                              {lessonIndex + 1}. {lesson.title}
-                                            </p>
-                                            <div className="flex items-center gap-2 mt-1">
-                                              <Clock className={`w-4 h-4 ${(isActive && !activeLesson?.isSubLesson) ? 'text-white/80' : 'text-slate-400 dark:text-slate-500'}`} />
-                                              <span className={`text-sm ${(isActive && !activeLesson?.isSubLesson) ? 'text-white/80' : 'text-slate-500 dark:text-slate-400'}`}>
-                                                {formatDuration(lesson.duration)}
-                                              </span>
-                                            </div>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    {/* Sub-lessons */}
-                                    {lesson.subLessons.length > 0 && (
-                                      <div className="ml-4 space-y-2">
-                                        {lesson.subLessons.map((subLesson, subLessonIndex) => {
-                                          const isSubCompleted = completedLessons.has(subLesson._id)
-                                          const isSubActive = activeLesson?._id === subLesson._id
-                                          
-                                          return (
-                                            <div
-                                              key={subLesson._id}
-                                              className="ml-4 p-3 rounded-lg border cursor-pointer transition-all duration-300"
-                                              onClick={() => {
-                                                setActiveLesson({
-                                                  ...subLesson,
-                                                  isSubLesson: true,
-                                                  parentLessonId: lesson._id
-                                                } as Lesson)
-                                                setShowMobileCurriculum(false)
-                                              }}
-                                            >
-                                              <div className="flex items-center gap-2">
-                                                <div className={`w-6 h-6 rounded-md flex items-center justify-center ${
-                                                  isSubActive ? 'bg-white/20' : isSubCompleted ? 'bg-green-100 dark:bg-green-900/30' : 'bg-gradient-to-br from-red-100 to-orange-100 dark:from-red-900/20 dark:to-orange-900/20'
-                                                }`}>
-                                                  {isSubCompleted ? (
-                                                    <Check className="w-3 h-3 text-green-600 dark:text-green-400" />
-                                                  ) : (
-                                                    <PlayCircle className={`w-3 h-3 ${isSubActive ? 'text-white' : 'text-red-600 dark:text-red-400'}`} />
-                                                  )}
-                                                </div>
-                                                <span className={`text-sm font-medium ${isSubActive ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
-                                                  • {subLesson.title}
-                                                </span>
-                                              </div>
-                                            </div>
-                                          )
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+      <LearningMode
+        course={course}
+        activeLesson={activeLesson}
+        userProgress={userProgress}
+        completedLessons={completedLessons}
+        allContentItems={allContentItems}
+        onExit={() => setIsLearningMode(false)}
+        onLessonSelect={handleLessonSelect}
+        onLessonComplete={handleLessonComplete}
+        onNavigate={navigateToLesson}
+      />
     )
   }
 
@@ -1715,11 +2318,10 @@ const processedCourse: Course = {
 
       {/* Hero Section */}
       <div className="relative overflow-hidden">
-        {/* Background Gradient */}
         <div className="absolute inset-0 bg-gradient-to-r from-red-500/10 via-orange-500/10 to-amber-500/10" />
         
         <div className="relative px-4 pt-6 pb-8">
-          {/* Preview Video - UPDATED with CloudFrontVideoPlayer */}
+          {/* Preview Video */}
           {course.previewVideo && (
             <div className="mb-6">
               <div className="flex items-center gap-2 mb-3">
@@ -1733,7 +2335,7 @@ const processedCourse: Course = {
                 <CloudFrontVideoPlayer
                   videoKey={course.previewVideo.key}
                   poster={course.thumbnail?.url}
-                  muted={isIOS}
+                  muted={true}
                   playsInline={true}
                 />
               </div>
