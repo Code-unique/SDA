@@ -54,6 +54,7 @@ export function CloudFrontVideoPlayer({
   const [showControls, setShowControls] = useState(true)
   const [hasUserInteracted, setHasUserInteracted] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [videoAspectRatio, setVideoAspectRatio] = useState<number | null>(null)
   
   // Video state - derived from video element, not React state
   const [uiState, setUiState] = useState({
@@ -215,8 +216,35 @@ export function CloudFrontVideoPlayer({
     }
     
     const handleLoadedMetadata = () => {
-      setUiState(prev => ({ ...prev, duration: video.duration || 0 }))
-      onLoadedMetadata?.(video.duration || 0)
+      const duration = video.duration || 0
+      setUiState(prev => ({ ...prev, duration }))
+      onLoadedMetadata?.(duration)
+      
+      // Get video dimensions and calculate aspect ratio
+      const videoWidth = video.videoWidth || video.clientWidth
+      const videoHeight = video.videoHeight || video.clientHeight
+      
+      if (videoWidth > 0 && videoHeight > 0) {
+        const aspectRatio = videoWidth / videoHeight
+        console.log(`Video dimensions: ${videoWidth}x${videoHeight}, Aspect ratio: ${aspectRatio}`)
+        setVideoAspectRatio(aspectRatio)
+      }
+    }
+    
+    // Handle video resize to detect aspect ratio
+    const handleResize = () => {
+      if (!video) return
+      const videoWidth = video.videoWidth || video.clientWidth
+      const videoHeight = video.videoHeight || video.clientHeight
+      
+      if (videoWidth > 0 && videoHeight > 0) {
+        const aspectRatio = videoWidth / videoHeight
+        // Only update if it's significantly different
+        if (!videoAspectRatio || Math.abs(videoAspectRatio - aspectRatio) > 0.01) {
+          console.log(`Video resized: ${videoWidth}x${videoHeight}, Aspect ratio: ${aspectRatio}`)
+          setVideoAspectRatio(aspectRatio)
+        }
+      }
     }
     
     const handleVolumeChange = () => {
@@ -254,6 +282,7 @@ export function CloudFrontVideoPlayer({
     video.addEventListener('ended', handleEnded)
     video.addEventListener('error', handleError)
     video.addEventListener('loadedmetadata', handleLoadedMetadata)
+    video.addEventListener('resize', handleResize)
     video.addEventListener('volumechange', handleVolumeChange)
     
     // Add iOS WebKit fullscreen events
@@ -286,6 +315,7 @@ export function CloudFrontVideoPlayer({
       video.removeEventListener('ended', handleEnded)
       video.removeEventListener('error', handleError)
       video.removeEventListener('loadedmetadata', handleLoadedMetadata)
+      video.removeEventListener('resize', handleResize)
       video.removeEventListener('volumechange', handleVolumeChange)
       video.removeEventListener('webkitbeginfullscreen', handleWebkitBeginFullscreen)
       video.removeEventListener('webkitendfullscreen', handleWebkitEndFullscreen)
@@ -490,12 +520,32 @@ export function CloudFrontVideoPlayer({
     }
   }, [controls, uiState.currentTime])
   
+  // Calculate container styles based on aspect ratio
+  const containerStyle = useMemo(() => {
+    if (videoAspectRatio) {
+      // For normal mode: use aspect ratio with max width/height
+      // For fullscreen mode: let it fill the screen
+      return {
+        aspectRatio: isFullscreen ? 'auto' : videoAspectRatio,
+        maxWidth: isFullscreen ? '100%' : '100%',
+        maxHeight: isFullscreen ? '100vh' : '100%',
+        height: isFullscreen ? '100vh' : 'auto'
+      } as React.CSSProperties
+    }
+    
+    // Default fallback to 16:9 if aspect ratio not available
+    return {
+      aspectRatio: '16/9'
+    } as React.CSSProperties
+  }, [videoAspectRatio, isFullscreen])
+  
   // Error state
   if (uiState.error) {
     return (
       <div 
         ref={containerRef}
-        className={cn("relative bg-black rounded-xl overflow-hidden flex flex-col items-center justify-center aspect-video p-6", className)}
+        style={containerStyle}
+        className={cn("relative bg-black rounded-xl overflow-hidden flex flex-col items-center justify-center p-6", className)}
       >
         <div className="text-center space-y-4">
           <div className="text-red-400 mb-4 text-4xl">⚠️</div>
@@ -520,8 +570,9 @@ export function CloudFrontVideoPlayer({
   return (
     <div
       ref={containerRef}
+      style={containerStyle}
       className={cn(
-        "relative bg-black rounded-xl overflow-hidden group aspect-video",
+        "relative bg-black rounded-xl overflow-hidden group",
         isFullscreen && "fixed inset-0 z-50",
         className
       )}
