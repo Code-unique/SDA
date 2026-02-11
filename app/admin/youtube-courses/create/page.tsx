@@ -1,14 +1,15 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Separator } from "@/components/ui/separator"
+
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
 import { useToast } from '@/components/ui/use-toast'
 import { 
   Plus, 
@@ -18,9 +19,7 @@ import {
   ChevronDown, 
   Eye, 
   EyeOff,
-  Link,
   Video,
-  FileText,
   BookOpen,
   Users,
   Target,
@@ -28,7 +27,12 @@ import {
   Award,
   Loader2,
   Check,
-  X
+  X,
+  Image as ImageIcon,
+  Link,
+  FileText,
+  Youtube,
+  Clock
 } from 'lucide-react'
 import {
   Select,
@@ -39,10 +43,13 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 
+// Interfaces
 interface YouTubeVideo {
+  type: 'youtube'
   videoId: string
   url: string
   thumbnailUrl: string
+  duration?: number
 }
 
 interface LessonResource {
@@ -58,10 +65,11 @@ interface SubLesson {
   title: string
   description: string
   content?: string
-  youtubeUrl?: string
+  videoSource?: YouTubeVideo
   duration: number
   isPreview: boolean
   resources: LessonResource[]
+  order: number
 }
 
 interface Lesson {
@@ -69,11 +77,12 @@ interface Lesson {
   title: string
   description: string
   content?: string
-  youtubeUrl?: string
+  videoSource?: YouTubeVideo
   duration: number
   isPreview: boolean
   resources: LessonResource[]
   subLessons: SubLesson[]
+  order: number
 }
 
 interface Chapter {
@@ -81,6 +90,7 @@ interface Chapter {
   title: string
   description?: string
   lessons: Lesson[]
+  order: number
 }
 
 interface Module {
@@ -89,6 +99,95 @@ interface Module {
   description?: string
   thumbnailUrl?: string
   chapters: Chapter[]
+  order: number
+}
+
+// Helper functions
+const generateId = () => `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+
+const extractYouTubeVideoId = (url: string): string | null => {
+  if (!url) return null
+  
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/
+  const match = url.match(regExp)
+  return match && match[2].length === 11 ? match[2] : null
+}
+
+const getYouTubeThumbnail = (videoId: string, quality: 'default' | 'mqdefault' | 'hqdefault' | 'sddefault' | 'maxresdefault' = 'maxresdefault'): string => {
+  return `https://img.youtube.com/vi/${videoId}/${quality}.jpg`
+}
+
+// Fallback image component
+const FallbackImage = ({ className, alt }: { className?: string; alt: string }) => {
+  return (
+    <div className={`bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center ${className}`}>
+      <div className="text-center">
+        <ImageIcon className="w-12 h-12 text-gray-400 mx-auto mb-2" />
+        <p className="text-sm text-gray-500">{alt || 'No image available'}</p>
+      </div>
+    </div>
+  )
+}
+
+// Image component with error handling
+const CourseImage = ({ src, alt, className }: { src: string; alt: string; className?: string }) => {
+  const [error, setError] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  if (!src || error) {
+    return <FallbackImage className={className} alt={alt} />
+  }
+
+  return (
+    <div className="relative">
+      {loading && (
+        <div className="absolute inset-0 bg-gray-100 animate-pulse flex items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+        </div>
+      )}
+      <img
+        src={src}
+        alt={alt}
+        className={className}
+        onError={() => setError(true)}
+        onLoad={() => setLoading(false)}
+        style={loading ? { opacity: 0 } : { opacity: 1 }}
+      />
+    </div>
+  )
+}
+
+// Drag handle component
+const DragHandle = ({ onMoveUp, onMoveDown, canMoveUp = true, canMoveDown = true }: {
+  onMoveUp: () => void
+  onMoveDown: () => void
+  canMoveUp?: boolean
+  canMoveDown?: boolean
+}) => {
+  return (
+    <div className="flex items-center gap-1">
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        onClick={onMoveUp}
+        disabled={!canMoveUp}
+        className="h-6 w-6 p-0"
+      >
+        <ChevronUp className="w-3 h-3" />
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        onClick={onMoveDown}
+        disabled={!canMoveDown}
+        className="h-6 w-6 p-0"
+      >
+        <ChevronDown className="w-3 h-3" />
+      </Button>
+    </div>
+  )
 }
 
 export default function CreateYouTubeCoursePage() {
@@ -97,7 +196,6 @@ export default function CreateYouTubeCoursePage() {
   const [loading, setLoading] = useState(false)
   const [previewMode, setPreviewMode] = useState(false)
   
-  // Course basic info
   const [courseData, setCourseData] = useState({
     title: '',
     description: '',
@@ -115,28 +213,29 @@ export default function CreateYouTubeCoursePage() {
     manualEnrollmentEnabled: true
   })
   
-  // YouTube preview video
   const [previewVideo, setPreviewVideo] = useState<YouTubeVideo | null>(null)
   const [previewVideoUrl, setPreviewVideoUrl] = useState('')
   
-  // Modules
   const [modules, setModules] = useState<Module[]>([
     {
-      _id: '1',
+      _id: generateId(),
       title: 'Module 1',
       description: '',
+      order: 0,
       chapters: [
         {
-          _id: '1-1',
+          _id: generateId(),
           title: 'Chapter 1',
+          description: '',
+          order: 0,
           lessons: [
             {
-              _id: '1-1-1',
+              _id: generateId(),
               title: 'Lesson 1',
               description: '',
-              youtubeUrl: '',
               duration: 0,
               isPreview: false,
+              order: 0,
               resources: [],
               subLessons: []
             }
@@ -146,45 +245,107 @@ export default function CreateYouTubeCoursePage() {
     }
   ])
   
-  // Current tag input
   const [tagInput, setTagInput] = useState('')
   const [requirementInput, setRequirementInput] = useState('')
   const [outcomeInput, setOutcomeInput] = useState('')
-  
-  // Parse YouTube URL
-  const parseYouTubeUrl = (url: string): YouTubeVideo | null => {
-    if (!url) return null
-    
-    let videoId = ''
-    
-    if (url.includes('youtu.be/')) {
-      videoId = url.split('youtu.be/')[1]?.split('?')[0] || ''
-    } else if (url.includes('youtube.com/watch')) {
-      const urlObj = new URL(url)
-      videoId = urlObj.searchParams.get('v') || ''
-    } else if (url.includes('youtube.com/embed/')) {
-      videoId = url.split('youtube.com/embed/')[1]?.split('?')[0] || ''
-    } else if (/^[a-zA-Z0-9_-]{11}$/.test(url)) {
-      videoId = url
+  const [expandedModules, setExpandedModules] = useState<string[]>([])
+  const [expandedChapters, setExpandedChapters] = useState<string[]>([])
+  const [expandedLessons, setExpandedLessons] = useState<string[]>([])
+
+  const fetchYouTubeInfo = async (videoId: string) => {
+    return {
+      type: 'youtube' as const,
+      videoId,
+      url: `https://www.youtube.com/watch?v=${videoId}`,
+      thumbnailUrl: getYouTubeThumbnail(videoId, 'maxresdefault'),
+      duration: 0
     }
-    
-    if (!videoId || videoId.length !== 11) {
+  }
+
+  const handlePreviewYouTube = async () => {
+    const videoId = extractYouTubeVideoId(previewVideoUrl)
+    if (!videoId) {
       toast({
         title: 'Invalid YouTube URL',
         description: 'Please enter a valid YouTube video URL',
         variant: 'destructive'
       })
-      return null
+      return
     }
     
-    return {
-      videoId,
-      url: `https://www.youtube.com/embed/${videoId}`,
-      thumbnailUrl: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`
+    const video = await fetchYouTubeInfo(videoId)
+    setPreviewVideo(video)
+    
+    if (!courseData.thumbnail.trim()) {
+      setCourseData(prev => ({
+        ...prev,
+        thumbnail: video.thumbnailUrl
+      }))
+      toast({
+        title: 'Thumbnail Auto-filled',
+        description: 'YouTube thumbnail has been set as course thumbnail',
+        variant: 'default'
+      })
     }
   }
-  
-  // Add tag
+
+  const handleLessonYouTubeVideo = async (
+    moduleIndex: number, 
+    chapterIndex: number, 
+    lessonIndex: number, 
+    url: string
+  ) => {
+    const videoId = extractYouTubeVideoId(url)
+    if (!videoId) {
+      toast({
+        title: 'Invalid YouTube URL',
+        description: 'Please enter a valid YouTube video URL',
+        variant: 'destructive'
+      })
+      return
+    }
+    
+    const videoInfo = await fetchYouTubeInfo(videoId)
+    updateLesson(moduleIndex, chapterIndex, lessonIndex, 'videoSource', videoInfo)
+  }
+
+  const handleSubLessonYouTubeVideo = async (
+    moduleIndex: number, 
+    chapterIndex: number, 
+    lessonIndex: number, 
+    subLessonIndex: number,
+    url: string
+  ) => {
+    const videoId = extractYouTubeVideoId(url)
+    if (!videoId) {
+      toast({
+        title: 'Invalid YouTube URL',
+        description: 'Please enter a valid YouTube video URL',
+        variant: 'destructive'
+      })
+      return
+    }
+    
+    const videoInfo = await fetchYouTubeInfo(videoId)
+    updateSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, 'videoSource', videoInfo)
+  }
+
+  const autoFillThumbnailFromYouTube = (url: string) => {
+    const videoId = extractYouTubeVideoId(url)
+    if (videoId && !courseData.thumbnail.trim()) {
+      const thumbnailUrl = getYouTubeThumbnail(videoId, 'maxresdefault')
+      setCourseData(prev => ({
+        ...prev,
+        thumbnail: thumbnailUrl
+      }))
+      toast({
+        title: 'Thumbnail Auto-filled',
+        description: 'YouTube thumbnail has been set as course thumbnail',
+        variant: 'default'
+      })
+    }
+  }
+
   const addTag = () => {
     if (tagInput.trim() && courseData.tags.length < 10) {
       setCourseData(prev => ({
@@ -194,16 +355,14 @@ export default function CreateYouTubeCoursePage() {
       setTagInput('')
     }
   }
-  
-  // Remove tag
+
   const removeTag = (index: number) => {
     setCourseData(prev => ({
       ...prev,
       tags: prev.tags.filter((_, i) => i !== index)
     }))
   }
-  
-  // Add requirement
+
   const addRequirement = () => {
     if (requirementInput.trim() && courseData.requirements.length < 10) {
       setCourseData(prev => ({
@@ -213,16 +372,14 @@ export default function CreateYouTubeCoursePage() {
       setRequirementInput('')
     }
   }
-  
-  // Remove requirement
+
   const removeRequirement = (index: number) => {
     setCourseData(prev => ({
       ...prev,
       requirements: prev.requirements.filter((_, i) => i !== index)
     }))
   }
-  
-  // Add learning outcome
+
   const addOutcome = () => {
     if (outcomeInput.trim() && courseData.learningOutcomes.length < 10) {
       setCourseData(prev => ({
@@ -232,58 +389,65 @@ export default function CreateYouTubeCoursePage() {
       setOutcomeInput('')
     }
   }
-  
-  // Remove learning outcome
+
   const removeOutcome = (index: number) => {
     setCourseData(prev => ({
       ...prev,
       learningOutcomes: prev.learningOutcomes.filter((_, i) => i !== index)
     }))
   }
-  
-  // Module management
+
   const addModule = () => {
-    const newId = Date.now().toString()
-    setModules(prev => [
-      ...prev,
-      {
-        _id: newId,
-        title: `Module ${prev.length + 1}`,
-        description: '',
-        chapters: [
-          {
-            _id: `${newId}-1`,
-            title: 'Chapter 1',
-            lessons: [
-              {
-                _id: `${newId}-1-1`,
-                title: 'Lesson 1',
-                description: '',
-                youtubeUrl: '',
-                duration: 0,
-                isPreview: false,
-                resources: [],
-                subLessons: []
-              }
-            ]
-          }
-        ]
-      }
-    ])
+    const newModule: Module = {
+      _id: generateId(),
+      title: `Module ${modules.length + 1}`,
+      description: '',
+      order: modules.length,
+      chapters: [
+        {
+          _id: generateId(),
+          title: 'Chapter 1',
+          description: '',
+          order: 0,
+          lessons: [
+            {
+              _id: generateId(),
+              title: 'Lesson 1',
+              description: '',
+              duration: 0,
+              isPreview: false,
+              order: 0,
+              resources: [],
+              subLessons: []
+            }
+          ]
+        }
+      ]
+    }
+    
+    setModules(prev => [...prev, newModule])
+    setExpandedModules(prev => [...prev, newModule._id])
   }
-  
-  const updateModule = (index: number, field: keyof Module, value: any) => {
+
+  const updateModule = (moduleIndex: number, field: keyof Module, value: any) => {
     setModules(prev => prev.map((module, i) => 
-      i === index ? { ...module, [field]: value } : module
+      i === moduleIndex ? { ...module, [field]: value } : module
     ))
   }
-  
-  const removeModule = (index: number) => {
+
+  const removeModule = (moduleIndex: number) => {
     if (modules.length > 1) {
-      setModules(prev => prev.filter((_, i) => i !== index))
+      setModules(prev => prev.filter((_, i) => i !== moduleIndex))
+      setExpandedModules(prev => prev.filter(id => id !== modules[moduleIndex]._id))
+    } else {
+      toast({
+        title: 'Cannot Remove',
+        description: 'Course must have at least one module',
+        variant: 'destructive'
+      })
     }
   }
-  
+
   const moveModule = (index: number, direction: 'up' | 'down') => {
     if (
       (direction === 'up' && index === 0) ||
@@ -294,189 +458,247 @@ export default function CreateYouTubeCoursePage() {
     
     const newModules = [...modules]
     const swapIndex = direction === 'up' ? index - 1 : index + 1
+    
+    const tempOrder = newModules[index].order
+    newModules[index].order = newModules[swapIndex].order
+    newModules[swapIndex].order = tempOrder
+    
     ;[newModules[index], newModules[swapIndex]] = [newModules[swapIndex], newModules[index]]
+    
+    newModules.sort((a, b) => a.order - b.order)
+    
     setModules(newModules)
   }
-  
-  // Chapter management
+
   const addChapter = (moduleIndex: number) => {
-    const moduleId = modules[moduleIndex]._id
-    const newId = `${moduleId}-${modules[moduleIndex].chapters.length + 1}`
+    const newChapter: Chapter = {
+      _id: generateId(),
+      title: `Chapter ${modules[moduleIndex].chapters.length + 1}`,
+      description: '',
+      order: modules[moduleIndex].chapters.length,
+      lessons: [
+        {
+          _id: generateId(),
+          title: 'Lesson 1',
+          description: '',
+          duration: 0,
+          isPreview: false,
+          order: 0,
+          resources: [],
+          subLessons: []
+        }
+      ]
+    }
+    
+    setModules(prev => prev.map((module, i) => 
+      i === moduleIndex 
+        ? { ...module, chapters: [...module.chapters, newChapter] }
+        : module
+    ))
+  }
+
+  const updateChapter = (moduleIndex: number, chapterIndex: number, field: keyof Chapter, value: any) => {
+    setModules(prev => prev.map((module, i) => 
+      i === moduleIndex 
+        ? {
+            ...module,
+            chapters: module.chapters.map((chapter, j) => 
+              j === chapterIndex ? { ...chapter, [field]: value } : chapter
+            )
+          }
+        : module
+    ))
+  }
+
+  const removeChapter = (moduleIndex: number, chapterIndex: number) => {
+    if (modules[moduleIndex].chapters.length > 1) {
+      setModules(prev => prev.map((module, i) => 
+        i === moduleIndex 
+          ? { ...module, chapters: module.chapters.filter((_, j) => j !== chapterIndex) }
+          : module
+      ))
+    } else {
+      toast({
+        title: 'Cannot Remove',
+        description: 'Module must have at least one chapter',
+        variant: 'destructive'
+      })
+    }
+  }
+
+  const moveChapter = (moduleIndex: number, chapterIndex: number, direction: 'up' | 'down') => {
+    const chapters = modules[moduleIndex].chapters
+    
+    if (
+      (direction === 'up' && chapterIndex === 0) ||
+      (direction === 'down' && chapterIndex === chapters.length - 1)
+    ) {
+      return
+    }
     
     setModules(prev => prev.map((module, i) => {
-      if (i === moduleIndex) {
-        return {
-          ...module,
-          chapters: [
-            ...module.chapters,
-            {
-              _id: newId,
-              title: `Chapter ${module.chapters.length + 1}`,
-              lessons: [
-                {
-                  _id: `${newId}-1`,
-                  title: 'Lesson 1',
-                  description: '',
-                  youtubeUrl: '',
-                  duration: 0,
-                  isPreview: false,
-                  resources: [],
-                  subLessons: []
-                }
-              ]
-            }
-          ]
-        }
-      }
-      return module
+      if (i !== moduleIndex) return module
+      
+      const newChapters = [...chapters]
+      const swapIndex = direction === 'up' ? chapterIndex - 1 : chapterIndex + 1
+      
+      const tempOrder = newChapters[chapterIndex].order
+      newChapters[chapterIndex].order = newChapters[swapIndex].order
+      newChapters[swapIndex].order = tempOrder
+      
+      ;[newChapters[chapterIndex], newChapters[swapIndex]] = [newChapters[swapIndex], newChapters[chapterIndex]]
+      
+      newChapters.sort((a, b) => a.order - b.order)
+      
+      return { ...module, chapters: newChapters }
     }))
   }
-  
-  const updateChapter = (moduleIndex: number, chapterIndex: number, field: keyof Chapter, value: any) => {
-    setModules(prev => prev.map((module, i) => {
-      if (i === moduleIndex) {
-        const updatedChapters = [...module.chapters]
-        updatedChapters[chapterIndex] = {
-          ...updatedChapters[chapterIndex],
-          [field]: value
-        }
-        return { ...module, chapters: updatedChapters }
-      }
-      return module
-    }))
-  }
-  
-  const removeChapter = (moduleIndex: number, chapterIndex: number) => {
-    setModules(prev => prev.map((module, i) => {
-      if (i === moduleIndex && module.chapters.length > 1) {
-        return {
-          ...module,
-          chapters: module.chapters.filter((_, j) => j !== chapterIndex)
-        }
-      }
-      return module
-    }))
-  }
-  
-  // Lesson management
+
   const addLesson = (moduleIndex: number, chapterIndex: number) => {
+    const newLesson: Lesson = {
+      _id: generateId(),
+      title: `Lesson ${modules[moduleIndex].chapters[chapterIndex].lessons.length + 1}`,
+      description: '',
+      duration: 0,
+      isPreview: false,
+      order: modules[moduleIndex].chapters[chapterIndex].lessons.length,
+      resources: [],
+      subLessons: []
+    }
+    
     setModules(prev => prev.map((module, i) => {
-      if (i === moduleIndex) {
-        const updatedChapters = [...module.chapters]
-        const chapter = updatedChapters[chapterIndex]
-        const newId = `${chapter._id}-${chapter.lessons.length + 1}`
-        
-        updatedChapters[chapterIndex] = {
-          ...chapter,
-          lessons: [
-            ...chapter.lessons,
-            {
-              _id: newId,
-              title: `Lesson ${chapter.lessons.length + 1}`,
-              description: '',
-              youtubeUrl: '',
-              duration: 0,
-              isPreview: false,
-              resources: [],
-              subLessons: []
-            }
-          ]
-        }
-        return { ...module, chapters: updatedChapters }
+      if (i !== moduleIndex) return module
+      
+      return {
+        ...module,
+        chapters: module.chapters.map((chapter, j) => {
+          if (j !== chapterIndex) return chapter
+          
+          return {
+            ...chapter,
+            lessons: [...chapter.lessons, newLesson]
+          }
+        })
       }
-      return module
     }))
   }
-  
-  const updateLesson = (
-    moduleIndex: number, 
-    chapterIndex: number, 
-    lessonIndex: number, 
-    field: keyof Lesson, 
-    value: any
-  ) => {
+
+  const updateLesson = (moduleIndex: number, chapterIndex: number, lessonIndex: number, field: keyof Lesson, value: any) => {
     setModules(prev => prev.map((module, i) => {
-      if (i === moduleIndex) {
-        const updatedChapters = [...module.chapters]
-        const updatedLessons = [...updatedChapters[chapterIndex].lessons]
-        updatedLessons[lessonIndex] = {
-          ...updatedLessons[lessonIndex],
-          [field]: value
-        }
-        updatedChapters[chapterIndex] = {
-          ...updatedChapters[chapterIndex],
-          lessons: updatedLessons
-        }
-        return { ...module, chapters: updatedChapters }
+      if (i !== moduleIndex) return module
+      
+      return {
+        ...module,
+        chapters: module.chapters.map((chapter, j) => {
+          if (j !== chapterIndex) return chapter
+          
+          return {
+            ...chapter,
+            lessons: chapter.lessons.map((lesson, k) => 
+              k === lessonIndex ? { ...lesson, [field]: value } : lesson
+            )
+          }
+        })
       }
-      return module
     }))
   }
-  
+
   const removeLesson = (moduleIndex: number, chapterIndex: number, lessonIndex: number) => {
-    setModules(prev => prev.map((module, i) => {
-      if (i === moduleIndex) {
-        const updatedChapters = [...module.chapters]
-        const updatedLessons = updatedChapters[chapterIndex].lessons.filter((_, j) => j !== lessonIndex)
+    if (modules[moduleIndex].chapters[chapterIndex].lessons.length > 1) {
+      setModules(prev => prev.map((module, i) => {
+        if (i !== moduleIndex) return module
         
-        if (updatedLessons.length === 0) {
-          // Add a default lesson if all are removed
-          updatedLessons.push({
-            _id: `${updatedChapters[chapterIndex]._id}-1`,
-            title: 'Lesson 1',
-            description: '',
-            youtubeUrl: '',
-            duration: 0,
-            isPreview: false,
-            resources: [],
-            subLessons: []
+        return {
+          ...module,
+          chapters: module.chapters.map((chapter, j) => {
+            if (j !== chapterIndex) return chapter
+            
+            return {
+              ...chapter,
+              lessons: chapter.lessons.filter((_, k) => k !== lessonIndex)
+            }
           })
         }
-        
-        updatedChapters[chapterIndex] = {
-          ...updatedChapters[chapterIndex],
-          lessons: updatedLessons
-        }
-        return { ...module, chapters: updatedChapters }
-      }
-      return module
-    }))
+      }))
+    } else {
+      toast({
+        title: 'Cannot Remove',
+        description: 'Chapter must have at least one lesson',
+        variant: 'destructive'
+      })
+    }
   }
-  
-  // Sub-lesson management
-  const addSubLesson = (moduleIndex: number, chapterIndex: number, lessonIndex: number) => {
+
+  const moveLesson = (moduleIndex: number, chapterIndex: number, lessonIndex: number, direction: 'up' | 'down') => {
+    const lessons = modules[moduleIndex].chapters[chapterIndex].lessons
+    
+    if (
+      (direction === 'up' && lessonIndex === 0) ||
+      (direction === 'down' && lessonIndex === lessons.length - 1)
+    ) {
+      return
+    }
+    
     setModules(prev => prev.map((module, i) => {
-      if (i === moduleIndex) {
-        const updatedChapters = [...module.chapters]
-        const updatedLessons = [...updatedChapters[chapterIndex].lessons]
-        const lesson = updatedLessons[lessonIndex]
-        const newId = `${lesson._id}-${lesson.subLessons.length + 1}`
-        
-        updatedLessons[lessonIndex] = {
-          ...lesson,
-          subLessons: [
-            ...lesson.subLessons,
-            {
-              _id: newId,
-              title: `Sub-lesson ${lesson.subLessons.length + 1}`,
-              description: '',
-              youtubeUrl: '',
-              duration: 0,
-              isPreview: false,
-              resources: []
-            }
-          ]
-        }
-        updatedChapters[chapterIndex] = {
-          ...updatedChapters[chapterIndex],
-          lessons: updatedLessons
-        }
-        return { ...module, chapters: updatedChapters }
+      if (i !== moduleIndex) return module
+      
+      return {
+        ...module,
+        chapters: module.chapters.map((chapter, j) => {
+          if (j !== chapterIndex) return chapter
+          
+          const newLessons = [...lessons]
+          const swapIndex = direction === 'up' ? lessonIndex - 1 : lessonIndex + 1
+          
+          const tempOrder = newLessons[lessonIndex].order
+          newLessons[lessonIndex].order = newLessons[swapIndex].order
+          newLessons[swapIndex].order = tempOrder
+          
+          ;[newLessons[lessonIndex], newLessons[swapIndex]] = [newLessons[swapIndex], newLessons[lessonIndex]]
+          
+          newLessons.sort((a, b) => a.order - b.order)
+          
+          return { ...chapter, lessons: newLessons }
+        })
       }
-      return module
     }))
   }
-  
+
+  const addSubLesson = (moduleIndex: number, chapterIndex: number, lessonIndex: number) => {
+    const newSubLesson: SubLesson = {
+      _id: generateId(),
+      title: `Sub-lesson ${modules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].subLessons.length + 1}`,
+      description: '',
+      duration: 0,
+      isPreview: false,
+      order: modules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].subLessons.length,
+      resources: []
+    }
+    
+    setModules(prev => prev.map((module, i) => {
+      if (i !== moduleIndex) return module
+      
+      return {
+        ...module,
+        chapters: module.chapters.map((chapter, j) => {
+          if (j !== chapterIndex) return chapter
+          
+          return {
+            ...chapter,
+            lessons: chapter.lessons.map((lesson, k) => {
+              if (k !== lessonIndex) return lesson
+              
+              return {
+                ...lesson,
+                subLessons: [...lesson.subLessons, newSubLesson]
+              }
+            })
+          }
+        })
+      }
+    }))
+  }
+
   const updateSubLesson = (
     moduleIndex: number, 
     chapterIndex: number, 
@@ -486,30 +708,31 @@ export default function CreateYouTubeCoursePage() {
     value: any
   ) => {
     setModules(prev => prev.map((module, i) => {
-      if (i === moduleIndex) {
-        const updatedChapters = [...module.chapters]
-        const updatedLessons = [...updatedChapters[chapterIndex].lessons]
-        const updatedSubLessons = [...updatedLessons[lessonIndex].subLessons]
-        
-        updatedSubLessons[subLessonIndex] = {
-          ...updatedSubLessons[subLessonIndex],
-          [field]: value
-        }
-        
-        updatedLessons[lessonIndex] = {
-          ...updatedLessons[lessonIndex],
-          subLessons: updatedSubLessons
-        }
-        updatedChapters[chapterIndex] = {
-          ...updatedChapters[chapterIndex],
-          lessons: updatedLessons
-        }
-        return { ...module, chapters: updatedChapters }
+      if (i !== moduleIndex) return module
+      
+      return {
+        ...module,
+        chapters: module.chapters.map((chapter, j) => {
+          if (j !== chapterIndex) return chapter
+          
+          return {
+            ...chapter,
+            lessons: chapter.lessons.map((lesson, k) => {
+              if (k !== lessonIndex) return lesson
+              
+              return {
+                ...lesson,
+                subLessons: lesson.subLessons.map((sub, s) => 
+                  s === subLessonIndex ? { ...sub, [field]: value } : sub
+                )
+              }
+            })
+          }
+        })
       }
-      return module
     }))
   }
-  
+
   const removeSubLesson = (
     moduleIndex: number, 
     chapterIndex: number, 
@@ -517,84 +740,85 @@ export default function CreateYouTubeCoursePage() {
     subLessonIndex: number
   ) => {
     setModules(prev => prev.map((module, i) => {
-      if (i === moduleIndex) {
-        const updatedChapters = [...module.chapters]
-        const updatedLessons = [...updatedChapters[chapterIndex].lessons]
-        const updatedSubLessons = updatedLessons[lessonIndex].subLessons.filter((_, j) => j !== subLessonIndex)
-        
-        updatedLessons[lessonIndex] = {
-          ...updatedLessons[lessonIndex],
-          subLessons: updatedSubLessons
-        }
-        updatedChapters[chapterIndex] = {
-          ...updatedChapters[chapterIndex],
-          lessons: updatedLessons
-        }
-        return { ...module, chapters: updatedChapters }
+      if (i !== moduleIndex) return module
+      
+      return {
+        ...module,
+        chapters: module.chapters.map((chapter, j) => {
+          if (j !== chapterIndex) return chapter
+          
+          return {
+            ...chapter,
+            lessons: chapter.lessons.map((lesson, k) => {
+              if (k !== lessonIndex) return lesson
+              
+              return {
+                ...lesson,
+                subLessons: lesson.subLessons.filter((_, s) => s !== subLessonIndex)
+              }
+            })
+          }
+        })
       }
-      return module
     }))
   }
-  
-  // Resource management
+
   const addResource = (
     moduleIndex: number, 
     chapterIndex: number, 
     lessonIndex: number, 
     subLessonIndex?: number
   ) => {
+    const newResource: LessonResource = {
+      _id: generateId(),
+      title: 'New Resource',
+      url: '',
+      type: 'link'
+    }
+
     setModules(prev => prev.map((module, i) => {
-      if (i === moduleIndex) {
-        const updatedChapters = [...module.chapters]
-        const updatedLessons = [...updatedChapters[chapterIndex].lessons]
-        
-        if (subLessonIndex !== undefined) {
-          const updatedSubLessons = [...updatedLessons[lessonIndex].subLessons]
-          const subLesson = updatedSubLessons[subLessonIndex]
+      if (i !== moduleIndex) return module
+      
+      return {
+        ...module,
+        chapters: module.chapters.map((chapter, j) => {
+          if (j !== chapterIndex) return chapter
           
-          updatedSubLessons[subLessonIndex] = {
-            ...subLesson,
-            resources: [
-              ...subLesson.resources,
-              {
-                _id: Date.now().toString(),
-                title: `Resource ${subLesson.resources.length + 1}`,
-                url: '',
-                type: 'link'
-              }
-            ]
+          if (subLessonIndex !== undefined) {
+            return {
+              ...chapter,
+              lessons: chapter.lessons.map((lesson, k) => {
+                if (k !== lessonIndex) return lesson
+                
+                return {
+                  ...lesson,
+                  subLessons: lesson.subLessons.map((sub, s) => {
+                    if (s !== subLessonIndex) return sub
+                    return {
+                      ...sub,
+                      resources: [...sub.resources, newResource]
+                    }
+                  })
+                }
+              })
+            }
+          } else {
+            return {
+              ...chapter,
+              lessons: chapter.lessons.map((lesson, k) => {
+                if (k !== lessonIndex) return lesson
+                return {
+                  ...lesson,
+                  resources: [...lesson.resources, newResource]
+                }
+              })
+            }
           }
-          
-          updatedLessons[lessonIndex] = {
-            ...updatedLessons[lessonIndex],
-            subLessons: updatedSubLessons
-          }
-        } else {
-          const lesson = updatedLessons[lessonIndex]
-          updatedLessons[lessonIndex] = {
-            ...lesson,
-            resources: [
-              ...lesson.resources,
-              {
-                _id: Date.now().toString(),
-                title: `Resource ${lesson.resources.length + 1}`,
-                url: '',
-                type: 'link'
-              }
-            ]
-          }
-        }
-        
-        updatedChapters[chapterIndex] = {
-          ...updatedChapters[chapterIndex],
-          lessons: updatedLessons
-        }
-        return { ...module, chapters: updatedChapters }
+        })
       }
-      return module
     }))
   }
-  
+
   const updateResource = (
     moduleIndex: number, 
     chapterIndex: number, 
@@ -605,51 +829,52 @@ export default function CreateYouTubeCoursePage() {
     subLessonIndex?: number
   ) => {
     setModules(prev => prev.map((module, i) => {
-      if (i === moduleIndex) {
-        const updatedChapters = [...module.chapters]
-        const updatedLessons = [...updatedChapters[chapterIndex].lessons]
-        
-        if (subLessonIndex !== undefined) {
-          const updatedSubLessons = [...updatedLessons[lessonIndex].subLessons]
-          const updatedResources = [...updatedSubLessons[subLessonIndex].resources]
+      if (i !== moduleIndex) return module
+      
+      return {
+        ...module,
+        chapters: module.chapters.map((chapter, j) => {
+          if (j !== chapterIndex) return chapter
           
-          updatedResources[resourceIndex] = {
-            ...updatedResources[resourceIndex],
-            [field]: value
+          if (subLessonIndex !== undefined) {
+            return {
+              ...chapter,
+              lessons: chapter.lessons.map((lesson, k) => {
+                if (k !== lessonIndex) return lesson
+                
+                return {
+                  ...lesson,
+                  subLessons: lesson.subLessons.map((sub, s) => {
+                    if (s !== subLessonIndex) return sub
+                    return {
+                      ...sub,
+                      resources: sub.resources.map((res, r) => 
+                        r === resourceIndex ? { ...res, [field]: value } : res
+                      )
+                    }
+                  })
+                }
+              })
+            }
+          } else {
+            return {
+              ...chapter,
+              lessons: chapter.lessons.map((lesson, k) => {
+                if (k !== lessonIndex) return lesson
+                return {
+                  ...lesson,
+                  resources: lesson.resources.map((res, r) => 
+                    r === resourceIndex ? { ...res, [field]: value } : res
+                  )
+                }
+              })
+            }
           }
-          
-          updatedSubLessons[subLessonIndex] = {
-            ...updatedSubLessons[subLessonIndex],
-            resources: updatedResources
-          }
-          
-          updatedLessons[lessonIndex] = {
-            ...updatedLessons[lessonIndex],
-            subLessons: updatedSubLessons
-          }
-        } else {
-          const updatedResources = [...updatedLessons[lessonIndex].resources]
-          updatedResources[resourceIndex] = {
-            ...updatedResources[resourceIndex],
-            [field]: value
-          }
-          
-          updatedLessons[lessonIndex] = {
-            ...updatedLessons[lessonIndex],
-            resources: updatedResources
-          }
-        }
-        
-        updatedChapters[chapterIndex] = {
-          ...updatedChapters[chapterIndex],
-          lessons: updatedLessons
-        }
-        return { ...module, chapters: updatedChapters }
+        })
       }
-      return module
     }))
   }
-  
+
   const removeResource = (
     moduleIndex: number, 
     chapterIndex: number, 
@@ -658,42 +883,48 @@ export default function CreateYouTubeCoursePage() {
     subLessonIndex?: number
   ) => {
     setModules(prev => prev.map((module, i) => {
-      if (i === moduleIndex) {
-        const updatedChapters = [...module.chapters]
-        const updatedLessons = [...updatedChapters[chapterIndex].lessons]
-        
-        if (subLessonIndex !== undefined) {
-          const updatedSubLessons = [...updatedLessons[lessonIndex].subLessons]
-          const updatedResources = updatedSubLessons[subLessonIndex].resources.filter((_, j) => j !== resourceIndex)
+      if (i !== moduleIndex) return module
+      
+      return {
+        ...module,
+        chapters: module.chapters.map((chapter, j) => {
+          if (j !== chapterIndex) return chapter
           
-          updatedSubLessons[subLessonIndex] = {
-            ...updatedSubLessons[subLessonIndex],
-            resources: updatedResources
+          if (subLessonIndex !== undefined) {
+            return {
+              ...chapter,
+              lessons: chapter.lessons.map((lesson, k) => {
+                if (k !== lessonIndex) return lesson
+                
+                return {
+                  ...lesson,
+                  subLessons: lesson.subLessons.map((sub, s) => {
+                    if (s !== subLessonIndex) return sub
+                    return {
+                      ...sub,
+                      resources: sub.resources.filter((_, r) => r !== resourceIndex)
+                    }
+                  })
+                }
+              })
+            }
+          } else {
+            return {
+              ...chapter,
+              lessons: chapter.lessons.map((lesson, k) => {
+                if (k !== lessonIndex) return lesson
+                return {
+                  ...lesson,
+                  resources: lesson.resources.filter((_, r) => r !== resourceIndex)
+                }
+              })
+            }
           }
-          
-          updatedLessons[lessonIndex] = {
-            ...updatedLessons[lessonIndex],
-            subLessons: updatedSubLessons
-          }
-        } else {
-          const updatedResources = updatedLessons[lessonIndex].resources.filter((_, j) => j !== resourceIndex)
-          updatedLessons[lessonIndex] = {
-            ...updatedLessons[lessonIndex],
-            resources: updatedResources
-          }
-        }
-        
-        updatedChapters[chapterIndex] = {
-          ...updatedChapters[chapterIndex],
-          lessons: updatedLessons
-        }
-        return { ...module, chapters: updatedChapters }
+        })
       }
-      return module
     }))
   }
-  
-  // Validate course data
+
   const validateCourse = (): string[] => {
     const errors: string[] = []
     
@@ -703,36 +934,18 @@ export default function CreateYouTubeCoursePage() {
     if (!courseData.thumbnail.trim()) errors.push('Thumbnail URL is required')
     if (courseData.price < 0) errors.push('Price cannot be negative')
     
-    // Validate YouTube URLs
-    modules.forEach((module, moduleIndex) => {
-      module.chapters.forEach((chapter, chapterIndex) => {
-        chapter.lessons.forEach((lesson, lessonIndex) => {
-          if (lesson.youtubeUrl && parseYouTubeUrl(lesson.youtubeUrl) === null) {
-            errors.push(`Invalid YouTube URL in Module ${moduleIndex + 1}, Chapter ${chapterIndex + 1}, Lesson ${lessonIndex + 1}`)
-          }
-          
-          lesson.subLessons.forEach((subLesson, subLessonIndex) => {
-            if (subLesson.youtubeUrl && parseYouTubeUrl(subLesson.youtubeUrl) === null) {
-              errors.push(`Invalid YouTube URL in Module ${moduleIndex + 1}, Chapter ${chapterIndex + 1}, Lesson ${lessonIndex + 1}, Sub-lesson ${subLessonIndex + 1}`)
-            }
-          })
-        })
-      })
-    })
-    
     return errors
   }
-  
-  // Calculate total duration
+
   const calculateTotalDuration = () => {
     let totalMinutes = 0
     
     modules.forEach(module => {
       module.chapters.forEach(chapter => {
         chapter.lessons.forEach(lesson => {
-          totalMinutes += lesson.duration || 0
+          totalMinutes += Math.round(lesson.duration / 60)
           lesson.subLessons.forEach(subLesson => {
-            totalMinutes += subLesson.duration || 0
+            totalMinutes += Math.round(subLesson.duration / 60)
           })
         })
       })
@@ -746,8 +959,7 @@ export default function CreateYouTubeCoursePage() {
     }
     return `${minutes}m`
   }
-  
-  // Calculate total lessons
+
   const calculateTotalLessons = () => {
     let total = 0
     
@@ -762,8 +974,7 @@ export default function CreateYouTubeCoursePage() {
     
     return total
   }
-  
-  // Submit course
+
   const handleSubmit = async () => {
     const errors = validateCourse()
     if (errors.length > 0) {
@@ -778,69 +989,6 @@ export default function CreateYouTubeCoursePage() {
     setLoading(true)
     
     try {
-      // Transform modules with proper YouTube data
-      const transformedModules = modules.map((module, moduleIndex) => ({
-        title: module.title,
-        description: module.description,
-        thumbnailUrl: module.thumbnailUrl,
-        order: moduleIndex,
-        chapters: module.chapters.map((chapter, chapterIndex) => ({
-          title: chapter.title,
-          description: chapter.description,
-          order: chapterIndex,
-          lessons: chapter.lessons.map((lesson, lessonIndex) => {
-            const lessonVideoSource = lesson.youtubeUrl ? parseYouTubeUrl(lesson.youtubeUrl) : undefined
-            
-            return {
-              title: lesson.title,
-              description: lesson.description,
-              content: lesson.content,
-              videoSource: lessonVideoSource ? {
-                type: 'youtube' as const,
-                videoId: lessonVideoSource.videoId,
-                url: lessonVideoSource.url,
-                thumbnailUrl: lessonVideoSource.thumbnailUrl,
-                duration: lesson.duration
-              } : undefined,
-              duration: lesson.duration,
-              isPreview: lesson.isPreview,
-              resources: lesson.resources.map(resource => ({
-                title: resource.title,
-                url: resource.url,
-                type: resource.type,
-                description: resource.description
-              })),
-              order: lessonIndex,
-              subLessons: lesson.subLessons.map((subLesson, subLessonIndex) => {
-                const subLessonVideoSource = subLesson.youtubeUrl ? parseYouTubeUrl(subLesson.youtubeUrl) : undefined
-                
-                return {
-                  title: subLesson.title,
-                  description: subLesson.description,
-                  content: subLesson.content,
-                  videoSource: subLessonVideoSource ? {
-                    type: 'youtube' as const,
-                    videoId: subLessonVideoSource.videoId,
-                    url: subLessonVideoSource.url,
-                    thumbnailUrl: subLessonVideoSource.thumbnailUrl,
-                    duration: subLesson.duration
-                  } : undefined,
-                  duration: subLesson.duration,
-                  isPreview: subLesson.isPreview,
-                  resources: subLesson.resources.map(resource => ({
-                    title: resource.title,
-                    url: resource.url,
-                    type: resource.type,
-                    description: resource.description
-                  })),
-                  order: subLessonIndex
-                }
-              })
-            }
-          })
-        }))
-      }))
-      
       const coursePayload = {
         ...courseData,
         previewVideo: previewVideo ? {
@@ -849,7 +997,7 @@ export default function CreateYouTubeCoursePage() {
           url: previewVideo.url,
           thumbnailUrl: previewVideo.thumbnailUrl
         } : undefined,
-        modules: transformedModules
+        modules: modules
       }
       
       const response = await fetch('/api/admin/youtube-courses', {
@@ -884,29 +1032,17 @@ export default function CreateYouTubeCoursePage() {
       setLoading(false)
     }
   }
-  
-  // Preview YouTube video
-  const handlePreviewYouTube = () => {
-    const video = parseYouTubeUrl(previewVideoUrl)
-    if (video) {
-      setPreviewVideo(video)
-    } else {
-      setPreviewVideo(null)
-    }
-  }
-  
+
   if (previewMode) {
     return (
       <div className="min-h-screen bg-gray-50 p-6">
         <div className="max-w-6xl mx-auto">
           <div className="flex justify-between items-center mb-6">
             <h1 className="text-3xl font-bold">Course Preview</h1>
-            <div className="flex gap-2">
-              <Button onClick={() => setPreviewMode(false)} variant="outline">
-                <EyeOff className="w-4 h-4 mr-2" />
-                Exit Preview
-              </Button>
-            </div>
+            <Button onClick={() => setPreviewMode(false)} variant="outline">
+              <EyeOff className="w-4 h-4 mr-2" />
+              Exit Preview
+            </Button>
           </div>
           
           <Card>
@@ -914,7 +1050,7 @@ export default function CreateYouTubeCoursePage() {
               {/* Course Header */}
               <div className="mb-8">
                 <div className="flex gap-4 mb-4">
-                  <Badge className="bg-blue-500">{courseData.category}</Badge>
+                  <Badge className="bg-blue-500">{courseData.category || 'Uncategorized'}</Badge>
                   <Badge className={
                     courseData.level === 'beginner' ? 'bg-green-500' :
                     courseData.level === 'intermediate' ? 'bg-yellow-500' :
@@ -929,16 +1065,27 @@ export default function CreateYouTubeCoursePage() {
                   )}
                 </div>
                 
-                <h2 className="text-2xl font-bold mb-4">{courseData.title}</h2>
-                <p className="text-gray-600 mb-6">{courseData.shortDescription}</p>
+                <h2 className="text-2xl font-bold mb-4">{courseData.title || 'Untitled Course'}</h2>
+                <p className="text-gray-600 mb-6">{courseData.shortDescription || 'No description provided'}</p>
                 
-                {/* Preview Video */}
+                {courseData.thumbnail && (
+                  <div className="mb-4">
+                    <div className="aspect-video rounded-lg overflow-hidden">
+                      <CourseImage 
+                        src={courseData.thumbnail} 
+                        alt={courseData.title} 
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  </div>
+                )}
+                
                 {previewVideo && (
                   <div className="mb-6">
                     <h3 className="text-lg font-semibold mb-2">Preview Video</h3>
                     <div className="aspect-video rounded-lg overflow-hidden">
                       <iframe
-                        src={previewVideo.url}
+                        src={`https://www.youtube.com/embed/${previewVideo.videoId}`}
                         title="YouTube video player"
                         className="w-full h-full"
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -999,19 +1146,18 @@ export default function CreateYouTubeCoursePage() {
                                   {lesson.description && (
                                     <p className="text-sm text-gray-600 mb-1">{lesson.description}</p>
                                   )}
-                                  {lesson.youtubeUrl && (
+                                  {lesson.videoSource && (
                                     <div className="flex items-center text-sm text-gray-500 mb-1">
-                                      <Video className="w-4 h-4 mr-1" />
-                                      YouTube Video: {parseYouTubeUrl(lesson.youtubeUrl)?.videoId}
+                                      <Youtube className="w-4 h-4 mr-1 text-red-600" />
+                                      YouTube Video: {lesson.videoSource.videoId}
                                     </div>
                                   )}
                                   {lesson.duration > 0 && (
                                     <div className="text-sm text-gray-500">
-                                      Duration: {lesson.duration} minutes
+                                      Duration: {Math.round(lesson.duration / 60)} minutes
                                     </div>
                                   )}
                                   
-                                  {/* Sub-lessons */}
                                   {lesson.subLessons.length > 0 && (
                                     <div className="ml-4 mt-2 space-y-2">
                                       {lesson.subLessons.map((subLesson, subLessonIndex) => (
@@ -1022,9 +1168,9 @@ export default function CreateYouTubeCoursePage() {
                                           {subLesson.description && (
                                             <p className="text-xs text-gray-600">{subLesson.description}</p>
                                           )}
-                                          {subLesson.youtubeUrl && (
+                                          {subLesson.videoSource && (
                                             <div className="flex items-center text-xs text-gray-500">
-                                              <Video className="w-3 h-3 mr-1" />
+                                              <Youtube className="w-3 h-3 mr-1 text-red-600" />
                                               YouTube Video
                                             </div>
                                           )}
@@ -1051,7 +1197,7 @@ export default function CreateYouTubeCoursePage() {
   
   return (
     <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-7xl mx-auto">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-3xl font-bold">Create YouTube Course</h1>
           <div className="flex gap-2">
@@ -1062,9 +1208,9 @@ export default function CreateYouTubeCoursePage() {
           </div>
         </div>
         
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column - Course Details */}
-          <div className="lg:col-span-2 space-y-6">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Main Content - 3 columns */}
+          <div className="lg:col-span-3 space-y-6">
             {/* Basic Information */}
             <Card>
               <CardHeader>
@@ -1086,7 +1232,7 @@ export default function CreateYouTubeCoursePage() {
                 </div>
                 
                 <div className="space-y-2">
-                  <Label htmlFor="shortDescription">Short Description * (max 200 chars)</Label>
+                  <Label htmlFor="shortDescription">Short Description *</Label>
                   <Textarea
                     id="shortDescription"
                     value={courseData.shortDescription}
@@ -1142,71 +1288,112 @@ export default function CreateYouTubeCoursePage() {
                 
                 <div className="space-y-2">
                   <Label htmlFor="thumbnail">Thumbnail URL *</Label>
-                  <Input
-                    id="thumbnail"
-                    value={courseData.thumbnail}
-                    onChange={(e) => setCourseData(prev => ({ ...prev, thumbnail: e.target.value }))}
-                    placeholder="https://example.com/image.jpg"
-                  />
+                  <div className="flex gap-2">
+                    <Input
+                      id="thumbnail"
+                      value={courseData.thumbnail}
+                      onChange={(e) => setCourseData(prev => ({ ...prev, thumbnail: e.target.value }))}
+                      placeholder="https://example.com/image.jpg"
+                    />
+                  </div>
+                  {courseData.thumbnail && (
+                    <div className="mt-2">
+                      <Label className="text-sm text-gray-500 mb-2">Thumbnail Preview:</Label>
+                      <CourseImage 
+                        src={courseData.thumbnail} 
+                        alt="Thumbnail preview" 
+                        className="h-40 w-full object-cover rounded border"
+                      />
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
             
-            {/* Pricing */}
+            {/* Course Preview Video */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Users className="w-5 h-5" />
-                  Pricing & Enrollment
+                  <Youtube className="w-5 h-5" />
+                  Course Preview Video (Optional)
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Free Course</Label>
-                    <p className="text-sm text-gray-500">Make this course free for all users</p>
+                {previewVideo ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Youtube className="w-5 h-5 text-red-600" />
+                        <span className="font-medium">{previewVideo.videoId}</span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPreviewVideo(null)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                    <div className="aspect-video rounded-lg overflow-hidden border">
+                      <iframe
+                        src={`https://www.youtube.com/embed/${previewVideo.videoId}`}
+                        className="w-full h-full"
+                        allowFullScreen
+                      />
+                    </div>
                   </div>
-                  <Switch
-                    checked={courseData.isFree}
-                    onCheckedChange={(checked) => 
-                      setCourseData(prev => ({ ...prev, isFree: checked, price: checked ? 0 : prev.price }))
-                    }
-                  />
-                </div>
-                
-                {!courseData.isFree && (
+                ) : (
                   <div className="space-y-2">
-                    <Label htmlFor="price">Price (NPR)</Label>
-                    <Input
-                      id="price"
-                      type="number"
-                      value={courseData.price}
-                      onChange={(e) => setCourseData(prev => ({ 
-                        ...prev, 
-                        price: Math.max(0, parseInt(e.target.value) || 0)
-                      }))}
-                      placeholder="0"
-                      min="0"
-                    />
+                    <Label>YouTube URL for Preview</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={previewVideoUrl}
+                        onChange={(e) => setPreviewVideoUrl(e.target.value)}
+                        placeholder="https://www.youtube.com/watch?v=..."
+                      />
+                      <Button
+                        type="button"
+                        onClick={handlePreviewYouTube}
+                      >
+                        <Plus className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </div>
                 )}
-                
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Manual Enrollment</Label>
-                    <p className="text-sm text-gray-500">Require admin approval for access</p>
+              </CardContent>
+            </Card>
+            
+            {/* Thumbnail Helper */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ImageIcon className="w-5 h-5" />
+                  Thumbnail Helper
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Auto-fill from YouTube</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Paste YouTube URL to auto-fill thumbnail"
+                      onBlur={(e) => autoFillThumbnailFromYouTube(e.target.value)}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter') {
+                          autoFillThumbnailFromYouTube(e.currentTarget.value)
+                        }
+                      }}
+                    />
                   </div>
-                  <Switch
-                    checked={courseData.manualEnrollmentEnabled}
-                    onCheckedChange={(checked) => 
-                      setCourseData(prev => ({ ...prev, manualEnrollmentEnabled: checked }))
-                    }
-                  />
+                  <p className="text-xs text-gray-500">
+                    Enter any YouTube URL to automatically set the course thumbnail
+                  </p>
                 </div>
               </CardContent>
             </Card>
             
-            {/* Course Content */}
+            {/* Course Content Modules */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -1215,28 +1402,18 @@ export default function CreateYouTubeCoursePage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-6">
+                <div className="space-y-4">
                   {modules.map((module, moduleIndex) => (
                     <div key={module._id} className="border rounded-lg p-4">
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-2">
+                          <DragHandle
+                            onMoveUp={() => moveModule(moduleIndex, 'up')}
+                            onMoveDown={() => moveModule(moduleIndex, 'down')}
+                            canMoveUp={moduleIndex > 0}
+                            canMoveDown={moduleIndex < modules.length - 1}
+                          />
                           <h3 className="font-semibold">Module {moduleIndex + 1}</h3>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => moveModule(moduleIndex, 'up')}
-                            disabled={moduleIndex === 0}
-                          >
-                            <ChevronUp className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => moveModule(moduleIndex, 'down')}
-                            disabled={moduleIndex === modules.length - 1}
-                          >
-                            <ChevronDown className="w-4 h-4" />
-                          </Button>
                         </div>
                         <div className="flex gap-2">
                           <Button
@@ -1252,7 +1429,7 @@ export default function CreateYouTubeCoursePage() {
                       
                       <div className="space-y-4">
                         <div className="space-y-2">
-                          <Label>Module Title</Label>
+                          <Label>Module Title *</Label>
                           <Input
                             value={module.title}
                             onChange={(e) => updateModule(moduleIndex, 'title', e.target.value)}
@@ -1263,12 +1440,14 @@ export default function CreateYouTubeCoursePage() {
                         <div className="space-y-2">
                           <Label>Module Description (Optional)</Label>
                           <Textarea
-                            value={module.description}
+                            value={module.description || ''}
                             onChange={(e) => updateModule(moduleIndex, 'description', e.target.value)}
                             placeholder="Brief module description"
                             rows={2}
                           />
                         </div>
+                        
+                        <Separator />
                         
                         {/* Chapters */}
                         <div className="space-y-4">
@@ -1277,8 +1456,9 @@ export default function CreateYouTubeCoursePage() {
                             <Button
                               size="sm"
                               onClick={() => addChapter(moduleIndex)}
+                              variant="outline"
                             >
-                              <Plus className="w-4 h-4 mr-1" />
+                              <Plus className="w-4 h-4 mr-2" />
                               Add Chapter
                             </Button>
                           </div>
@@ -1287,6 +1467,12 @@ export default function CreateYouTubeCoursePage() {
                             <div key={chapter._id} className="border-l-2 border-blue-200 pl-4">
                               <div className="flex items-center justify-between mb-2">
                                 <div className="flex items-center gap-2">
+                                  <DragHandle
+                                    onMoveUp={() => moveChapter(moduleIndex, chapterIndex, 'up')}
+                                    onMoveDown={() => moveChapter(moduleIndex, chapterIndex, 'down')}
+                                    canMoveUp={chapterIndex > 0}
+                                    canMoveDown={chapterIndex < module.chapters.length - 1}
+                                  />
                                   <h5 className="font-medium">Chapter {chapterIndex + 1}</h5>
                                 </div>
                                 <div className="flex gap-2">
@@ -1303,7 +1489,7 @@ export default function CreateYouTubeCoursePage() {
                               
                               <div className="space-y-4">
                                 <div className="space-y-2">
-                                  <Label>Chapter Title</Label>
+                                  <Label>Chapter Title *</Label>
                                   <Input
                                     value={chapter.title}
                                     onChange={(e) => updateChapter(moduleIndex, chapterIndex, 'title', e.target.value)}
@@ -1314,22 +1500,25 @@ export default function CreateYouTubeCoursePage() {
                                 <div className="space-y-2">
                                   <Label>Chapter Description (Optional)</Label>
                                   <Textarea
-                                    value={chapter.description}
+                                    value={chapter.description || ''}
                                     onChange={(e) => updateChapter(moduleIndex, chapterIndex, 'description', e.target.value)}
                                     placeholder="Brief chapter description"
                                     rows={2}
                                   />
                                 </div>
                                 
+                                <Separator />
+                                
                                 {/* Lessons */}
                                 <div className="space-y-4">
                                   <div className="flex items-center justify-between">
-                                    <h6 className="font-medium">Lessons</h6>
+                                    <h5 className="font-medium">Lessons</h5>
                                     <Button
                                       size="sm"
                                       onClick={() => addLesson(moduleIndex, chapterIndex)}
+                                      variant="outline"
                                     >
-                                      <Plus className="w-4 h-4 mr-1" />
+                                      <Plus className="w-4 h-4 mr-2" />
                                       Add Lesson
                                     </Button>
                                   </div>
@@ -1338,13 +1527,23 @@ export default function CreateYouTubeCoursePage() {
                                     <div key={lesson._id} className="border-l-2 border-green-200 pl-4">
                                       <div className="flex items-center justify-between mb-2">
                                         <div className="flex items-center gap-2">
+                                          <DragHandle
+                                            onMoveUp={() => moveLesson(moduleIndex, chapterIndex, lessonIndex, 'up')}
+                                            onMoveDown={() => moveLesson(moduleIndex, chapterIndex, lessonIndex, 'down')}
+                                            canMoveUp={lessonIndex > 0}
+                                            canMoveDown={lessonIndex < chapter.lessons.length - 1}
+                                          />
                                           <h6 className="font-medium">Lesson {lessonIndex + 1}</h6>
+                                          {lesson.isPreview && (
+                                            <Badge variant="outline" className="text-xs">Preview</Badge>
+                                          )}
                                         </div>
                                         <div className="flex gap-2">
                                           <Button
                                             size="sm"
                                             variant="outline"
                                             onClick={() => removeLesson(moduleIndex, chapterIndex, lessonIndex)}
+                                            disabled={chapter.lessons.length <= 1}
                                           >
                                             <Trash2 className="w-4 h-4" />
                                           </Button>
@@ -1353,7 +1552,7 @@ export default function CreateYouTubeCoursePage() {
                                       
                                       <div className="space-y-4">
                                         <div className="space-y-2">
-                                          <Label>Lesson Title</Label>
+                                          <Label>Lesson Title *</Label>
                                           <Input
                                             value={lesson.title}
                                             onChange={(e) => updateLesson(moduleIndex, chapterIndex, lessonIndex, 'title', e.target.value)}
@@ -1372,28 +1571,20 @@ export default function CreateYouTubeCoursePage() {
                                         </div>
                                         
                                         <div className="space-y-2">
-                                          <Label>YouTube URL (Optional)</Label>
+                                          <Label>YouTube Video (Optional)</Label>
                                           <div className="flex gap-2">
                                             <Input
-                                              value={lesson.youtubeUrl}
-                                              onChange={(e) => updateLesson(moduleIndex, chapterIndex, lessonIndex, 'youtubeUrl', e.target.value)}
+                                              value={lesson.videoSource?.videoId || ''}
+                                              onChange={(e) => handleLessonYouTubeVideo(moduleIndex, chapterIndex, lessonIndex, e.target.value)}
                                               placeholder="https://youtube.com/watch?v=..."
                                             />
-                                            {lesson.youtubeUrl && (
+                                            {lesson.videoSource && (
                                               <Button
                                                 size="sm"
                                                 variant="outline"
-                                                onClick={() => {
-                                                  const video = parseYouTubeUrl(lesson.youtubeUrl!)
-                                                  if (video) {
-                                                    toast({
-                                                      title: 'Valid YouTube URL',
-                                                      description: `Video ID: ${video.videoId}`,
-                                                    })
-                                                  }
-                                                }}
+                                                onClick={() => updateLesson(moduleIndex, chapterIndex, lessonIndex, 'videoSource', undefined)}
                                               >
-                                                <Check className="w-4 h-4" />
+                                                <Trash2 className="w-4 h-4" />
                                               </Button>
                                             )}
                                           </div>
@@ -1404,8 +1595,8 @@ export default function CreateYouTubeCoursePage() {
                                             <Label>Duration (minutes)</Label>
                                             <Input
                                               type="number"
-                                              value={lesson.duration}
-                                              onChange={(e) => updateLesson(moduleIndex, chapterIndex, lessonIndex, 'duration', parseInt(e.target.value) || 0)}
+                                              value={Math.round(lesson.duration / 60)}
+                                              onChange={(e) => updateLesson(moduleIndex, chapterIndex, lessonIndex, 'duration', (parseInt(e.target.value) || 0) * 60)}
                                               placeholder="0"
                                               min="0"
                                             />
@@ -1421,21 +1612,34 @@ export default function CreateYouTubeCoursePage() {
                                                 }
                                               />
                                               <span className="text-sm text-gray-500">
-                                                Allow preview without enrollment
+                                                Allow preview
                                               </span>
                                             </div>
                                           </div>
                                         </div>
                                         
-                                        {/* Resources for Lesson */}
-                                        <div className="space-y-4">
+                                        {/* Content */}
+                                        <div className="space-y-2">
+                                          <Label>Content (HTML/Markdown)</Label>
+                                          <Textarea
+                                            value={lesson.content || ''}
+                                            onChange={(e) => updateLesson(moduleIndex, chapterIndex, lessonIndex, 'content', e.target.value)}
+                                            placeholder="Additional lesson content"
+                                            rows={3}
+                                          />
+                                        </div>
+                                        
+                                        {/* Resources */}
+                                        <div className="space-y-3">
                                           <div className="flex items-center justify-between">
-                                            <h6 className="font-medium">Lesson Resources</h6>
+                                            <Label>Resources</Label>
                                             <Button
+                                              type="button"
                                               size="sm"
+                                              variant="outline"
                                               onClick={() => addResource(moduleIndex, chapterIndex, lessonIndex)}
                                             >
-                                              <Plus className="w-4 h-4 mr-1" />
+                                              <Plus className="w-4 h-4 mr-2" />
                                               Add Resource
                                             </Button>
                                           </div>
@@ -1443,7 +1647,7 @@ export default function CreateYouTubeCoursePage() {
                                           {lesson.resources.map((resource, resourceIndex) => (
                                             <div key={resource._id} className="space-y-2 border p-3 rounded">
                                               <div className="flex justify-between">
-                                                <Label>Resource {resourceIndex + 1}</Label>
+                                                <Label className="text-sm">Resource {resourceIndex + 1}</Label>
                                                 <Button
                                                   size="sm"
                                                   variant="ghost"
@@ -1483,14 +1687,16 @@ export default function CreateYouTubeCoursePage() {
                                         </div>
                                         
                                         {/* Sub-lessons */}
-                                        <div className="space-y-4">
+                                        <div className="space-y-3">
                                           <div className="flex items-center justify-between">
-                                            <h6 className="font-medium">Sub-lessons</h6>
+                                            <Label>Sub-lessons</Label>
                                             <Button
+                                              type="button"
                                               size="sm"
+                                              variant="outline"
                                               onClick={() => addSubLesson(moduleIndex, chapterIndex, lessonIndex)}
                                             >
-                                              <Plus className="w-4 h-4 mr-1" />
+                                              <Plus className="w-4 h-4 mr-2" />
                                               Add Sub-lesson
                                             </Button>
                                           </div>
@@ -1529,28 +1735,20 @@ export default function CreateYouTubeCoursePage() {
                                                 </div>
                                                 
                                                 <div className="space-y-2">
-                                                  <Label>YouTube URL (Optional)</Label>
+                                                  <Label>YouTube Video (Optional)</Label>
                                                   <div className="flex gap-2">
                                                     <Input
-                                                      value={subLesson.youtubeUrl}
-                                                      onChange={(e) => updateSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, 'youtubeUrl', e.target.value)}
+                                                      value={subLesson.videoSource?.videoId || ''}
+                                                      onChange={(e) => handleSubLessonYouTubeVideo(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, e.target.value)}
                                                       placeholder="https://youtube.com/watch?v=..."
                                                     />
-                                                    {subLesson.youtubeUrl && (
+                                                    {subLesson.videoSource && (
                                                       <Button
                                                         size="sm"
                                                         variant="outline"
-                                                        onClick={() => {
-                                                          const video = parseYouTubeUrl(subLesson.youtubeUrl!)
-                                                          if (video) {
-                                                            toast({
-                                                              title: 'Valid YouTube URL',
-                                                              description: `Video ID: ${video.videoId}`,
-                                                            })
-                                                          }
-                                                        }}
+                                                        onClick={() => updateSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, 'videoSource', undefined)}
                                                       >
-                                                        <Check className="w-4 h-4" />
+                                                        <Trash2 className="w-4 h-4" />
                                                       </Button>
                                                     )}
                                                   </div>
@@ -1561,8 +1759,8 @@ export default function CreateYouTubeCoursePage() {
                                                     <Label>Duration (minutes)</Label>
                                                     <Input
                                                       type="number"
-                                                      value={subLesson.duration}
-                                                      onChange={(e) => updateSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, 'duration', parseInt(e.target.value) || 0)}
+                                                      value={Math.round(subLesson.duration / 60)}
+                                                      onChange={(e) => updateSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, 'duration', (parseInt(e.target.value) || 0) * 60)}
                                                       placeholder="0"
                                                       min="0"
                                                     />
@@ -1585,14 +1783,15 @@ export default function CreateYouTubeCoursePage() {
                                                 </div>
                                                 
                                                 {/* Resources for Sub-lesson */}
-                                                <div className="space-y-4">
+                                                <div className="space-y-3">
                                                   <div className="flex items-center justify-between">
-                                                    <h6 className="font-medium">Sub-lesson Resources</h6>
+                                                    <Label>Resources</Label>
                                                     <Button
                                                       size="sm"
+                                                      variant="outline"
                                                       onClick={() => addResource(moduleIndex, chapterIndex, lessonIndex, subLessonIndex)}
                                                     >
-                                                      <Plus className="w-4 h-4 mr-1" />
+                                                      <Plus className="w-4 h-4 mr-2" />
                                                       Add Resource
                                                     </Button>
                                                   </div>
@@ -1600,7 +1799,7 @@ export default function CreateYouTubeCoursePage() {
                                                   {subLesson.resources.map((resource, resourceIndex) => (
                                                     <div key={resource._id} className="space-y-2 border p-3 rounded">
                                                       <div className="flex justify-between">
-                                                        <Label>Resource {resourceIndex + 1}</Label>
+                                                        <Label className="text-sm">Resource {resourceIndex + 1}</Label>
                                                         <Button
                                                           size="sm"
                                                           variant="ghost"
@@ -1667,49 +1866,8 @@ export default function CreateYouTubeCoursePage() {
             </Card>
           </div>
           
-          {/* Right Column - Settings & Actions */}
+          {/* Sidebar - 1 column */}
           <div className="space-y-6">
-            {/* Preview Video */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Video className="w-5 h-5" />
-                  Preview Video
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label>YouTube URL for Preview</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      value={previewVideoUrl}
-                      onChange={(e) => setPreviewVideoUrl(e.target.value)}
-                      placeholder="https://youtube.com/watch?v=..."
-                    />
-                    <Button onClick={handlePreviewYouTube}>
-                      <Check className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-                
-                {previewVideo && (
-                  <div className="space-y-2">
-                    <Label>Preview</Label>
-                    <div className="aspect-video rounded-lg overflow-hidden">
-                      <iframe
-                        src={previewVideo.url}
-                        title="YouTube preview"
-                        className="w-full h-full"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                        allowFullScreen
-                      />
-                    </div>
-                    <p className="text-sm text-gray-500">Video ID: {previewVideo.videoId}</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-            
             {/* Tags */}
             <Card>
               <CardHeader>
@@ -1728,7 +1886,7 @@ export default function CreateYouTubeCoursePage() {
                       placeholder="e.g., fashion, design, sewing"
                       onKeyPress={(e) => e.key === 'Enter' && addTag()}
                     />
-                    <Button onClick={addTag}>
+                    <Button type="button" onClick={addTag}>
                       <Plus className="w-4 h-4" />
                     </Button>
                   </div>
@@ -1739,6 +1897,7 @@ export default function CreateYouTubeCoursePage() {
                     <Badge key={index} className="flex items-center gap-1">
                       {tag}
                       <button
+                        type="button"
                         onClick={() => removeTag(index)}
                         className="hover:text-red-500"
                       >
@@ -1746,6 +1905,9 @@ export default function CreateYouTubeCoursePage() {
                       </button>
                     </Badge>
                   ))}
+                  {courseData.tags.length === 0 && (
+                    <p className="text-sm text-gray-500">No tags added</p>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -1768,7 +1930,7 @@ export default function CreateYouTubeCoursePage() {
                       placeholder="e.g., Basic sewing knowledge"
                       onKeyPress={(e) => e.key === 'Enter' && addRequirement()}
                     />
-                    <Button onClick={addRequirement}>
+                    <Button type="button" onClick={addRequirement}>
                       <Plus className="w-4 h-4" />
                     </Button>
                   </div>
@@ -1779,6 +1941,7 @@ export default function CreateYouTubeCoursePage() {
                     <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
                       <span className="text-sm">{req}</span>
                       <button
+                        type="button"
                         onClick={() => removeRequirement(index)}
                         className="text-red-500 hover:text-red-700"
                       >
@@ -1786,6 +1949,9 @@ export default function CreateYouTubeCoursePage() {
                       </button>
                     </div>
                   ))}
+                  {courseData.requirements.length === 0 && (
+                    <p className="text-sm text-gray-500">No requirements specified</p>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -1808,7 +1974,7 @@ export default function CreateYouTubeCoursePage() {
                       placeholder="e.g., Create custom patterns"
                       onKeyPress={(e) => e.key === 'Enter' && addOutcome()}
                     />
-                    <Button onClick={addOutcome}>
+                    <Button type="button" onClick={addOutcome}>
                       <Plus className="w-4 h-4" />
                     </Button>
                   </div>
@@ -1819,6 +1985,7 @@ export default function CreateYouTubeCoursePage() {
                     <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
                       <span className="text-sm">{outcome}</span>
                       <button
+                        type="button"
                         onClick={() => removeOutcome(index)}
                         className="text-red-500 hover:text-red-700"
                       >
@@ -1826,6 +1993,67 @@ export default function CreateYouTubeCoursePage() {
                       </button>
                     </div>
                   ))}
+                  {courseData.learningOutcomes.length === 0 && (
+                    <p className="text-sm text-gray-500">No learning outcomes specified</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+            
+            {/* Pricing */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="w-5 h-5" />
+                  Pricing & Enrollment
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>Free Course</Label>
+                    <p className="text-sm text-gray-500">Make this course free for all users</p>
+                  </div>
+                  <Switch
+                    checked={courseData.isFree}
+                    onCheckedChange={(checked) => 
+                      setCourseData(prev => ({ 
+                        ...prev, 
+                        isFree: checked, 
+                        price: checked ? 0 : prev.price 
+                      }))
+                    }
+                  />
+                </div>
+                
+                {!courseData.isFree && (
+                  <div className="space-y-2">
+                    <Label htmlFor="price">Price (NPR)</Label>
+                    <Input
+                      id="price"
+                      type="number"
+                      value={courseData.price}
+                      onChange={(e) => setCourseData(prev => ({ 
+                        ...prev, 
+                        price: Math.max(0, parseInt(e.target.value) || 0)
+                      }))}
+                      placeholder="0"
+                      min="0"
+                    />
+                  </div>
+                )}
+                
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>Manual Enrollment</Label>
+                    <p className="text-sm text-gray-500">Require admin approval for access</p>
+                  </div>
+                  <Switch
+                    checked={courseData.manualEnrollmentEnabled}
+                    onCheckedChange={(checked) => 
+                      setCourseData(prev => ({ ...prev, manualEnrollmentEnabled: checked }))
+                    }
+                  />
                 </div>
               </CardContent>
             </Card>
@@ -1842,7 +2070,7 @@ export default function CreateYouTubeCoursePage() {
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label>Published</Label>
-                    <p className="text-sm text-gray-500">Make course visible to users</p>
+                    <p className="text-sm text-gray-500">Make course visible</p>
                   </div>
                   <Switch
                     checked={courseData.isPublished}
@@ -1855,7 +2083,7 @@ export default function CreateYouTubeCoursePage() {
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label>Featured</Label>
-                    <p className="text-sm text-gray-500">Highlight this course</p>
+                    <p className="text-sm text-gray-500">Highlight on homepage</p>
                   </div>
                   <Switch
                     checked={courseData.isFeatured}
@@ -1878,24 +2106,32 @@ export default function CreateYouTubeCoursePage() {
                   <span className="font-semibold">{modules.length}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Content Items</span>
-                  <span className="font-semibold">{calculateTotalLessons()}</span>
+                  <span className="text-gray-600">Chapters</span>
+                  <span className="font-semibold">
+                    {modules.reduce((acc, m) => acc + m.chapters.length, 0)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Lessons</span>
+                  <span className="font-semibold">
+                    {modules.reduce((acc, m) => 
+                      acc + m.chapters.reduce((acc2, c) => acc2 + c.lessons.length, 0), 0
+                    )}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Sub-lessons</span>
+                  <span className="font-semibold">
+                    {modules.reduce((acc, m) => 
+                      acc + m.chapters.reduce((acc2, c) => 
+                        acc2 + c.lessons.reduce((acc3, l) => acc3 + l.subLessons.length, 0), 0
+                      ), 0
+                    )}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Total Duration</span>
                   <span className="font-semibold">{calculateTotalDuration()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Requirements</span>
-                  <span className="font-semibold">{courseData.requirements.length}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Learning Outcomes</span>
-                  <span className="font-semibold">{courseData.learningOutcomes.length}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Tags</span>
-                  <span className="font-semibold">{courseData.tags.length}</span>
                 </div>
               </CardContent>
             </Card>
