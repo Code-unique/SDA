@@ -3,9 +3,9 @@ import { currentUser } from '@clerk/nextjs/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import User from '@/lib/models/User'
 import YouTubeCourse from '@/lib/models/YouTubeCourse'
-import { parseYouTubeUrl } from '@/lib/utils/youtubeParser'
 import '@/lib/loadmodels'
 import mongoose from 'mongoose'
+
 export async function POST(request: NextRequest) {
   try {
     const user = await currentUser()
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate slug
-    const slug = body.title
+    const baseSlug = body.title
       .toLowerCase()
       .replace(/[^a-z0-9\s-]/g, '')
       .trim()
@@ -49,21 +49,14 @@ export async function POST(request: NextRequest) {
       .substring(0, 100)
 
     // Check for existing course
-    const existingCourse = await YouTubeCourse.findOne({
-      $or: [
-        { title: body.title },
-        { slug }
-      ]
-    })
-
-    if (existingCourse) {
-      return NextResponse.json(
-        { error: 'Course with this title already exists' },
-        { status: 400 }
-      )
+    let slug = baseSlug
+    let counter = 1
+    while (await YouTubeCourse.findOne({ slug })) {
+      slug = `${baseSlug}-${counter}`
+      counter++
     }
 
-    // Create course data
+    // Create course data - NO _id fields, let MongoDB generate them
     const courseData = {
       title: body.title.substring(0, 100),
       slug,
@@ -93,7 +86,7 @@ export async function POST(request: NextRequest) {
     await course.populate('instructor', 'username firstName lastName avatar')
 
     return NextResponse.json({
-      _id: course._id,
+      _id: course._id.toString(),
       title: course.title,
       slug: course.slug,
       description: course.description,
@@ -123,7 +116,7 @@ export async function POST(request: NextRequest) {
     
     if (error.code === 11000) {
       return NextResponse.json(
-        { error: 'Course with this title or slug already exists' },
+        { error: 'Course with this title already exists' },
         { status: 400 }
       )
     }

@@ -20,7 +20,7 @@ interface Course {
   category?: string;
   tags?: string[];
   thumbnail?: string;
-  previewVideo?: string;
+  previewVideo?: any;
   modules?: any[];
   requirements?: string[];
   learningOutcomes?: string[];
@@ -42,22 +42,17 @@ export async function GET(
   try {
     console.log('GET /api/admin/youtube-courses/[courseId] called')
     
-    // Await the params Promise directly
     const { courseId } = await params
     
     if (!courseId || courseId.trim() === '') {
-      console.log('Empty course ID received')
       return NextResponse.json(
         { error: 'Course identifier is required' },
         { status: 400 }
       )
     }
-    
-    console.log('Requested course ID:', courseId)
 
     const user = await currentUser()
     if (!user) {
-      console.log('No user found - Unauthorized')
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
@@ -65,23 +60,18 @@ export async function GET(
     }
 
     await connectToDatabase()
-    console.log('Database connected')
 
     const adminUser = await User.findOne({ clerkId: user.id })
     if (!adminUser || adminUser.role !== 'admin') {
-      console.log('User not admin or not found:', { clerkId: user.id, adminUser })
       return NextResponse.json(
         { error: 'Forbidden' },
         { status: 403 }
       )
     }
 
-    // Try multiple ways to find the course
     let course: Course | null = null
     
-    // First try as ObjectId
     if (mongoose.isValidObjectId(courseId)) {
-      console.log('Searching by ObjectId:', courseId)
       course = await YouTubeCourse.findById(courseId)
         .populate('instructor', 'username firstName lastName avatar')
         .populate({
@@ -95,9 +85,7 @@ export async function GET(
         .lean() as Course | null
     }
     
-    // If not found by ObjectId, try by slug
     if (!course) {
-      console.log('Not found by ObjectId, trying by slug:', courseId)
       course = await YouTubeCourse.findOne({ slug: courseId })
         .populate('instructor', 'username firstName lastName avatar')
         .populate({
@@ -112,38 +100,12 @@ export async function GET(
     }
 
     if (!course) {
-      console.log('Course not found by any method')
-      
-      // Get all courses to help debug
-      const allCourses = await YouTubeCourse.find({}, '_id title slug').lean() as unknown as Course[]
-      console.log('Available courses:', allCourses.map(c => ({ 
-        _id: c._id.toString(), 
-        title: c.title, 
-        slug: c.slug 
-      })))
-      
       return NextResponse.json(
-        { 
-          error: 'Course not found',
-          requestedId: courseId,
-          availableCount: allCourses.length,
-          availableCourses: allCourses.slice(0, 5).map(c => ({
-            _id: c._id.toString(),
-            title: c.title,
-            slug: c.slug
-          }))
-        },
+        { error: 'Course not found' },
         { status: 404 }
       )
     }
 
-    console.log('Course found:', { 
-      _id: course._id.toString(),
-      title: course.title,
-      slug: course.slug 
-    })
-
-    // Convert _id to string for consistent response
     const courseWithStringId = {
       ...course,
       _id: course._id.toString(),
@@ -154,8 +116,6 @@ export async function GET(
     
   } catch (error: any) {
     console.error('Error fetching course:', error)
-    console.error('Error stack:', error.stack)
-    
     return NextResponse.json(
       { error: 'Internal server error: ' + error.message },
       { status: 500 }
@@ -163,7 +123,7 @@ export async function GET(
   }
 }
 
-// PUT - Update course
+// PUT - Update course (COMPLETE OVERWRITE)
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ courseId: string }> }
@@ -191,9 +151,6 @@ export async function PUT(
       )
     }
 
-    console.log('Updating course ID/slug:', courseId)
-
-    // Try multiple ways to find the course
     let course: Course | null = null
     
     if (mongoose.isValidObjectId(courseId)) {
@@ -212,145 +169,63 @@ export async function PUT(
     }
 
     const body = await request.json()
-    console.log('Update body received')
     
-    // Validate updates
-    const updates: any = {}
-
-    // Update basic fields if provided
-    if (body.title !== undefined) {
-      if (body.title.trim().length === 0) {
-        return NextResponse.json(
-          { error: 'Title cannot be empty' },
-          { status: 400 }
-        )
-      }
-      updates.title = body.title.substring(0, 100)
+    // Generate new slug if title changed
+    let slug = course.slug
+    if (body.title && body.title !== course.title) {
+      const newSlug = body.title
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, '')
+        .trim()
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .substring(0, 100)
       
-      // Generate new slug if title changed
-      if (body.title !== course.title) {
-        const newSlug = body.title
-          .toLowerCase()
-          .replace(/[^a-z0-9\s-]/g, '')
-          .trim()
-          .replace(/\s+/g, '-')
-          .replace(/-+/g, '-')
-          .substring(0, 100)
-        
-        // Check if slug already exists for another course
-        if (newSlug !== course.slug) {
-          const existingCourse = await YouTubeCourse.findOne({ 
-            slug: newSlug,
-            _id: { $ne: course._id }
-          })
-          if (existingCourse) {
-            return NextResponse.json(
-              { error: 'Another course with this title already exists' },
-              { status: 400 }
-            )
-          }
-          updates.slug = newSlug
-        }
+      // Check if slug already exists for another course
+      const existingCourse = await YouTubeCourse.findOne({ 
+        slug: newSlug,
+        _id: { $ne: course._id }
+      })
+      
+      if (existingCourse) {
+        // Add timestamp to make unique
+        slug = `${newSlug}-${Date.now()}`.substring(0, 100)
+      } else {
+        slug = newSlug
       }
     }
 
-    if (body.description !== undefined) {
-      updates.description = body.description
+    // Prepare update object - COMPLETE OVERWRITE
+    const updateData = {
+      title: body.title?.substring(0, 100) || course.title,
+      slug: slug,
+      description: body.description !== undefined ? body.description : course.description,
+      shortDescription: body.shortDescription !== undefined ? body.shortDescription?.substring(0, 200) : course.shortDescription,
+      price: body.isFree ? 0 : (body.price !== undefined ? Math.max(0, body.price) : course.price),
+      isFree: body.isFree !== undefined ? !!body.isFree : course.isFree,
+      level: body.level || course.level || 'beginner',
+      category: body.category !== undefined ? (body.category ? body.category.substring(0, 50) : undefined) : course.category,
+      tags: body.tags !== undefined ? (Array.isArray(body.tags) ? body.tags.slice(0, 10).map((t: string) => t.substring(0, 30)) : []) : course.tags || [],
+      thumbnail: body.thumbnail !== undefined ? body.thumbnail : course.thumbnail,
+      previewVideo: body.previewVideo !== undefined ? body.previewVideo : course.previewVideo,
+      
+      // ✅ CRITICAL FIX: Update modules array
+      modules: body.modules !== undefined ? body.modules : course.modules || [],
+      
+      requirements: body.requirements !== undefined ? (Array.isArray(body.requirements) ? body.requirements.slice(0, 10).map((r: string) => r.substring(0, 200)) : []) : course.requirements || [],
+      learningOutcomes: body.learningOutcomes !== undefined ? (Array.isArray(body.learningOutcomes) ? body.learningOutcomes.slice(0, 10).map((l: string) => l.substring(0, 200)) : []) : course.learningOutcomes || [],
+      isPublished: body.isPublished !== undefined ? !!body.isPublished : course.isPublished,
+      isFeatured: body.isFeatured !== undefined ? !!body.isFeatured : course.isFeatured,
+      manualEnrollmentEnabled: body.manualEnrollmentEnabled !== undefined ? body.manualEnrollmentEnabled !== false : course.manualEnrollmentEnabled
     }
 
-    if (body.shortDescription !== undefined) {
-      updates.shortDescription = body.shortDescription.substring(0, 200)
-    }
+    console.log('Updating course with modules:', updateData.modules ? `${updateData.modules.length} modules` : 'none')
 
-    if (body.price !== undefined) {
-      if (typeof body.price !== 'number' || body.price < 0) {
-        return NextResponse.json(
-          { error: 'Price must be a positive number' },
-          { status: 400 }
-        )
-      }
-      updates.price = body.isFree ? 0 : body.price
-    }
-
-    if (body.isFree !== undefined) {
-      updates.isFree = !!body.isFree
-      if (body.isFree) {
-        updates.price = 0
-      }
-    }
-
-    if (body.level !== undefined) {
-      const validLevels = ['beginner', 'intermediate', 'advanced']
-      if (!validLevels.includes(body.level)) {
-        return NextResponse.json(
-          { error: 'Invalid level' },
-          { status: 400 }
-        )
-      }
-      updates.level = body.level
-    }
-
-    if (body.category !== undefined) {
-      updates.category = body.category ? body.category.substring(0, 50) : undefined
-    }
-
-    if (body.tags !== undefined) {
-      if (!Array.isArray(body.tags)) {
-        return NextResponse.json(
-          { error: 'Tags must be an array' },
-          { status: 400 }
-        )
-      }
-      updates.tags = body.tags.slice(0, 10).map((tag: string) => tag.substring(0, 30))
-    }
-
-    if (body.thumbnail !== undefined) {
-      updates.thumbnail = body.thumbnail
-    }
-
-    if (body.previewVideo !== undefined) {
-      updates.previewVideo = body.previewVideo
-    }
-
-    if (body.requirements !== undefined) {
-      if (!Array.isArray(body.requirements)) {
-        return NextResponse.json(
-          { error: 'Requirements must be an array' },
-          { status: 400 }
-        )
-      }
-      updates.requirements = body.requirements.slice(0, 10).map((req: string) => req.substring(0, 200))
-    }
-
-    if (body.learningOutcomes !== undefined) {
-      if (!Array.isArray(body.learningOutcomes)) {
-        return NextResponse.json(
-          { error: 'Learning outcomes must be an array' },
-          { status: 400 }
-        )
-      }
-      updates.learningOutcomes = body.learningOutcomes.slice(0, 10).map((lo: string) => lo.substring(0, 200))
-    }
-
-    if (body.isPublished !== undefined) {
-      updates.isPublished = !!body.isPublished
-    }
-
-    if (body.isFeatured !== undefined) {
-      updates.isFeatured = !!body.isFeatured
-    }
-
-    if (body.manualEnrollmentEnabled !== undefined) {
-      updates.manualEnrollmentEnabled = body.manualEnrollmentEnabled !== false
-    }
-
-    // Update the course
-    console.log('Applying updates:', updates)
     const updatedCourse = await YouTubeCourse.findByIdAndUpdate(
       course._id,
-      { $set: updates },
+      { $set: updateData },
       { new: true, runValidators: true }
-    ).populate('instructor', 'username firstName lastName avatar') as Course
+    ).populate('instructor', 'username firstName lastName avatar')
 
     if (!updatedCourse) {
       return NextResponse.json(
@@ -361,34 +236,31 @@ export async function PUT(
 
     console.log('Course updated successfully:', updatedCourse.title)
 
+    // ✅ CRITICAL FIX: Return course directly, not nested
     return NextResponse.json({
-      success: true,
-      message: 'Course updated successfully',
-      course: {
-        _id: updatedCourse._id.toString(),
-        title: updatedCourse.title,
-        slug: updatedCourse.slug,
-        description: updatedCourse.description,
-        shortDescription: updatedCourse.shortDescription,
-        instructor: updatedCourse.instructor,
-        price: updatedCourse.price,
-        isFree: updatedCourse.isFree,
-        level: updatedCourse.level,
-        category: updatedCourse.category,
-        tags: updatedCourse.tags,
-        thumbnail: updatedCourse.thumbnail,
-        previewVideo: updatedCourse.previewVideo,
-        modules: updatedCourse.modules,
-        requirements: updatedCourse.requirements,
-        learningOutcomes: updatedCourse.learningOutcomes,
-        isPublished: updatedCourse.isPublished,
-        isFeatured: updatedCourse.isFeatured,
-        manualEnrollmentEnabled: updatedCourse.manualEnrollmentEnabled,
-        totalStudents: updatedCourse.totalStudents,
-        averageRating: updatedCourse.averageRating,
-        createdAt: updatedCourse.createdAt,
-        updatedAt: updatedCourse.updatedAt
-      }
+      _id: updatedCourse._id.toString(),
+      title: updatedCourse.title,
+      slug: updatedCourse.slug,
+      description: updatedCourse.description,
+      shortDescription: updatedCourse.shortDescription,
+      instructor: updatedCourse.instructor,
+      price: updatedCourse.price,
+      isFree: updatedCourse.isFree,
+      level: updatedCourse.level,
+      category: updatedCourse.category,
+      tags: updatedCourse.tags,
+      thumbnail: updatedCourse.thumbnail,
+      previewVideo: updatedCourse.previewVideo,
+      modules: updatedCourse.modules,
+      requirements: updatedCourse.requirements,
+      learningOutcomes: updatedCourse.learningOutcomes,
+      isPublished: updatedCourse.isPublished,
+      isFeatured: updatedCourse.isFeatured,
+      manualEnrollmentEnabled: updatedCourse.manualEnrollmentEnabled,
+      totalStudents: updatedCourse.totalStudents,
+      averageRating: updatedCourse.averageRating,
+      createdAt: updatedCourse.createdAt,
+      updatedAt: updatedCourse.updatedAt
     })
     
   } catch (error: any) {
@@ -396,7 +268,7 @@ export async function PUT(
     
     if (error.code === 11000) {
       return NextResponse.json(
-        { error: 'Course with this title or slug already exists' },
+        { error: 'Course with this title already exists' },
         { status: 400 }
       )
     }
@@ -444,9 +316,6 @@ export async function DELETE(
       )
     }
 
-    console.log('Deleting course ID/slug:', courseId)
-
-    // Try multiple ways to find the course
     let course: Course | null = null
     
     if (mongoose.isValidObjectId(courseId)) {
@@ -464,7 +333,6 @@ export async function DELETE(
       )
     }
 
-    // Check if course has students enrolled
     if (course.totalStudents > 0) {
       return NextResponse.json(
         { 
@@ -477,8 +345,6 @@ export async function DELETE(
 
     await YouTubeCourse.findByIdAndDelete(course._id)
 
-    console.log('Course deleted successfully:', course.title)
-
     return NextResponse.json({
       success: true,
       message: 'Course deleted successfully'
@@ -486,7 +352,6 @@ export async function DELETE(
     
   } catch (error: any) {
     console.error('Error deleting course:', error)
-    
     return NextResponse.json(
       { error: 'Internal server error: ' + error.message },
       { status: 500 }

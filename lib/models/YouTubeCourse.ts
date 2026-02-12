@@ -13,7 +13,7 @@ export interface IYouTubeSource {
 
 // Lesson Resource Interface
 export interface ILessonResource {
-  _id?: mongoose.Types.ObjectId
+  _id?: mongoose.Types.ObjectId  // Optional - MongoDB will generate
   title: string
   url: string
   type: 'pdf' | 'document' | 'link' | 'youtube'
@@ -22,7 +22,7 @@ export interface ILessonResource {
 
 // Sub-Lesson Interface
 export interface ISubLesson {
-  _id?: mongoose.Types.ObjectId
+  _id?: mongoose.Types.ObjectId  // Optional - MongoDB will generate
   title: string
   description: string
   content?: string
@@ -37,7 +37,7 @@ export interface ISubLesson {
 
 // Lesson Interface
 export interface ILesson {
-  _id?: mongoose.Types.ObjectId
+  _id?: mongoose.Types.ObjectId  // Optional - MongoDB will generate
   title: string
   description: string
   content?: string
@@ -53,7 +53,7 @@ export interface ILesson {
 
 // Chapter Interface
 export interface IChapter {
-  _id?: mongoose.Types.ObjectId
+  _id?: mongoose.Types.ObjectId  // Optional - MongoDB will generate
   title: string
   description?: string
   lessons: ILesson[]
@@ -64,7 +64,7 @@ export interface IChapter {
 
 // Module Interface
 export interface IModule {
-  _id?: mongoose.Types.ObjectId
+  _id?: mongoose.Types.ObjectId  // Optional - MongoDB will generate
   title: string
   description?: string
   thumbnailUrl?: string
@@ -202,8 +202,7 @@ const YouTubeCourseSchema = new Schema({
   title: { 
     type: String, 
     required: true, 
-    maxlength: 100,
-    unique: true 
+    maxlength: 100 
   },
   slug: { 
     type: String, 
@@ -262,9 +261,12 @@ const YouTubeCourseSchema = new Schema({
   toObject: { virtuals: true }
 })
 
+// Remove unique index on title - only slug needs to be unique
+// YouTubeCourseSchema.index({ title: 1 }, { unique: true }) // ❌ REMOVE THIS
+
 // Indexes
 YouTubeCourseSchema.index({ title: 'text', description: 'text', category: 'text' })
-YouTubeCourseSchema.index({ slug: 1 })
+YouTubeCourseSchema.index({ slug: 1 }, { unique: true })
 YouTubeCourseSchema.index({ isPublished: 1 })
 YouTubeCourseSchema.index({ isFeatured: 1 })
 YouTubeCourseSchema.index({ category: 1 })

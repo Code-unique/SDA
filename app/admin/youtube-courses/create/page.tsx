@@ -7,8 +7,6 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Separator } from "@/components/ui/separator"
-
 import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/components/ui/use-toast'
 import { 
@@ -19,20 +17,19 @@ import {
   ChevronDown, 
   Eye, 
   EyeOff,
-  Video,
+  Link,
+  FileText,
   BookOpen,
   Users,
   Target,
   Zap,
   Award,
   Loader2,
-  Check,
   X,
   Image as ImageIcon,
-  Link,
-  FileText,
   Youtube,
-  Clock
+  Clock,
+  FolderOpen
 } from 'lucide-react'
 import {
   Select,
@@ -42,8 +39,28 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion"
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
-// Interfaces
+// ==================== INTERFACES ====================
 interface YouTubeVideo {
   type: 'youtube'
   videoId: string
@@ -53,15 +70,14 @@ interface YouTubeVideo {
 }
 
 interface LessonResource {
-  _id: string
   title: string
   url: string
   type: 'pdf' | 'document' | 'link' | 'youtube'
   description?: string
+  // NO _id - MongoDB will generate
 }
 
 interface SubLesson {
-  _id: string
   title: string
   description: string
   content?: string
@@ -70,10 +86,10 @@ interface SubLesson {
   isPreview: boolean
   resources: LessonResource[]
   order: number
+  // NO _id - MongoDB will generate
 }
 
 interface Lesson {
-  _id: string
   title: string
   description: string
   content?: string
@@ -83,41 +99,41 @@ interface Lesson {
   resources: LessonResource[]
   subLessons: SubLesson[]
   order: number
+  // NO _id - MongoDB will generate
 }
 
 interface Chapter {
-  _id: string
   title: string
   description?: string
   lessons: Lesson[]
   order: number
+  // NO _id - MongoDB will generate
 }
 
 interface Module {
-  _id: string
   title: string
   description?: string
   thumbnailUrl?: string
   chapters: Chapter[]
   order: number
+  // NO _id - MongoDB will generate
 }
 
-// Helper functions
+// ==================== HELPER FUNCTIONS ====================
 const generateId = () => `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
 
 const extractYouTubeVideoId = (url: string): string | null => {
   if (!url) return null
-  
   const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/
   const match = url.match(regExp)
   return match && match[2].length === 11 ? match[2] : null
 }
 
-const getYouTubeThumbnail = (videoId: string, quality: 'default' | 'mqdefault' | 'hqdefault' | 'sddefault' | 'maxresdefault' = 'maxresdefault'): string => {
-  return `https://img.youtube.com/vi/${videoId}/${quality}.jpg`
+const getYouTubeThumbnail = (videoId: string): string => {
+  return `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`
 }
 
-// Fallback image component
+// ==================== COMPONENTS ====================
 const FallbackImage = ({ className, alt }: { className?: string; alt: string }) => {
   return (
     <div className={`bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center ${className}`}>
@@ -129,7 +145,6 @@ const FallbackImage = ({ className, alt }: { className?: string; alt: string }) 
   )
 }
 
-// Image component with error handling
 const CourseImage = ({ src, alt, className }: { src: string; alt: string; className?: string }) => {
   const [error, setError] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -157,7 +172,6 @@ const CourseImage = ({ src, alt, className }: { src: string; alt: string; classN
   )
 }
 
-// Drag handle component
 const DragHandle = ({ onMoveUp, onMoveDown, canMoveUp = true, canMoveDown = true }: {
   onMoveUp: () => void
   onMoveDown: () => void
@@ -190,12 +204,87 @@ const DragHandle = ({ onMoveUp, onMoveDown, canMoveUp = true, canMoveDown = true
   )
 }
 
+function AddResourceDialog({ onAdd }: { onAdd: (resource: LessonResource) => void }) {
+  const [type, setType] = useState<'pdf' | 'document' | 'link' | 'youtube'>('link')
+  const [title, setTitle] = useState('')
+  const [url, setUrl] = useState('')
+  const [description, setDescription] = useState('')
+
+  const handleSubmit = () => {
+    if (!title.trim() || !url.trim()) {
+      return
+    }
+
+    const resource: LessonResource = {
+      title: title.trim(),
+      url: url.trim(),
+      type,
+      description: description.trim() || undefined
+    }
+
+    onAdd(resource)
+    setTitle('')
+    setUrl('')
+    setDescription('')
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label>Resource Type</Label>
+        <Select value={type} onValueChange={(value: any) => setType(value)}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="pdf">PDF</SelectItem>
+            <SelectItem value="document">Document</SelectItem>
+            <SelectItem value="link">Link</SelectItem>
+            <SelectItem value="youtube">YouTube Video</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label>Title *</Label>
+        <Input 
+          value={title} 
+          onChange={(e) => setTitle(e.target.value)} 
+          placeholder="Resource title" 
+        />
+      </div>
+      <div className="space-y-2">
+        <Label>URL *</Label>
+        <Input 
+          value={url} 
+          onChange={(e) => setUrl(e.target.value)} 
+          placeholder="Resource URL" 
+        />
+      </div>
+      <div className="space-y-2">
+        <Label>Description (Optional)</Label>
+        <Textarea 
+          value={description} 
+          onChange={(e) => setDescription(e.target.value)} 
+          placeholder="Resource description" 
+          rows={2}
+        />
+      </div>
+      <DialogFooter>
+        <Button type="button" onClick={handleSubmit}>Add Resource</Button>
+      </DialogFooter>
+    </div>
+  )
+}
+
+// ==================== MAIN COMPONENT ====================
 export default function CreateYouTubeCoursePage() {
   const router = useRouter()
   const { toast } = useToast()
   const [loading, setLoading] = useState(false)
   const [previewMode, setPreviewMode] = useState(false)
+  const [youtubeLoading, setYoutubeLoading] = useState(false)
   
+  // Course Basic Info
   const [courseData, setCourseData] = useState({
     title: '',
     description: '',
@@ -213,24 +302,23 @@ export default function CreateYouTubeCoursePage() {
     manualEnrollmentEnabled: true
   })
   
+  // Preview Video
   const [previewVideo, setPreviewVideo] = useState<YouTubeVideo | null>(null)
   const [previewVideoUrl, setPreviewVideoUrl] = useState('')
   
+  // Modules - NO _id fields
   const [modules, setModules] = useState<Module[]>([
     {
-      _id: generateId(),
       title: 'Module 1',
       description: '',
       order: 0,
       chapters: [
         {
-          _id: generateId(),
           title: 'Chapter 1',
           description: '',
           order: 0,
           lessons: [
             {
-              _id: generateId(),
               title: 'Lesson 1',
               description: '',
               duration: 0,
@@ -245,24 +333,30 @@ export default function CreateYouTubeCoursePage() {
     }
   ])
   
+  // Input States
   const [tagInput, setTagInput] = useState('')
   const [requirementInput, setRequirementInput] = useState('')
   const [outcomeInput, setOutcomeInput] = useState('')
-  const [expandedModules, setExpandedModules] = useState<string[]>([])
+  
+  // Expanded States
+  const [expandedModules, setExpandedModules] = useState<string[]>(['module-0'])
   const [expandedChapters, setExpandedChapters] = useState<string[]>([])
   const [expandedLessons, setExpandedLessons] = useState<string[]>([])
 
-  const fetchYouTubeInfo = async (videoId: string) => {
+  // ==================== YOUTUBE HELPERS ====================
+  const fetchYouTubeInfo = async (videoId: string): Promise<YouTubeVideo> => {
     return {
-      type: 'youtube' as const,
+      type: 'youtube',
       videoId,
       url: `https://www.youtube.com/watch?v=${videoId}`,
-      thumbnailUrl: getYouTubeThumbnail(videoId, 'maxresdefault'),
+      thumbnailUrl: getYouTubeThumbnail(videoId),
       duration: 0
     }
   }
 
   const handlePreviewYouTube = async () => {
+    if (!previewVideoUrl.trim()) return
+    
     const videoId = extractYouTubeVideoId(previewVideoUrl)
     if (!videoId) {
       toast({
@@ -273,19 +367,31 @@ export default function CreateYouTubeCoursePage() {
       return
     }
     
-    const video = await fetchYouTubeInfo(videoId)
-    setPreviewVideo(video)
-    
-    if (!courseData.thumbnail.trim()) {
-      setCourseData(prev => ({
-        ...prev,
-        thumbnail: video.thumbnailUrl
-      }))
+    setYoutubeLoading(true)
+    try {
+      const video = await fetchYouTubeInfo(videoId)
+      setPreviewVideo(video)
+      
+      if (!courseData.thumbnail.trim()) {
+        setCourseData(prev => ({
+          ...prev,
+          thumbnail: video.thumbnailUrl
+        }))
+        toast({
+          title: 'Thumbnail Auto-filled',
+          description: 'YouTube thumbnail has been set as course thumbnail',
+        })
+      }
+      
+      setPreviewVideoUrl('')
+    } catch (error) {
       toast({
-        title: 'Thumbnail Auto-filled',
-        description: 'YouTube thumbnail has been set as course thumbnail',
-        variant: 'default'
+        title: 'Error',
+        description: 'Failed to fetch YouTube video information',
+        variant: 'destructive'
       })
+    } finally {
+      setYoutubeLoading(false)
     }
   }
 
@@ -305,8 +411,16 @@ export default function CreateYouTubeCoursePage() {
       return
     }
     
-    const videoInfo = await fetchYouTubeInfo(videoId)
-    updateLesson(moduleIndex, chapterIndex, lessonIndex, 'videoSource', videoInfo)
+    try {
+      const videoInfo = await fetchYouTubeInfo(videoId)
+      updateLesson(moduleIndex, chapterIndex, lessonIndex, 'videoSource', videoInfo)
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to fetch YouTube video information',
+        variant: 'destructive'
+      })
+    }
   }
 
   const handleSubLessonYouTubeVideo = async (
@@ -326,14 +440,22 @@ export default function CreateYouTubeCoursePage() {
       return
     }
     
-    const videoInfo = await fetchYouTubeInfo(videoId)
-    updateSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, 'videoSource', videoInfo)
+    try {
+      const videoInfo = await fetchYouTubeInfo(videoId)
+      updateSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, 'videoSource', videoInfo)
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to fetch YouTube video information',
+        variant: 'destructive'
+      })
+    }
   }
 
   const autoFillThumbnailFromYouTube = (url: string) => {
     const videoId = extractYouTubeVideoId(url)
     if (videoId && !courseData.thumbnail.trim()) {
-      const thumbnailUrl = getYouTubeThumbnail(videoId, 'maxresdefault')
+      const thumbnailUrl = getYouTubeThumbnail(videoId)
       setCourseData(prev => ({
         ...prev,
         thumbnail: thumbnailUrl
@@ -341,11 +463,11 @@ export default function CreateYouTubeCoursePage() {
       toast({
         title: 'Thumbnail Auto-filled',
         description: 'YouTube thumbnail has been set as course thumbnail',
-        variant: 'default'
       })
     }
   }
 
+  // ==================== BASIC CRUD ====================
   const addTag = () => {
     if (tagInput.trim() && courseData.tags.length < 10) {
       setCourseData(prev => ({
@@ -397,21 +519,19 @@ export default function CreateYouTubeCoursePage() {
     }))
   }
 
+  // ==================== MODULE OPERATIONS ====================
   const addModule = () => {
     const newModule: Module = {
-      _id: generateId(),
       title: `Module ${modules.length + 1}`,
       description: '',
       order: modules.length,
       chapters: [
         {
-          _id: generateId(),
           title: 'Chapter 1',
           description: '',
           order: 0,
           lessons: [
             {
-              _id: generateId(),
               title: 'Lesson 1',
               description: '',
               duration: 0,
@@ -425,8 +545,8 @@ export default function CreateYouTubeCoursePage() {
       ]
     }
     
-    setModules(prev => [...prev, newModule])
-    setExpandedModules(prev => [...prev, newModule._id])
+    setModules([...modules, newModule])
+    setExpandedModules([...expandedModules, `module-${modules.length}`])
   }
 
   const updateModule = (moduleIndex: number, field: keyof Module, value: any) => {
@@ -438,7 +558,6 @@ export default function CreateYouTubeCoursePage() {
   const removeModule = (moduleIndex: number) => {
     if (modules.length > 1) {
       setModules(prev => prev.filter((_, i) => i !== moduleIndex))
-      setExpandedModules(prev => prev.filter(id => id !== modules[moduleIndex]._id))
     } else {
       toast({
         title: 'Cannot Remove',
@@ -470,15 +589,14 @@ export default function CreateYouTubeCoursePage() {
     setModules(newModules)
   }
 
+  // ==================== CHAPTER OPERATIONS ====================
   const addChapter = (moduleIndex: number) => {
     const newChapter: Chapter = {
-      _id: generateId(),
       title: `Chapter ${modules[moduleIndex].chapters.length + 1}`,
       description: '',
       order: modules[moduleIndex].chapters.length,
       lessons: [
         {
-          _id: generateId(),
           title: 'Lesson 1',
           description: '',
           duration: 0,
@@ -495,6 +613,8 @@ export default function CreateYouTubeCoursePage() {
         ? { ...module, chapters: [...module.chapters, newChapter] }
         : module
     ))
+    
+    setExpandedChapters([...expandedChapters, `chapter-${moduleIndex}-${modules[moduleIndex].chapters.length}`])
   }
 
   const updateChapter = (moduleIndex: number, chapterIndex: number, field: keyof Chapter, value: any) => {
@@ -554,9 +674,9 @@ export default function CreateYouTubeCoursePage() {
     }))
   }
 
+  // ==================== LESSON OPERATIONS ====================
   const addLesson = (moduleIndex: number, chapterIndex: number) => {
     const newLesson: Lesson = {
-      _id: generateId(),
       title: `Lesson ${modules[moduleIndex].chapters[chapterIndex].lessons.length + 1}`,
       description: '',
       duration: 0,
@@ -581,6 +701,9 @@ export default function CreateYouTubeCoursePage() {
         })
       }
     }))
+    
+    const lessonId = `lesson-${moduleIndex}-${chapterIndex}-${modules[moduleIndex].chapters[chapterIndex].lessons.length}`
+    setExpandedLessons([...expandedLessons, lessonId])
   }
 
   const updateLesson = (moduleIndex: number, chapterIndex: number, lessonIndex: number, field: keyof Lesson, value: any) => {
@@ -664,9 +787,9 @@ export default function CreateYouTubeCoursePage() {
     }))
   }
 
+  // ==================== SUB-LESSON OPERATIONS ====================
   const addSubLesson = (moduleIndex: number, chapterIndex: number, lessonIndex: number) => {
     const newSubLesson: SubLesson = {
-      _id: generateId(),
       title: `Sub-lesson ${modules[moduleIndex].chapters[chapterIndex].lessons[lessonIndex].subLessons.length + 1}`,
       description: '',
       duration: 0,
@@ -700,11 +823,11 @@ export default function CreateYouTubeCoursePage() {
   }
 
   const updateSubLesson = (
-    moduleIndex: number, 
-    chapterIndex: number, 
-    lessonIndex: number, 
-    subLessonIndex: number, 
-    field: keyof SubLesson, 
+    moduleIndex: number,
+    chapterIndex: number,
+    lessonIndex: number,
+    subLessonIndex: number,
+    field: keyof SubLesson,
     value: any
   ) => {
     setModules(prev => prev.map((module, i) => {
@@ -734,9 +857,9 @@ export default function CreateYouTubeCoursePage() {
   }
 
   const removeSubLesson = (
-    moduleIndex: number, 
-    chapterIndex: number, 
-    lessonIndex: number, 
+    moduleIndex: number,
+    chapterIndex: number,
+    lessonIndex: number,
     subLessonIndex: number
   ) => {
     setModules(prev => prev.map((module, i) => {
@@ -763,70 +886,12 @@ export default function CreateYouTubeCoursePage() {
     }))
   }
 
-  const addResource = (
-    moduleIndex: number, 
-    chapterIndex: number, 
-    lessonIndex: number, 
-    subLessonIndex?: number
-  ) => {
-    const newResource: LessonResource = {
-      _id: generateId(),
-      title: 'New Resource',
-      url: '',
-      type: 'link'
-    }
-
-    setModules(prev => prev.map((module, i) => {
-      if (i !== moduleIndex) return module
-      
-      return {
-        ...module,
-        chapters: module.chapters.map((chapter, j) => {
-          if (j !== chapterIndex) return chapter
-          
-          if (subLessonIndex !== undefined) {
-            return {
-              ...chapter,
-              lessons: chapter.lessons.map((lesson, k) => {
-                if (k !== lessonIndex) return lesson
-                
-                return {
-                  ...lesson,
-                  subLessons: lesson.subLessons.map((sub, s) => {
-                    if (s !== subLessonIndex) return sub
-                    return {
-                      ...sub,
-                      resources: [...sub.resources, newResource]
-                    }
-                  })
-                }
-              })
-            }
-          } else {
-            return {
-              ...chapter,
-              lessons: chapter.lessons.map((lesson, k) => {
-                if (k !== lessonIndex) return lesson
-                return {
-                  ...lesson,
-                  resources: [...lesson.resources, newResource]
-                }
-              })
-            }
-          }
-        })
-      }
-    }))
-  }
-
-  const updateResource = (
-    moduleIndex: number, 
-    chapterIndex: number, 
-    lessonIndex: number, 
-    resourceIndex: number, 
-    field: keyof LessonResource, 
-    value: any,
-    subLessonIndex?: number
+  // ==================== RESOURCE OPERATIONS ====================
+  const addResourceToLesson = (
+    moduleIndex: number,
+    chapterIndex: number,
+    lessonIndex: number,
+    resource: LessonResource
   ) => {
     setModules(prev => prev.map((module, i) => {
       if (i !== moduleIndex) return module
@@ -836,51 +901,28 @@ export default function CreateYouTubeCoursePage() {
         chapters: module.chapters.map((chapter, j) => {
           if (j !== chapterIndex) return chapter
           
-          if (subLessonIndex !== undefined) {
-            return {
-              ...chapter,
-              lessons: chapter.lessons.map((lesson, k) => {
-                if (k !== lessonIndex) return lesson
-                
-                return {
-                  ...lesson,
-                  subLessons: lesson.subLessons.map((sub, s) => {
-                    if (s !== subLessonIndex) return sub
-                    return {
-                      ...sub,
-                      resources: sub.resources.map((res, r) => 
-                        r === resourceIndex ? { ...res, [field]: value } : res
-                      )
-                    }
-                  })
-                }
-              })
-            }
-          } else {
-            return {
-              ...chapter,
-              lessons: chapter.lessons.map((lesson, k) => {
-                if (k !== lessonIndex) return lesson
-                return {
-                  ...lesson,
-                  resources: lesson.resources.map((res, r) => 
-                    r === resourceIndex ? { ...res, [field]: value } : res
-                  )
-                }
-              })
-            }
+          return {
+            ...chapter,
+            lessons: chapter.lessons.map((lesson, k) => {
+              if (k !== lessonIndex) return lesson
+              
+              return {
+                ...lesson,
+                resources: [...lesson.resources, resource]
+              }
+            })
           }
         })
       }
     }))
   }
 
-  const removeResource = (
-    moduleIndex: number, 
-    chapterIndex: number, 
-    lessonIndex: number, 
-    resourceIndex: number,
-    subLessonIndex?: number
+  const addResourceToSubLesson = (
+    moduleIndex: number,
+    chapterIndex: number,
+    lessonIndex: number,
+    subLessonIndex: number,
+    resource: LessonResource
   ) => {
     setModules(prev => prev.map((module, i) => {
       if (i !== moduleIndex) return module
@@ -890,53 +932,98 @@ export default function CreateYouTubeCoursePage() {
         chapters: module.chapters.map((chapter, j) => {
           if (j !== chapterIndex) return chapter
           
-          if (subLessonIndex !== undefined) {
-            return {
-              ...chapter,
-              lessons: chapter.lessons.map((lesson, k) => {
-                if (k !== lessonIndex) return lesson
-                
-                return {
-                  ...lesson,
-                  subLessons: lesson.subLessons.map((sub, s) => {
-                    if (s !== subLessonIndex) return sub
-                    return {
-                      ...sub,
-                      resources: sub.resources.filter((_, r) => r !== resourceIndex)
-                    }
-                  })
-                }
-              })
-            }
-          } else {
-            return {
-              ...chapter,
-              lessons: chapter.lessons.map((lesson, k) => {
-                if (k !== lessonIndex) return lesson
-                return {
-                  ...lesson,
-                  resources: lesson.resources.filter((_, r) => r !== resourceIndex)
-                }
-              })
-            }
+          return {
+            ...chapter,
+            lessons: chapter.lessons.map((lesson, k) => {
+              if (k !== lessonIndex) return lesson
+              
+              return {
+                ...lesson,
+                subLessons: lesson.subLessons.map((sub, s) => {
+                  if (s !== subLessonIndex) return sub
+                  
+                  return {
+                    ...sub,
+                    resources: [...sub.resources, resource]
+                  }
+                })
+              }
+            })
           }
         })
       }
     }))
   }
 
-  const validateCourse = (): string[] => {
-    const errors: string[] = []
-    
-    if (!courseData.title.trim()) errors.push('Title is required')
-    if (!courseData.description.trim()) errors.push('Description is required')
-    if (!courseData.shortDescription.trim()) errors.push('Short description is required')
-    if (!courseData.thumbnail.trim()) errors.push('Thumbnail URL is required')
-    if (courseData.price < 0) errors.push('Price cannot be negative')
-    
-    return errors
+  const removeResourceFromLesson = (
+    moduleIndex: number,
+    chapterIndex: number,
+    lessonIndex: number,
+    resourceIndex: number
+  ) => {
+    setModules(prev => prev.map((module, i) => {
+      if (i !== moduleIndex) return module
+      
+      return {
+        ...module,
+        chapters: module.chapters.map((chapter, j) => {
+          if (j !== chapterIndex) return chapter
+          
+          return {
+            ...chapter,
+            lessons: chapter.lessons.map((lesson, k) => {
+              if (k !== lessonIndex) return lesson
+              
+              return {
+                ...lesson,
+                resources: lesson.resources.filter((_, r) => r !== resourceIndex)
+              }
+            })
+          }
+        })
+      }
+    }))
   }
 
+  const removeResourceFromSubLesson = (
+    moduleIndex: number,
+    chapterIndex: number,
+    lessonIndex: number,
+    subLessonIndex: number,
+    resourceIndex: number
+  ) => {
+    setModules(prev => prev.map((module, i) => {
+      if (i !== moduleIndex) return module
+      
+      return {
+        ...module,
+        chapters: module.chapters.map((chapter, j) => {
+          if (j !== chapterIndex) return chapter
+          
+          return {
+            ...chapter,
+            lessons: chapter.lessons.map((lesson, k) => {
+              if (k !== lessonIndex) return lesson
+              
+              return {
+                ...lesson,
+                subLessons: lesson.subLessons.map((sub, s) => {
+                  if (s !== subLessonIndex) return sub
+                  
+                  return {
+                    ...sub,
+                    resources: sub.resources.filter((_, r) => r !== resourceIndex)
+                  }
+                })
+              }
+            })
+          }
+        })
+      }
+    }))
+  }
+
+  // ==================== UTILITY FUNCTIONS ====================
   const calculateTotalDuration = () => {
     let totalMinutes = 0
     
@@ -975,6 +1062,43 @@ export default function CreateYouTubeCoursePage() {
     return total
   }
 
+  // ==================== VALIDATION ====================
+  const validateCourse = (): string[] => {
+    const errors: string[] = []
+    
+    if (!courseData.title.trim()) errors.push('Course title is required')
+    if (!courseData.description.trim()) errors.push('Course description is required')
+    if (!courseData.shortDescription.trim()) errors.push('Short description is required')
+    if (!courseData.thumbnail.trim()) errors.push('Thumbnail URL is required')
+    
+    if (modules.length === 0) {
+      errors.push('Course must have at least one module')
+    } else {
+      modules.forEach((module, mi) => {
+        if (!module.title.trim()) errors.push(`Module ${mi + 1} title is required`)
+        
+        if (module.chapters.length === 0) {
+          errors.push(`Module "${module.title || mi + 1}" must have at least one chapter`)
+        } else {
+          module.chapters.forEach((chapter, ci) => {
+            if (!chapter.title.trim()) errors.push(`Chapter ${ci + 1} in Module ${mi + 1} title is required`)
+            
+            if (chapter.lessons.length === 0) {
+              errors.push(`Chapter "${chapter.title || ci + 1}" must have at least one lesson`)
+            } else {
+              chapter.lessons.forEach((lesson, li) => {
+                if (!lesson.title.trim()) errors.push(`Lesson ${li + 1} in Chapter ${ci + 1} title is required`)
+              })
+            }
+          })
+        }
+      })
+    }
+    
+    return errors
+  }
+
+  // ==================== SUBMIT ====================
   const handleSubmit = async () => {
     const errors = validateCourse()
     if (errors.length > 0) {
@@ -989,23 +1113,59 @@ export default function CreateYouTubeCoursePage() {
     setLoading(true)
     
     try {
-      const coursePayload = {
+      // Prepare payload WITHOUT _id fields
+      const payload = {
         ...courseData,
-        previewVideo: previewVideo ? {
-          type: 'youtube' as const,
-          videoId: previewVideo.videoId,
-          url: previewVideo.url,
-          thumbnailUrl: previewVideo.thumbnailUrl
-        } : undefined,
-        modules: modules
+        previewVideo: previewVideo || undefined,
+        modules: modules.map((module, moduleIndex) => ({
+          title: module.title,
+          description: module.description,
+          thumbnailUrl: module.thumbnailUrl,
+          order: moduleIndex,
+          chapters: module.chapters.map((chapter, chapterIndex) => ({
+            title: chapter.title,
+            description: chapter.description,
+            order: chapterIndex,
+            lessons: chapter.lessons.map((lesson, lessonIndex) => ({
+              title: lesson.title,
+              description: lesson.description,
+              content: lesson.content,
+              videoSource: lesson.videoSource,
+              duration: lesson.duration || 0,
+              isPreview: lesson.isPreview || false,
+              order: lessonIndex,
+              resources: lesson.resources.map(resource => ({
+                title: resource.title,
+                url: resource.url,
+                type: resource.type,
+                description: resource.description
+              })),
+              subLessons: lesson.subLessons.map((sub, subIndex) => ({
+                title: sub.title,
+                description: sub.description,
+                content: sub.content,
+                videoSource: sub.videoSource,
+                duration: sub.duration || 0,
+                isPreview: sub.isPreview || false,
+                order: subIndex,
+                resources: sub.resources.map(resource => ({
+                  title: resource.title,
+                  url: resource.url,
+                  type: resource.type,
+                  description: resource.description
+                }))
+              }))
+            }))
+          }))
+        }))
       }
-      
+
       const response = await fetch('/api/admin/youtube-courses', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(coursePayload)
+        body: JSON.stringify(payload)
       })
       
       const data = await response.json()
@@ -1014,15 +1174,16 @@ export default function CreateYouTubeCoursePage() {
         toast({
           title: 'Course Created!',
           description: 'YouTube course has been created successfully',
-          variant: 'default'
         })
         
         router.push(`/admin/youtube-courses/${data._id}`)
+        router.refresh()
       } else {
-        throw new Error(data.error || 'Failed to create course')
+        throw new Error(data.error || data.details?.join(', ') || 'Failed to create course')
       }
       
     } catch (error: any) {
+      console.error('Error creating course:', error)
       toast({
         title: 'Error',
         description: error.message || 'Failed to create course',
@@ -1033,6 +1194,7 @@ export default function CreateYouTubeCoursePage() {
     }
   }
 
+  // ==================== PREVIEW MODE ====================
   if (previewMode) {
     return (
       <div className="min-h-screen bg-gray-50 p-6">
@@ -1047,7 +1209,6 @@ export default function CreateYouTubeCoursePage() {
           
           <Card>
             <CardContent className="p-6">
-              {/* Course Header */}
               <div className="mb-8">
                 <div className="flex gap-4 mb-4">
                   <Badge className="bg-blue-500">{courseData.category || 'Uncategorized'}</Badge>
@@ -1086,9 +1247,7 @@ export default function CreateYouTubeCoursePage() {
                     <div className="aspect-video rounded-lg overflow-hidden">
                       <iframe
                         src={`https://www.youtube.com/embed/${previewVideo.videoId}`}
-                        title="YouTube video player"
                         className="w-full h-full"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                         allowFullScreen
                       />
                     </div>
@@ -1096,7 +1255,6 @@ export default function CreateYouTubeCoursePage() {
                 )}
               </div>
               
-              {/* Course Stats */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
                 <div className="bg-gray-100 p-4 rounded-lg text-center">
                   <div className="text-2xl font-bold">{calculateTotalDuration()}</div>
@@ -1118,12 +1276,11 @@ export default function CreateYouTubeCoursePage() {
                 </div>
               </div>
               
-              {/* Course Content */}
               <div>
                 <h3 className="text-xl font-bold mb-4">Course Content</h3>
                 <div className="space-y-4">
                   {modules.map((module, moduleIndex) => (
-                    <div key={module._id} className="border rounded-lg">
+                    <div key={moduleIndex} className="border rounded-lg">
                       <div className="p-4 bg-gray-50">
                         <h4 className="font-semibold">Module {moduleIndex + 1}: {module.title}</h4>
                         {module.description && (
@@ -1133,7 +1290,7 @@ export default function CreateYouTubeCoursePage() {
                       
                       <div className="p-4">
                         {module.chapters.map((chapter, chapterIndex) => (
-                          <div key={chapter._id} className="ml-4 mb-4 last:mb-0">
+                          <div key={chapterIndex} className="ml-4 mb-4 last:mb-0">
                             <h5 className="font-medium">Chapter {chapterIndex + 1}: {chapter.title}</h5>
                             {chapter.description && (
                               <p className="text-sm text-gray-600 mb-2">{chapter.description}</p>
@@ -1141,7 +1298,7 @@ export default function CreateYouTubeCoursePage() {
                             
                             <div className="ml-4 space-y-2">
                               {chapter.lessons.map((lesson, lessonIndex) => (
-                                <div key={lesson._id} className="border-l-2 border-blue-200 pl-4">
+                                <div key={lessonIndex} className="border-l-2 border-blue-200 pl-4">
                                   <h6 className="font-medium">Lesson {lessonIndex + 1}: {lesson.title}</h6>
                                   {lesson.description && (
                                     <p className="text-sm text-gray-600 mb-1">{lesson.description}</p>
@@ -1149,7 +1306,7 @@ export default function CreateYouTubeCoursePage() {
                                   {lesson.videoSource && (
                                     <div className="flex items-center text-sm text-gray-500 mb-1">
                                       <Youtube className="w-4 h-4 mr-1 text-red-600" />
-                                      YouTube Video: {lesson.videoSource.videoId}
+                                      YouTube Video
                                     </div>
                                   )}
                                   {lesson.duration > 0 && (
@@ -1161,18 +1318,12 @@ export default function CreateYouTubeCoursePage() {
                                   {lesson.subLessons.length > 0 && (
                                     <div className="ml-4 mt-2 space-y-2">
                                       {lesson.subLessons.map((subLesson, subLessonIndex) => (
-                                        <div key={subLesson._id} className="border-l-2 border-green-200 pl-4">
+                                        <div key={subLessonIndex} className="border-l-2 border-green-200 pl-4">
                                           <h6 className="text-sm font-medium">
                                             Sub-lesson {subLessonIndex + 1}: {subLesson.title}
                                           </h6>
                                           {subLesson.description && (
                                             <p className="text-xs text-gray-600">{subLesson.description}</p>
-                                          )}
-                                          {subLesson.videoSource && (
-                                            <div className="flex items-center text-xs text-gray-500">
-                                              <Youtube className="w-3 h-3 mr-1 text-red-600" />
-                                              YouTube Video
-                                            </div>
                                           )}
                                         </div>
                                       ))}
@@ -1195,187 +1346,191 @@ export default function CreateYouTubeCoursePage() {
     )
   }
   
+  // ==================== CREATE MODE ====================
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-3xl font-bold">Create YouTube Course</h1>
-          <div className="flex gap-2">
+    <TooltipProvider>
+      <div className="min-h-screen bg-gray-50 p-6">
+        <div className="max-w-7xl mx-auto">
+          {/* Header */}
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-3xl font-bold">Create YouTube Course</h1>
             <Button onClick={() => setPreviewMode(true)} variant="outline">
               <Eye className="w-4 h-4 mr-2" />
               Preview
             </Button>
           </div>
-        </div>
-        
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Main Content - 3 columns */}
-          <div className="lg:col-span-3 space-y-6">
-            {/* Basic Information */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <BookOpen className="w-5 h-5" />
-                  Course Information
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="title">Course Title *</Label>
-                  <Input
-                    id="title"
-                    value={courseData.title}
-                    onChange={(e) => setCourseData(prev => ({ ...prev, title: e.target.value }))}
-                    placeholder="Enter course title"
-                    maxLength={100}
-                  />
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="shortDescription">Short Description *</Label>
-                  <Textarea
-                    id="shortDescription"
-                    value={courseData.shortDescription}
-                    onChange={(e) => setCourseData(prev => ({ ...prev, shortDescription: e.target.value }))}
-                    placeholder="Brief description shown in course cards"
-                    maxLength={200}
-                    rows={2}
-                  />
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="description">Full Description *</Label>
-                  <Textarea
-                    id="description"
-                    value={courseData.description}
-                    onChange={(e) => setCourseData(prev => ({ ...prev, description: e.target.value }))}
-                    placeholder="Detailed course description"
-                    rows={6}
-                  />
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
+          
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            {/* Main Content - 3 columns */}
+            <div className="lg:col-span-3 space-y-6">
+              {/* Basic Information */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <BookOpen className="w-5 h-5" />
+                    Course Information
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="category">Category</Label>
+                    <Label htmlFor="title">Course Title *</Label>
                     <Input
-                      id="category"
-                      value={courseData.category}
-                      onChange={(e) => setCourseData(prev => ({ ...prev, category: e.target.value }))}
-                      placeholder="e.g., Fashion Design"
-                      maxLength={50}
+                      id="title"
+                      value={courseData.title}
+                      onChange={(e) => setCourseData(prev => ({ ...prev, title: e.target.value }))}
+                      placeholder="Enter course title"
+                      maxLength={100}
                     />
                   </div>
                   
                   <div className="space-y-2">
-                    <Label htmlFor="level">Level</Label>
-                    <Select
-                      value={courseData.level}
-                      onValueChange={(value: 'beginner' | 'intermediate' | 'advanced') => 
-                        setCourseData(prev => ({ ...prev, level: value }))
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="beginner">Beginner</SelectItem>
-                        <SelectItem value="intermediate">Intermediate</SelectItem>
-                        <SelectItem value="advanced">Advanced</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Label htmlFor="shortDescription">Short Description *</Label>
+                    <Textarea
+                      id="shortDescription"
+                      value={courseData.shortDescription}
+                      onChange={(e) => setCourseData(prev => ({ ...prev, shortDescription: e.target.value }))}
+                      placeholder="Brief description shown in course cards"
+                      maxLength={200}
+                      rows={2}
+                    />
                   </div>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="thumbnail">Thumbnail URL *</Label>
-                  <div className="flex gap-2">
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="description">Full Description *</Label>
+                    <Textarea
+                      id="description"
+                      value={courseData.description}
+                      onChange={(e) => setCourseData(prev => ({ ...prev, description: e.target.value }))}
+                      placeholder="Detailed course description"
+                      rows={6}
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="category">Category</Label>
+                      <Input
+                        id="category"
+                        value={courseData.category}
+                        onChange={(e) => setCourseData(prev => ({ ...prev, category: e.target.value }))}
+                        placeholder="e.g., Fashion Design"
+                        maxLength={50}
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label htmlFor="level">Level</Label>
+                      <Select
+                        value={courseData.level}
+                        onValueChange={(value: 'beginner' | 'intermediate' | 'advanced') => 
+                          setCourseData(prev => ({ ...prev, level: value }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="beginner">Beginner</SelectItem>
+                          <SelectItem value="intermediate">Intermediate</SelectItem>
+                          <SelectItem value="advanced">Advanced</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="thumbnail">Thumbnail URL *</Label>
                     <Input
                       id="thumbnail"
                       value={courseData.thumbnail}
                       onChange={(e) => setCourseData(prev => ({ ...prev, thumbnail: e.target.value }))}
                       placeholder="https://example.com/image.jpg"
                     />
+                    {courseData.thumbnail && (
+                      <div className="mt-2">
+                        <Label className="text-sm text-gray-500 mb-2">Thumbnail Preview:</Label>
+                        <CourseImage 
+                          src={courseData.thumbnail} 
+                          alt="Thumbnail preview" 
+                          className="h-40 w-full object-cover rounded border"
+                        />
+                      </div>
+                    )}
                   </div>
-                  {courseData.thumbnail && (
-                    <div className="mt-2">
-                      <Label className="text-sm text-gray-500 mb-2">Thumbnail Preview:</Label>
-                      <CourseImage 
-                        src={courseData.thumbnail} 
-                        alt="Thumbnail preview" 
-                        className="h-40 w-full object-cover rounded border"
-                      />
+                </CardContent>
+              </Card>
+              
+              {/* Course Preview Video */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Youtube className="w-5 h-5" />
+                    Course Preview Video (Optional)
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {previewVideo ? (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Youtube className="w-5 h-5 text-red-600" />
+                          <span className="font-medium">YouTube Video: {previewVideo.videoId}</span>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setPreviewVideo(null)}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                      <div className="aspect-video rounded-lg overflow-hidden border">
+                        <iframe
+                          src={`https://www.youtube.com/embed/${previewVideo.videoId}`}
+                          className="w-full h-full"
+                          allowFullScreen
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <Label>YouTube URL for Preview</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          value={previewVideoUrl}
+                          onChange={(e) => setPreviewVideoUrl(e.target.value)}
+                          placeholder="https://www.youtube.com/watch?v=..."
+                          disabled={youtubeLoading}
+                        />
+                        <Button
+                          type="button"
+                          onClick={handlePreviewYouTube}
+                          disabled={youtubeLoading}
+                        >
+                          {youtubeLoading ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Plus className="w-4 h-4" />
+                          )}
+                        </Button>
+                      </div>
                     </div>
                   )}
-                </div>
-              </CardContent>
-            </Card>
-            
-            {/* Course Preview Video */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Youtube className="w-5 h-5" />
-                  Course Preview Video (Optional)
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {previewVideo ? (
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Youtube className="w-5 h-5 text-red-600" />
-                        <span className="font-medium">{previewVideo.videoId}</span>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setPreviewVideo(null)}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                    <div className="aspect-video rounded-lg overflow-hidden border">
-                      <iframe
-                        src={`https://www.youtube.com/embed/${previewVideo.videoId}`}
-                        className="w-full h-full"
-                        allowFullScreen
-                      />
-                    </div>
-                  </div>
-                ) : (
+                </CardContent>
+              </Card>
+              
+              {/* Thumbnail Helper */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <ImageIcon className="w-5 h-5" />
+                    Thumbnail Helper
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
                   <div className="space-y-2">
-                    <Label>YouTube URL for Preview</Label>
-                    <div className="flex gap-2">
-                      <Input
-                        value={previewVideoUrl}
-                        onChange={(e) => setPreviewVideoUrl(e.target.value)}
-                        placeholder="https://www.youtube.com/watch?v=..."
-                      />
-                      <Button
-                        type="button"
-                        onClick={handlePreviewYouTube}
-                      >
-                        <Plus className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-            
-            {/* Thumbnail Helper */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ImageIcon className="w-5 h-5" />
-                  Thumbnail Helper
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Auto-fill from YouTube</Label>
-                  <div className="flex gap-2">
+                    <Label>Auto-fill from YouTube</Label>
                     <Input
                       placeholder="Paste YouTube URL to auto-fill thumbnail"
                       onBlur={(e) => autoFillThumbnailFromYouTube(e.target.value)}
@@ -1385,75 +1540,98 @@ export default function CreateYouTubeCoursePage() {
                         }
                       }}
                     />
+                    <p className="text-xs text-gray-500">
+                      Enter any YouTube URL to automatically set the course thumbnail
+                    </p>
                   </div>
-                  <p className="text-xs text-gray-500">
-                    Enter any YouTube URL to automatically set the course thumbnail
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-            
-            {/* Course Content Modules */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Video className="w-5 h-5" />
-                  Course Content
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {modules.map((module, moduleIndex) => (
-                    <div key={module._id} className="border rounded-lg p-4">
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-2">
-                          <DragHandle
-                            onMoveUp={() => moveModule(moduleIndex, 'up')}
-                            onMoveDown={() => moveModule(moduleIndex, 'down')}
-                            canMoveUp={moduleIndex > 0}
-                            canMoveDown={moduleIndex < modules.length - 1}
-                          />
-                          <h3 className="font-semibold">Module {moduleIndex + 1}</h3>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => removeModule(moduleIndex)}
-                            disabled={modules.length <= 1}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </div>
-                      
-                      <div className="space-y-4">
-                        <div className="space-y-2">
-                          <Label>Module Title *</Label>
-                          <Input
-                            value={module.title}
-                            onChange={(e) => updateModule(moduleIndex, 'title', e.target.value)}
-                            placeholder="Module title"
-                          />
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <Label>Module Description (Optional)</Label>
-                          <Textarea
-                            value={module.description || ''}
-                            onChange={(e) => updateModule(moduleIndex, 'description', e.target.value)}
-                            placeholder="Brief module description"
-                            rows={2}
-                          />
+                </CardContent>
+              </Card>
+              
+              {/* Course Content Modules */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FolderOpen className="w-5 h-5" />
+                    Course Content
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Accordion
+                    type="multiple"
+                    value={expandedModules}
+                    onValueChange={setExpandedModules}
+                    className="space-y-4"
+                  >
+                    {modules.map((module, moduleIndex) => (
+                      <AccordionItem key={`module-${moduleIndex}`} value={`module-${moduleIndex}`} className="border rounded-lg">
+                        <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b">
+                          <div className="flex items-center gap-3">
+                            <DragHandle
+                              onMoveUp={() => moveModule(moduleIndex, 'up')}
+                              onMoveDown={() => moveModule(moduleIndex, 'down')}
+                              canMoveUp={moduleIndex > 0}
+                              canMoveDown={moduleIndex < modules.length - 1}
+                            />
+                            <div>
+                              <h3 className="font-semibold">Module {moduleIndex + 1}: {module.title}</h3>
+                              {module.description && (
+                                <p className="text-sm text-gray-600 truncate max-w-md">{module.description}</p>
+                              )}
+                              <p className="text-xs text-gray-500">
+                                {module.chapters.length} chapters,{' '}
+                                {module.chapters.reduce((acc, ch) => acc + ch.lessons.length, 0)} lessons
+                              </p>
+                            </div>
+                          </div>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => removeModule(moduleIndex)}
+                                disabled={modules.length <= 1}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Delete module</TooltipContent>
+                          </Tooltip>
                         </div>
                         
-                        <Separator />
+                        <AccordionTrigger className="px-4 py-2 hover:no-underline">
+                          <span className="text-sm font-medium">Module Settings</span>
+                        </AccordionTrigger>
+                        
+                        <AccordionContent className="px-4 pb-4">
+                          <div className="space-y-4 pt-4">
+                            <div className="space-y-2">
+                              <Label>Module Title *</Label>
+                              <Input
+                                value={module.title}
+                                onChange={(e) => updateModule(moduleIndex, 'title', e.target.value)}
+                                placeholder="Module title"
+                              />
+                            </div>
+                            
+                            <div className="space-y-2">
+                              <Label>Module Description (Optional)</Label>
+                              <Textarea
+                                value={module.description || ''}
+                                onChange={(e) => updateModule(moduleIndex, 'description', e.target.value)}
+                                placeholder="Brief module description"
+                                rows={2}
+                              />
+                            </div>
+                          </div>
+                        </AccordionContent>
                         
                         {/* Chapters */}
-                        <div className="space-y-4">
-                          <div className="flex items-center justify-between">
+                        <div className="px-4 pb-4">
+                          <div className="flex items-center justify-between mb-4">
                             <h4 className="font-medium">Chapters</h4>
                             <Button
+                              type="button"
                               size="sm"
                               onClick={() => addChapter(moduleIndex)}
                               variant="outline"
@@ -1463,57 +1641,82 @@ export default function CreateYouTubeCoursePage() {
                             </Button>
                           </div>
                           
-                          {module.chapters.map((chapter, chapterIndex) => (
-                            <div key={chapter._id} className="border-l-2 border-blue-200 pl-4">
-                              <div className="flex items-center justify-between mb-2">
-                                <div className="flex items-center gap-2">
-                                  <DragHandle
-                                    onMoveUp={() => moveChapter(moduleIndex, chapterIndex, 'up')}
-                                    onMoveDown={() => moveChapter(moduleIndex, chapterIndex, 'down')}
-                                    canMoveUp={chapterIndex > 0}
-                                    canMoveDown={chapterIndex < module.chapters.length - 1}
-                                  />
-                                  <h5 className="font-medium">Chapter {chapterIndex + 1}</h5>
-                                </div>
-                                <div className="flex gap-2">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => removeChapter(moduleIndex, chapterIndex)}
-                                    disabled={module.chapters.length <= 1}
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </Button>
-                                </div>
-                              </div>
-                              
-                              <div className="space-y-4">
-                                <div className="space-y-2">
-                                  <Label>Chapter Title *</Label>
-                                  <Input
-                                    value={chapter.title}
-                                    onChange={(e) => updateChapter(moduleIndex, chapterIndex, 'title', e.target.value)}
-                                    placeholder="Chapter title"
-                                  />
+                          <Accordion
+                            type="multiple"
+                            value={expandedChapters}
+                            onValueChange={setExpandedChapters}
+                            className="space-y-3"
+                          >
+                            {module.chapters.map((chapter, chapterIndex) => (
+                              <AccordionItem 
+                                key={`chapter-${moduleIndex}-${chapterIndex}`} 
+                                value={`chapter-${moduleIndex}-${chapterIndex}`} 
+                                className="border rounded-lg"
+                              >
+                                <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b">
+                                  <div className="flex items-center gap-3">
+                                    <DragHandle
+                                      onMoveUp={() => moveChapter(moduleIndex, chapterIndex, 'up')}
+                                      onMoveDown={() => moveChapter(moduleIndex, chapterIndex, 'down')}
+                                      canMoveUp={chapterIndex > 0}
+                                      canMoveDown={chapterIndex < module.chapters.length - 1}
+                                    />
+                                    <div>
+                                      <h4 className="font-medium">Chapter {chapterIndex + 1}: {chapter.title}</h4>
+                                      <p className="text-xs text-gray-500">
+                                        {chapter.lessons.length} lessons
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => removeChapter(moduleIndex, chapterIndex)}
+                                        disabled={module.chapters.length <= 1}
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Delete chapter</TooltipContent>
+                                  </Tooltip>
                                 </div>
                                 
-                                <div className="space-y-2">
-                                  <Label>Chapter Description (Optional)</Label>
-                                  <Textarea
-                                    value={chapter.description || ''}
-                                    onChange={(e) => updateChapter(moduleIndex, chapterIndex, 'description', e.target.value)}
-                                    placeholder="Brief chapter description"
-                                    rows={2}
-                                  />
-                                </div>
+                                <AccordionTrigger className="px-3 py-2 hover:no-underline">
+                                  <span className="text-sm font-medium">Chapter Settings</span>
+                                </AccordionTrigger>
                                 
-                                <Separator />
+                                <AccordionContent className="px-3 pb-3">
+                                  <div className="space-y-4 pt-4">
+                                    <div className="space-y-2">
+                                      <Label>Chapter Title *</Label>
+                                      <Input
+                                        value={chapter.title}
+                                        onChange={(e) => updateChapter(moduleIndex, chapterIndex, 'title', e.target.value)}
+                                        placeholder="Chapter title"
+                                      />
+                                    </div>
+                                    
+                                    <div className="space-y-2">
+                                      <Label>Chapter Description (Optional)</Label>
+                                      <Textarea
+                                        value={chapter.description || ''}
+                                        onChange={(e) => updateChapter(moduleIndex, chapterIndex, 'description', e.target.value)}
+                                        placeholder="Brief chapter description"
+                                        rows={2}
+                                      />
+                                    </div>
+                                  </div>
+                                </AccordionContent>
                                 
                                 {/* Lessons */}
-                                <div className="space-y-4">
-                                  <div className="flex items-center justify-between">
+                                <div className="px-3 pb-3">
+                                  <div className="flex items-center justify-between mb-4">
                                     <h5 className="font-medium">Lessons</h5>
                                     <Button
+                                      type="button"
                                       size="sm"
                                       onClick={() => addLesson(moduleIndex, chapterIndex)}
                                       variant="outline"
@@ -1523,641 +1726,663 @@ export default function CreateYouTubeCoursePage() {
                                     </Button>
                                   </div>
                                   
-                                  {chapter.lessons.map((lesson, lessonIndex) => (
-                                    <div key={lesson._id} className="border-l-2 border-green-200 pl-4">
-                                      <div className="flex items-center justify-between mb-2">
-                                        <div className="flex items-center gap-2">
-                                          <DragHandle
-                                            onMoveUp={() => moveLesson(moduleIndex, chapterIndex, lessonIndex, 'up')}
-                                            onMoveDown={() => moveLesson(moduleIndex, chapterIndex, lessonIndex, 'down')}
-                                            canMoveUp={lessonIndex > 0}
-                                            canMoveDown={lessonIndex < chapter.lessons.length - 1}
-                                          />
-                                          <h6 className="font-medium">Lesson {lessonIndex + 1}</h6>
-                                          {lesson.isPreview && (
-                                            <Badge variant="outline" className="text-xs">Preview</Badge>
-                                          )}
-                                        </div>
-                                        <div className="flex gap-2">
-                                          <Button
-                                            size="sm"
-                                            variant="outline"
-                                            onClick={() => removeLesson(moduleIndex, chapterIndex, lessonIndex)}
-                                            disabled={chapter.lessons.length <= 1}
-                                          >
-                                            <Trash2 className="w-4 h-4" />
-                                          </Button>
-                                        </div>
-                                      </div>
-                                      
-                                      <div className="space-y-4">
-                                        <div className="space-y-2">
-                                          <Label>Lesson Title *</Label>
-                                          <Input
-                                            value={lesson.title}
-                                            onChange={(e) => updateLesson(moduleIndex, chapterIndex, lessonIndex, 'title', e.target.value)}
-                                            placeholder="Lesson title"
-                                          />
-                                        </div>
-                                        
-                                        <div className="space-y-2">
-                                          <Label>Lesson Description</Label>
-                                          <Textarea
-                                            value={lesson.description}
-                                            onChange={(e) => updateLesson(moduleIndex, chapterIndex, lessonIndex, 'description', e.target.value)}
-                                            placeholder="Lesson description"
-                                            rows={2}
-                                          />
-                                        </div>
-                                        
-                                        <div className="space-y-2">
-                                          <Label>YouTube Video (Optional)</Label>
-                                          <div className="flex gap-2">
-                                            <Input
-                                              value={lesson.videoSource?.videoId || ''}
-                                              onChange={(e) => handleLessonYouTubeVideo(moduleIndex, chapterIndex, lessonIndex, e.target.value)}
-                                              placeholder="https://youtube.com/watch?v=..."
+                                  <Accordion
+                                    type="multiple"
+                                    value={expandedLessons}
+                                    onValueChange={setExpandedLessons}
+                                    className="space-y-3"
+                                  >
+                                    {chapter.lessons.map((lesson, lessonIndex) => (
+                                      <AccordionItem 
+                                        key={`lesson-${moduleIndex}-${chapterIndex}-${lessonIndex}`} 
+                                        value={`lesson-${moduleIndex}-${chapterIndex}-${lessonIndex}`} 
+                                        className="border rounded-lg"
+                                      >
+                                        <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b">
+                                          <div className="flex items-center gap-3">
+                                            <DragHandle
+                                              onMoveUp={() => moveLesson(moduleIndex, chapterIndex, lessonIndex, 'up')}
+                                              onMoveDown={() => moveLesson(moduleIndex, chapterIndex, lessonIndex, 'down')}
+                                              canMoveUp={lessonIndex > 0}
+                                              canMoveDown={lessonIndex < chapter.lessons.length - 1}
                                             />
-                                            {lesson.videoSource && (
-                                              <Button
-                                                size="sm"
-                                                variant="outline"
-                                                onClick={() => updateLesson(moduleIndex, chapterIndex, lessonIndex, 'videoSource', undefined)}
-                                              >
-                                                <Trash2 className="w-4 h-4" />
-                                              </Button>
-                                            )}
-                                          </div>
-                                        </div>
-                                        
-                                        <div className="grid grid-cols-2 gap-4">
-                                          <div className="space-y-2">
-                                            <Label>Duration (minutes)</Label>
-                                            <Input
-                                              type="number"
-                                              value={Math.round(lesson.duration / 60)}
-                                              onChange={(e) => updateLesson(moduleIndex, chapterIndex, lessonIndex, 'duration', (parseInt(e.target.value) || 0) * 60)}
-                                              placeholder="0"
-                                              min="0"
-                                            />
-                                          </div>
-                                          
-                                          <div className="space-y-2">
-                                            <Label>Preview Lesson</Label>
-                                            <div className="flex items-center gap-2">
-                                              <Switch
-                                                checked={lesson.isPreview}
-                                                onCheckedChange={(checked) => 
-                                                  updateLesson(moduleIndex, chapterIndex, lessonIndex, 'isPreview', checked)
-                                                }
-                                              />
-                                              <span className="text-sm text-gray-500">
-                                                Allow preview
-                                              </span>
-                                            </div>
-                                          </div>
-                                        </div>
-                                        
-                                        {/* Content */}
-                                        <div className="space-y-2">
-                                          <Label>Content (HTML/Markdown)</Label>
-                                          <Textarea
-                                            value={lesson.content || ''}
-                                            onChange={(e) => updateLesson(moduleIndex, chapterIndex, lessonIndex, 'content', e.target.value)}
-                                            placeholder="Additional lesson content"
-                                            rows={3}
-                                          />
-                                        </div>
-                                        
-                                        {/* Resources */}
-                                        <div className="space-y-3">
-                                          <div className="flex items-center justify-between">
-                                            <Label>Resources</Label>
-                                            <Button
-                                              type="button"
-                                              size="sm"
-                                              variant="outline"
-                                              onClick={() => addResource(moduleIndex, chapterIndex, lessonIndex)}
-                                            >
-                                              <Plus className="w-4 h-4 mr-2" />
-                                              Add Resource
-                                            </Button>
-                                          </div>
-                                          
-                                          {lesson.resources.map((resource, resourceIndex) => (
-                                            <div key={resource._id} className="space-y-2 border p-3 rounded">
-                                              <div className="flex justify-between">
-                                                <Label className="text-sm">Resource {resourceIndex + 1}</Label>
-                                                <Button
-                                                  size="sm"
-                                                  variant="ghost"
-                                                  onClick={() => removeResource(moduleIndex, chapterIndex, lessonIndex, resourceIndex)}
-                                                >
-                                                  <Trash2 className="w-4 h-4" />
-                                                </Button>
+                                            <div>
+                                              <div className="flex items-center gap-2">
+                                                <h5 className="font-medium">Lesson {lessonIndex + 1}: {lesson.title}</h5>
+                                                {lesson.isPreview && (
+                                                  <Badge variant="outline" className="text-xs">Preview</Badge>
+                                                )}
                                               </div>
-                                              <Input
-                                                value={resource.title}
-                                                onChange={(e) => updateResource(moduleIndex, chapterIndex, lessonIndex, resourceIndex, 'title', e.target.value)}
-                                                placeholder="Resource title"
-                                              />
-                                              <Input
-                                                value={resource.url}
-                                                onChange={(e) => updateResource(moduleIndex, chapterIndex, lessonIndex, resourceIndex, 'url', e.target.value)}
-                                                placeholder="Resource URL"
-                                              />
-                                              <Select
-                                                value={resource.type}
-                                                onValueChange={(value: 'pdf' | 'document' | 'link' | 'youtube') => 
-                                                  updateResource(moduleIndex, chapterIndex, lessonIndex, resourceIndex, 'type', value)
-                                                }
-                                              >
-                                                <SelectTrigger>
-                                                  <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                  <SelectItem value="pdf">PDF</SelectItem>
-                                                  <SelectItem value="document">Document</SelectItem>
-                                                  <SelectItem value="link">Link</SelectItem>
-                                                  <SelectItem value="youtube">YouTube</SelectItem>
-                                                </SelectContent>
-                                              </Select>
+                                              <div className="flex items-center gap-2 text-xs text-gray-500">
+                                                {lesson.videoSource ? (
+                                                  <>
+                                                    <Youtube className="w-3 h-3 text-red-600" />
+                                                    <span>YouTube Video</span>
+                                                  </>
+                                                ) : (
+                                                  <span>No video</span>
+                                                )}
+                                                {lesson.duration > 0 && (
+                                                  <>
+                                                    <Clock className="w-3 h-3" />
+                                                    <span>{Math.round(lesson.duration / 60)} min</span>
+                                                  </>
+                                                )}
+                                              </div>
                                             </div>
-                                          ))}
-                                        </div>
-                                        
-                                        {/* Sub-lessons */}
-                                        <div className="space-y-3">
-                                          <div className="flex items-center justify-between">
-                                            <Label>Sub-lessons</Label>
-                                            <Button
-                                              type="button"
-                                              size="sm"
-                                              variant="outline"
-                                              onClick={() => addSubLesson(moduleIndex, chapterIndex, lessonIndex)}
-                                            >
-                                              <Plus className="w-4 h-4 mr-2" />
-                                              Add Sub-lesson
-                                            </Button>
                                           </div>
-                                          
-                                          {lesson.subLessons.map((subLesson, subLessonIndex) => (
-                                            <div key={subLesson._id} className="border-l-2 border-yellow-200 pl-4">
-                                              <div className="flex items-center justify-between mb-2">
-                                                <h6 className="font-medium">Sub-lesson {subLessonIndex + 1}</h6>
+                                          <div className="flex items-center gap-2">
+                                            <Switch
+                                              checked={lesson.isPreview}
+                                              onCheckedChange={(checked) => 
+                                                updateLesson(moduleIndex, chapterIndex, lessonIndex, 'isPreview', checked)
+                                              }
+                                              className="scale-75"
+                                            />
+                                            <Tooltip>
+                                              <TooltipTrigger asChild>
                                                 <Button
+                                                  type="button"
                                                   size="sm"
                                                   variant="outline"
-                                                  onClick={() => removeSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex)}
+                                                  onClick={() => removeLesson(moduleIndex, chapterIndex, lessonIndex)}
+                                                  disabled={chapter.lessons.length <= 1}
                                                 >
                                                   <Trash2 className="w-4 h-4" />
                                                 </Button>
+                                              </TooltipTrigger>
+                                              <TooltipContent>Delete lesson</TooltipContent>
+                                            </Tooltip>
+                                          </div>
+                                        </div>
+                                        
+                                        <AccordionTrigger className="px-3 py-2 hover:no-underline">
+                                          <span className="text-sm font-medium">Lesson Details</span>
+                                        </AccordionTrigger>
+                                        
+                                        <AccordionContent className="px-3 pb-3">
+                                          <div className="space-y-4 pt-4">
+                                            <div className="space-y-2">
+                                              <Label>Lesson Title *</Label>
+                                              <Input
+                                                value={lesson.title}
+                                                onChange={(e) => updateLesson(moduleIndex, chapterIndex, lessonIndex, 'title', e.target.value)}
+                                                placeholder="Lesson title"
+                                              />
+                                            </div>
+                                            
+                                            <div className="space-y-2">
+                                              <Label>Lesson Description</Label>
+                                              <Textarea
+                                                value={lesson.description}
+                                                onChange={(e) => updateLesson(moduleIndex, chapterIndex, lessonIndex, 'description', e.target.value)}
+                                                placeholder="Lesson description"
+                                                rows={3}
+                                              />
+                                            </div>
+                                            
+                                            <div className="space-y-2">
+                                              <Label>YouTube Video</Label>
+                                              <div className="flex gap-2">
+                                                <Input
+                                                  placeholder="Paste YouTube URL"
+                                                  onBlur={(e) => {
+                                                    if (e.target.value.trim()) {
+                                                      handleLessonYouTubeVideo(moduleIndex, chapterIndex, lessonIndex, e.target.value)
+                                                    }
+                                                  }}
+                                                />
+                                                {lesson.videoSource && (
+                                                  <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => updateLesson(moduleIndex, chapterIndex, lessonIndex, 'videoSource', undefined)}
+                                                  >
+                                                    <Trash2 className="w-4 h-4" />
+                                                  </Button>
+                                                )}
                                               </div>
-                                              
-                                              <div className="space-y-4">
-                                                <div className="space-y-2">
-                                                  <Label>Sub-lesson Title</Label>
-                                                  <Input
-                                                    value={subLesson.title}
-                                                    onChange={(e) => updateSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, 'title', e.target.value)}
-                                                    placeholder="Sub-lesson title"
-                                                  />
-                                                </div>
-                                                
-                                                <div className="space-y-2">
-                                                  <Label>Sub-lesson Description</Label>
-                                                  <Textarea
-                                                    value={subLesson.description}
-                                                    onChange={(e) => updateSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, 'description', e.target.value)}
-                                                    placeholder="Sub-lesson description"
-                                                    rows={2}
-                                                  />
-                                                </div>
-                                                
-                                                <div className="space-y-2">
-                                                  <Label>YouTube Video (Optional)</Label>
-                                                  <div className="flex gap-2">
-                                                    <Input
-                                                      value={subLesson.videoSource?.videoId || ''}
-                                                      onChange={(e) => handleSubLessonYouTubeVideo(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, e.target.value)}
-                                                      placeholder="https://youtube.com/watch?v=..."
-                                                    />
-                                                    {subLesson.videoSource && (
-                                                      <Button
-                                                        size="sm"
-                                                        variant="outline"
-                                                        onClick={() => updateSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, 'videoSource', undefined)}
-                                                      >
-                                                        <Trash2 className="w-4 h-4" />
-                                                      </Button>
-                                                    )}
-                                                  </div>
-                                                </div>
-                                                
-                                                <div className="grid grid-cols-2 gap-4">
-                                                  <div className="space-y-2">
-                                                    <Label>Duration (minutes)</Label>
-                                                    <Input
-                                                      type="number"
-                                                      value={Math.round(subLesson.duration / 60)}
-                                                      onChange={(e) => updateSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, 'duration', (parseInt(e.target.value) || 0) * 60)}
-                                                      placeholder="0"
-                                                      min="0"
-                                                    />
-                                                  </div>
-                                                  
-                                                  <div className="space-y-2">
-                                                    <Label>Preview Sub-lesson</Label>
-                                                    <div className="flex items-center gap-2">
-                                                      <Switch
-                                                        checked={subLesson.isPreview}
-                                                        onCheckedChange={(checked) => 
-                                                          updateSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, 'isPreview', checked)
-                                                        }
-                                                      />
-                                                      <span className="text-sm text-gray-500">
-                                                        Allow preview
-                                                      </span>
-                                                    </div>
-                                                  </div>
-                                                </div>
-                                                
-                                                {/* Resources for Sub-lesson */}
-                                                <div className="space-y-3">
-                                                  <div className="flex items-center justify-between">
-                                                    <Label>Resources</Label>
-                                                    <Button
-                                                      size="sm"
-                                                      variant="outline"
-                                                      onClick={() => addResource(moduleIndex, chapterIndex, lessonIndex, subLessonIndex)}
-                                                    >
+                                            </div>
+                                            
+                                            <div className="space-y-2">
+                                              <Label>Duration (minutes)</Label>
+                                              <Input
+                                                type="number"
+                                                value={Math.round(lesson.duration / 60) || 0}
+                                                onChange={(e) => updateLesson(moduleIndex, chapterIndex, lessonIndex, 'duration', (parseInt(e.target.value) || 0) * 60)}
+                                                placeholder="0"
+                                                min="0"
+                                              />
+                                            </div>
+                                            
+                                            <div className="space-y-2">
+                                              <Label>Content (HTML/Markdown)</Label>
+                                              <Textarea
+                                                value={lesson.content || ''}
+                                                onChange={(e) => updateLesson(moduleIndex, chapterIndex, lessonIndex, 'content', e.target.value)}
+                                                placeholder="Additional lesson content"
+                                                rows={4}
+                                              />
+                                            </div>
+                                            
+                                            {/* Resources */}
+                                            <div className="space-y-3">
+                                              <div className="flex items-center justify-between">
+                                                <Label>Resources</Label>
+                                                <Dialog>
+                                                  <DialogTrigger asChild>
+                                                    <Button type="button" size="sm" variant="outline">
                                                       <Plus className="w-4 h-4 mr-2" />
                                                       Add Resource
                                                     </Button>
-                                                  </div>
-                                                  
-                                                  {subLesson.resources.map((resource, resourceIndex) => (
-                                                    <div key={resource._id} className="space-y-2 border p-3 rounded">
-                                                      <div className="flex justify-between">
-                                                        <Label className="text-sm">Resource {resourceIndex + 1}</Label>
-                                                        <Button
-                                                          size="sm"
-                                                          variant="ghost"
-                                                          onClick={() => removeResource(moduleIndex, chapterIndex, lessonIndex, resourceIndex, subLessonIndex)}
-                                                        >
-                                                          <Trash2 className="w-4 h-4" />
-                                                        </Button>
+                                                  </DialogTrigger>
+                                                  <DialogContent>
+                                                    <DialogHeader>
+                                                      <DialogTitle>Add Resource</DialogTitle>
+                                                    </DialogHeader>
+                                                    <AddResourceDialog
+                                                      onAdd={(resource) => {
+                                                        addResourceToLesson(moduleIndex, chapterIndex, lessonIndex, resource)
+                                                      }}
+                                                    />
+                                                  </DialogContent>
+                                                </Dialog>
+                                              </div>
+                                              
+                                              {lesson.resources.length > 0 ? (
+                                                <div className="space-y-2">
+                                                  {lesson.resources.map((resource, resourceIndex) => (
+                                                    <div key={resourceIndex} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                                                      <div className="flex items-center gap-2">
+                                                        {resource.type === 'pdf' && <FileText className="w-4 h-4" />}
+                                                        {resource.type === 'youtube' && <Youtube className="w-4 h-4 text-red-600" />}
+                                                        {resource.type === 'link' && <Link className="w-4 h-4" />}
+                                                        {resource.type === 'document' && <FileText className="w-4 h-4" />}
+                                                        <div>
+                                                          <p className="text-sm font-medium">{resource.title}</p>
+                                                          <p className="text-xs text-gray-500 truncate max-w-[200px]">{resource.url}</p>
+                                                        </div>
                                                       </div>
-                                                      <Input
-                                                        value={resource.title}
-                                                        onChange={(e) => updateResource(moduleIndex, chapterIndex, lessonIndex, resourceIndex, 'title', e.target.value, subLessonIndex)}
-                                                        placeholder="Resource title"
-                                                      />
-                                                      <Input
-                                                        value={resource.url}
-                                                        onChange={(e) => updateResource(moduleIndex, chapterIndex, lessonIndex, resourceIndex, 'url', e.target.value, subLessonIndex)}
-                                                        placeholder="Resource URL"
-                                                      />
-                                                      <Select
-                                                        value={resource.type}
-                                                        onValueChange={(value: 'pdf' | 'document' | 'link' | 'youtube') => 
-                                                          updateResource(moduleIndex, chapterIndex, lessonIndex, resourceIndex, 'type', value, subLessonIndex)
-                                                        }
+                                                      <Button
+                                                        type="button"
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        onClick={() => removeResourceFromLesson(moduleIndex, chapterIndex, lessonIndex, resourceIndex)}
                                                       >
-                                                        <SelectTrigger>
-                                                          <SelectValue />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                          <SelectItem value="pdf">PDF</SelectItem>
-                                                          <SelectItem value="document">Document</SelectItem>
-                                                          <SelectItem value="link">Link</SelectItem>
-                                                          <SelectItem value="youtube">YouTube</SelectItem>
-                                                        </SelectContent>
-                                                      </Select>
+                                                        <Trash2 className="w-4 h-4" />
+                                                      </Button>
                                                     </div>
                                                   ))}
                                                 </div>
-                                              </div>
+                                              ) : (
+                                                <p className="text-sm text-gray-500">No resources added</p>
+                                              )}
                                             </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
+                                            
+                                            {/* Sub-lessons */}
+                                            <div className="space-y-3">
+                                              <div className="flex items-center justify-between">
+                                                <Label>Sub-lessons</Label>
+                                                <Button
+                                                  type="button"
+                                                  size="sm"
+                                                  variant="outline"
+                                                  onClick={() => addSubLesson(moduleIndex, chapterIndex, lessonIndex)}
+                                                >
+                                                  <Plus className="w-4 h-4 mr-2" />
+                                                  Add Sub-lesson
+                                                </Button>
+                                              </div>
+                                              
+                                              {lesson.subLessons.length > 0 ? (
+                                                <div className="space-y-3">
+                                                  {lesson.subLessons.map((subLesson, subLessonIndex) => (
+                                                    <div key={subLessonIndex} className="border-l-2 border-blue-200 pl-3">
+                                                      <div className="flex items-center justify-between mb-2">
+                                                        <div className="flex items-center gap-2">
+                                                          <h6 className="text-sm font-medium">
+                                                            Sub-lesson {subLessonIndex + 1}: {subLesson.title}
+                                                          </h6>
+                                                          {subLesson.isPreview && (
+                                                            <Badge variant="outline" className="text-xs">Preview</Badge>
+                                                          )}
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                          <Switch
+                                                            checked={subLesson.isPreview}
+                                                            onCheckedChange={(checked) => 
+                                                              updateSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, 'isPreview', checked)
+                                                            }
+                                                            className="scale-75"
+                                                          />
+                                                          <Button
+                                                            type="button"
+                                                            size="sm"
+                                                            variant="ghost"
+                                                            onClick={() => removeSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex)}
+                                                          >
+                                                            <Trash2 className="w-4 h-4" />
+                                                          </Button>
+                                                        </div>
+                                                      </div>
+                                                      
+                                                      <div className="space-y-2 ml-4">
+                                                        <Input
+                                                          value={subLesson.title}
+                                                          onChange={(e) => updateSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, 'title', e.target.value)}
+                                                          placeholder="Sub-lesson title"
+                                                          className="text-sm"
+                                                        />
+                                                        
+                                                        <Textarea
+                                                          value={subLesson.description}
+                                                          onChange={(e) => updateSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, 'description', e.target.value)}
+                                                          placeholder="Sub-lesson description"
+                                                          rows={2}
+                                                          className="text-sm"
+                                                        />
+                                                        
+                                                        <div className="flex gap-2">
+                                                          <Input
+                                                            placeholder="YouTube URL"
+                                                            onBlur={(e) => {
+                                                              if (e.target.value.trim()) {
+                                                                handleSubLessonYouTubeVideo(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, e.target.value)
+                                                              }
+                                                            }}
+                                                            className="text-sm"
+                                                          />
+                                                          {subLesson.videoSource && (
+                                                            <Button
+                                                              size="sm"
+                                                              variant="outline"
+                                                              onClick={() => updateSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, 'videoSource', undefined)}
+                                                            >
+                                                              <Trash2 className="w-4 h-4" />
+                                                            </Button>
+                                                          )}
+                                                        </div>
+                                                        
+                                                        <Input
+                                                          type="number"
+                                                          value={Math.round(subLesson.duration / 60) || 0}
+                                                          onChange={(e) => updateSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, 'duration', (parseInt(e.target.value) || 0) * 60)}
+                                                          placeholder="Duration (minutes)"
+                                                          className="text-sm"
+                                                          min="0"
+                                                        />
+                                                        
+                                                        {/* Sub-lesson Resources */}
+                                                        <div className="mt-2">
+                                                          <div className="flex items-center justify-between mb-1">
+                                                            <Label className="text-xs">Resources</Label>
+                                                            <Dialog>
+                                                              <DialogTrigger asChild>
+                                                                <Button size="sm" variant="ghost" className="h-6">
+                                                                  <Plus className="w-3 h-3 mr-1" />
+                                                                  Add
+                                                                </Button>
+                                                              </DialogTrigger>
+                                                              <DialogContent>
+                                                                <DialogHeader>
+                                                                  <DialogTitle>Add Resource</DialogTitle>
+                                                                </DialogHeader>
+                                                                <AddResourceDialog
+                                                                  onAdd={(resource) => {
+                                                                    addResourceToSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, resource)
+                                                                  }}
+                                                                />
+                                                              </DialogContent>
+                                                            </Dialog>
+                                                          </div>
+                                                          
+                                                          {subLesson.resources.map((resource, resourceIndex) => (
+                                                            <div key={resourceIndex} className="flex items-center justify-between p-1 bg-gray-50 rounded mt-1">
+                                                              <div className="flex items-center gap-1">
+                                                                {resource.type === 'pdf' && <FileText className="w-3 h-3" />}
+                                                                {resource.type === 'youtube' && <Youtube className="w-3 h-3 text-red-600" />}
+                                                                <span className="text-xs">{resource.title}</span>
+                                                              </div>
+                                                              <Button
+                                                                size="sm"
+                                                                variant="ghost"
+                                                                className="h-5 w-5 p-0"
+                                                                onClick={() => removeResourceFromSubLesson(moduleIndex, chapterIndex, lessonIndex, subLessonIndex, resourceIndex)}
+                                                              >
+                                                                <Trash2 className="w-3 h-3" />
+                                                              </Button>
+                                                            </div>
+                                                          ))}
+                                                        </div>
+                                                      </div>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              ) : (
+                                                <p className="text-sm text-gray-500">No sub-lessons added</p>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </AccordionContent>
+                                      </AccordionItem>
+                                    ))}
+                                  </Accordion>
                                 </div>
-                              </div>
-                            </div>
-                          ))}
+                              </AccordionItem>
+                            ))}
+                          </Accordion>
                         </div>
-                      </div>
-                    </div>
-                  ))}
+                      </AccordionItem>
+                    ))}
+                  </Accordion>
                   
                   <Button
+                    type="button"
                     onClick={addModule}
                     variant="outline"
-                    className="w-full"
+                    className="w-full mt-4"
                   >
                     <Plus className="w-4 h-4 mr-2" />
                     Add Module
                   </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-          
-          {/* Sidebar - 1 column */}
-          <div className="space-y-6">
-            {/* Tags */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Award className="w-5 h-5" />
-                  Tags
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Add Tags</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      value={tagInput}
-                      onChange={(e) => setTagInput(e.target.value)}
-                      placeholder="e.g., fashion, design, sewing"
-                      onKeyPress={(e) => e.key === 'Enter' && addTag()}
-                    />
-                    <Button type="button" onClick={addTag}>
-                      <Plus className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-                
-                <div className="flex flex-wrap gap-2">
-                  {courseData.tags.map((tag, index) => (
-                    <Badge key={index} className="flex items-center gap-1">
-                      {tag}
-                      <button
-                        type="button"
-                        onClick={() => removeTag(index)}
-                        className="hover:text-red-500"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </Badge>
-                  ))}
-                  {courseData.tags.length === 0 && (
-                    <p className="text-sm text-gray-500">No tags added</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </div>
             
-            {/* Requirements */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Target className="w-5 h-5" />
-                  Requirements
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Add Requirement</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      value={requirementInput}
-                      onChange={(e) => setRequirementInput(e.target.value)}
-                      placeholder="e.g., Basic sewing knowledge"
-                      onKeyPress={(e) => e.key === 'Enter' && addRequirement()}
-                    />
-                    <Button type="button" onClick={addRequirement}>
-                      <Plus className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-                
-                <div className="space-y-2">
-                  {courseData.requirements.map((req, index) => (
-                    <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                      <span className="text-sm">{req}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeRequirement(index)}
-                        className="text-red-500 hover:text-red-700"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
-                  {courseData.requirements.length === 0 && (
-                    <p className="text-sm text-gray-500">No requirements specified</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-            
-            {/* Learning Outcomes */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Zap className="w-5 h-5" />
-                  Learning Outcomes
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Add Learning Outcome</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      value={outcomeInput}
-                      onChange={(e) => setOutcomeInput(e.target.value)}
-                      placeholder="e.g., Create custom patterns"
-                      onKeyPress={(e) => e.key === 'Enter' && addOutcome()}
-                    />
-                    <Button type="button" onClick={addOutcome}>
-                      <Plus className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-                
-                <div className="space-y-2">
-                  {courseData.learningOutcomes.map((outcome, index) => (
-                    <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                      <span className="text-sm">{outcome}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeOutcome(index)}
-                        className="text-red-500 hover:text-red-700"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
-                  {courseData.learningOutcomes.length === 0 && (
-                    <p className="text-sm text-gray-500">No learning outcomes specified</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-            
-            {/* Pricing */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Users className="w-5 h-5" />
-                  Pricing & Enrollment
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Free Course</Label>
-                    <p className="text-sm text-gray-500">Make this course free for all users</p>
-                  </div>
-                  <Switch
-                    checked={courseData.isFree}
-                    onCheckedChange={(checked) => 
-                      setCourseData(prev => ({ 
-                        ...prev, 
-                        isFree: checked, 
-                        price: checked ? 0 : prev.price 
-                      }))
-                    }
-                  />
-                </div>
-                
-                {!courseData.isFree && (
+            {/* Sidebar - 1 column */}
+            <div className="space-y-6">
+              {/* Tags */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Award className="w-5 h-5" />
+                    Tags
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="price">Price (NPR)</Label>
-                    <Input
-                      id="price"
-                      type="number"
-                      value={courseData.price}
-                      onChange={(e) => setCourseData(prev => ({ 
-                        ...prev, 
-                        price: Math.max(0, parseInt(e.target.value) || 0)
-                      }))}
-                      placeholder="0"
-                      min="0"
+                    <Label>Add Tags</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={tagInput}
+                        onChange={(e) => setTagInput(e.target.value)}
+                        placeholder="e.g., fashion, design"
+                        onKeyPress={(e) => e.key === 'Enter' && addTag()}
+                      />
+                      <Button type="button" onClick={addTag} size="sm">
+                        <Plus className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-wrap gap-2">
+                    {courseData.tags.map((tag, index) => (
+                      <Badge key={index} className="flex items-center gap-1">
+                        {tag}
+                        <button
+                          type="button"
+                          onClick={() => removeTag(index)}
+                          className="hover:text-red-500"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                    {courseData.tags.length === 0 && (
+                      <p className="text-sm text-gray-500">No tags added</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+              
+              {/* Requirements */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Target className="w-5 h-5" />
+                    Requirements
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Add Requirement</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={requirementInput}
+                        onChange={(e) => setRequirementInput(e.target.value)}
+                        placeholder="e.g., Basic sewing knowledge"
+                        onKeyPress={(e) => e.key === 'Enter' && addRequirement()}
+                      />
+                      <Button type="button" onClick={addRequirement} size="sm">
+                        <Plus className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    {courseData.requirements.map((req, index) => (
+                      <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                        <span className="text-sm">{req}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeRequirement(index)}
+                          className="text-red-500 hover:text-red-700"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                    {courseData.requirements.length === 0 && (
+                      <p className="text-sm text-gray-500">No requirements specified</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+              
+              {/* Learning Outcomes */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Zap className="w-5 h-5" />
+                    Learning Outcomes
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Add Learning Outcome</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={outcomeInput}
+                        onChange={(e) => setOutcomeInput(e.target.value)}
+                        placeholder="e.g., Create custom patterns"
+                        onKeyPress={(e) => e.key === 'Enter' && addOutcome()}
+                      />
+                      <Button type="button" onClick={addOutcome} size="sm">
+                        <Plus className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    {courseData.learningOutcomes.map((outcome, index) => (
+                      <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                        <span className="text-sm">{outcome}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeOutcome(index)}
+                          className="text-red-500 hover:text-red-700"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                    {courseData.learningOutcomes.length === 0 && (
+                      <p className="text-sm text-gray-500">No learning outcomes specified</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+              
+              {/* Pricing */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Users className="w-5 h-5" />
+                    Pricing & Enrollment
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Free Course</Label>
+                      <p className="text-sm text-gray-500">Make this course free</p>
+                    </div>
+                    <Switch
+                      checked={courseData.isFree}
+                      onCheckedChange={(checked) => 
+                        setCourseData(prev => ({ 
+                          ...prev, 
+                          isFree: checked, 
+                          price: checked ? 0 : prev.price 
+                        }))
+                      }
                     />
                   </div>
+                  
+                  {!courseData.isFree && (
+                    <div className="space-y-2">
+                      <Label htmlFor="price">Price (NPR)</Label>
+                      <Input
+                        id="price"
+                        type="number"
+                        value={courseData.price}
+                        onChange={(e) => setCourseData(prev => ({ 
+                          ...prev, 
+                          price: Math.max(0, parseInt(e.target.value) || 0)
+                        }))}
+                        placeholder="0"
+                        min="0"
+                      />
+                    </div>
+                  )}
+                  
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Manual Enrollment</Label>
+                      <p className="text-sm text-gray-500">Require admin approval</p>
+                    </div>
+                    <Switch
+                      checked={courseData.manualEnrollmentEnabled}
+                      onCheckedChange={(checked) => 
+                        setCourseData(prev => ({ ...prev, manualEnrollmentEnabled: checked }))
+                      }
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+              
+              {/* Publish Settings */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Upload className="w-5 h-5" />
+                    Publish Settings
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Published</Label>
+                      <p className="text-sm text-gray-500">Make course visible</p>
+                    </div>
+                    <Switch
+                      checked={courseData.isPublished}
+                      onCheckedChange={(checked) => 
+                        setCourseData(prev => ({ ...prev, isPublished: checked }))
+                      }
+                    />
+                  </div>
+                  
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Featured</Label>
+                      <p className="text-sm text-gray-500">Highlight on homepage</p>
+                    </div>
+                    <Switch
+                      checked={courseData.isFeatured}
+                      onCheckedChange={(checked) => 
+                        setCourseData(prev => ({ ...prev, isFeatured: checked }))
+                      }
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+              
+              {/* Course Stats */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Course Stats</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Modules</span>
+                    <span className="font-semibold">{modules.length}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Chapters</span>
+                    <span className="font-semibold">
+                      {modules.reduce((acc, m) => acc + m.chapters.length, 0)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Lessons</span>
+                    <span className="font-semibold">
+                      {modules.reduce((acc, m) => 
+                        acc + m.chapters.reduce((acc2, c) => acc2 + c.lessons.length, 0), 0
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Sub-lessons</span>
+                    <span className="font-semibold">
+                      {modules.reduce((acc, m) => 
+                        acc + m.chapters.reduce((acc2, c) => 
+                          acc2 + c.lessons.reduce((acc3, l) => acc3 + l.subLessons.length, 0), 0
+                        ), 0
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Total Duration</span>
+                    <span className="font-semibold">{calculateTotalDuration()}</span>
+                  </div>
+                </CardContent>
+              </Card>
+              
+              {/* Submit Button */}
+              <Button
+                onClick={handleSubmit}
+                disabled={loading}
+                className="w-full"
+                size="lg"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Creating Course...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4 mr-2" />
+                    Create YouTube Course
+                  </>
                 )}
-                
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Manual Enrollment</Label>
-                    <p className="text-sm text-gray-500">Require admin approval for access</p>
-                  </div>
-                  <Switch
-                    checked={courseData.manualEnrollmentEnabled}
-                    onCheckedChange={(checked) => 
-                      setCourseData(prev => ({ ...prev, manualEnrollmentEnabled: checked }))
-                    }
-                  />
-                </div>
-              </CardContent>
-            </Card>
-            
-            {/* Publish Settings */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Upload className="w-5 h-5" />
-                  Publish Settings
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Published</Label>
-                    <p className="text-sm text-gray-500">Make course visible</p>
-                  </div>
-                  <Switch
-                    checked={courseData.isPublished}
-                    onCheckedChange={(checked) => 
-                      setCourseData(prev => ({ ...prev, isPublished: checked }))
-                    }
-                  />
-                </div>
-                
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Featured</Label>
-                    <p className="text-sm text-gray-500">Highlight on homepage</p>
-                  </div>
-                  <Switch
-                    checked={courseData.isFeatured}
-                    onCheckedChange={(checked) => 
-                      setCourseData(prev => ({ ...prev, isFeatured: checked }))
-                    }
-                  />
-                </div>
-              </CardContent>
-            </Card>
-            
-            {/* Course Stats */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Course Stats</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Modules</span>
-                  <span className="font-semibold">{modules.length}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Chapters</span>
-                  <span className="font-semibold">
-                    {modules.reduce((acc, m) => acc + m.chapters.length, 0)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Lessons</span>
-                  <span className="font-semibold">
-                    {modules.reduce((acc, m) => 
-                      acc + m.chapters.reduce((acc2, c) => acc2 + c.lessons.length, 0), 0
-                    )}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Sub-lessons</span>
-                  <span className="font-semibold">
-                    {modules.reduce((acc, m) => 
-                      acc + m.chapters.reduce((acc2, c) => 
-                        acc2 + c.lessons.reduce((acc3, l) => acc3 + l.subLessons.length, 0), 0
-                      ), 0
-                    )}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Total Duration</span>
-                  <span className="font-semibold">{calculateTotalDuration()}</span>
-                </div>
-              </CardContent>
-            </Card>
-            
-            {/* Submit Button */}
-            <Button
-              onClick={handleSubmit}
-              disabled={loading}
-              className="w-full"
-              size="lg"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Creating Course...
-                </>
-              ) : (
-                <>
-                  <Upload className="w-4 h-4 mr-2" />
-                  Create YouTube Course
-                </>
-              )}
-            </Button>
+              </Button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </TooltipProvider>
   )
 }
