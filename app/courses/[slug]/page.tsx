@@ -2251,39 +2251,33 @@ export default function CourseDetailPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-red-50/30 dark:from-slate-900 dark:via-slate-950 dark:to-red-900/10 pb-20">
       {/* Mobile Header */}
-      <div className="sticky top-0 z-50 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border-b border-slate-200 dark:border-slate-800 shadow-sm">
-        <div className="px-4 py-3 flex items-center justify-between">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => router.back()}
-            className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </Button>
-          <h1 className="text-sm font-semibold text-slate-900 dark:text-white truncate max-w-[160px] text-center">
-            {course.title}
-          </h1>
-          <div className="flex items-center gap-1">
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-              onClick={() => setIsLiked(!isLiked)}
-            >
-              <Heart className={`w-4 h-4 ${isLiked ? 'fill-rose-500 text-rose-500' : 'text-slate-500 dark:text-slate-400'}`} />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-              onClick={() => setIsBookmarked(!isBookmarked)}
-            >
-              <Bookmark className={`w-4 h-4 ${isBookmarked ? 'fill-red-500 text-red-500' : 'text-slate-500 dark:text-slate-400'}`} />
-            </Button>
-          </div>
-        </div>
-      </div>
+<div className="sticky top-0 z-50 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border-b border-slate-200 dark:border-slate-800 shadow-sm">
+  <div className="px-4 py-3 flex items-center justify-between">
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={() => router.back()}
+      className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+    >
+      <ArrowLeft className="w-4 h-4" />
+    </Button>
+    <h1 className="text-sm font-semibold text-slate-900 dark:text-white truncate max-w-[160px] text-center">
+      {course.title}
+    </h1>
+    <div className="flex items-center">
+      {/* iOS Button only */}
+      <Button 
+        variant="ghost" 
+        size="sm" 
+        className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+        onClick={() => router.push('/youtube-courses')}
+        title="iOS Courses"
+      >
+        <Smartphone className="w-4 h-4 text-blue-500" />
+      </Button>
+    </div>
+  </div>
+</div>
 
       {/* Hero Section */}
       <div className="relative overflow-hidden">

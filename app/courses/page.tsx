@@ -10,6 +10,7 @@ import {
   Star, 
   Search,
   Filter,
+  Apple ,
   Upload,
   Grid, 
   List,
@@ -1384,22 +1385,31 @@ export default function CoursesPage() {
             </div>
             
             {/* Quick Categories */}
-            <div className="flex flex-wrap justify-center gap-2 sm:gap-3 mb-6 sm:mb-8 px-2">
-              {categories.map((category) => (
-                <button
-                  key={category.id}
-                  onClick={() => setActiveCategory(category.id)}
-                  className={`px-3 sm:px-5 py-2 sm:py-3 rounded-xl font-medium transition-all duration-300 flex items-center gap-2 backdrop-blur-sm text-sm sm:text-base ${
-                    activeCategory === category.id
-                      ? `bg-gradient-to-r ${category.color} text-white shadow-xl transform scale-105`
-                      : 'bg-white/80 text-gray-700 hover:bg-white shadow-lg hover:shadow-xl'
-                  }`}
-                >
-                  <category.icon className="w-4 h-4 sm:w-5 sm:h-5" />
-                  {category.name}
-                </button>
-              ))}
-            </div>
+<div className="flex flex-wrap justify-center gap-2 sm:gap-3 mb-6 sm:mb-8 px-2">
+  {categories.map((category) => (
+    <button
+      key={category.id}
+      onClick={() => setActiveCategory(category.id)}
+      className={`px-3 sm:px-5 py-2 sm:py-3 rounded-xl font-medium transition-all duration-300 flex items-center gap-2 backdrop-blur-sm text-sm sm:text-base ${
+        activeCategory === category.id
+          ? `bg-gradient-to-r ${category.color} text-white shadow-xl transform scale-105`
+          : 'bg-white/80 text-gray-700 hover:bg-white shadow-lg hover:shadow-xl'
+      }`}
+    >
+      <category.icon className="w-4 h-4 sm:w-5 sm:h-5" />
+      {category.name}
+    </button>
+  ))}
+  
+  {/* iOS Button */}
+  <button
+    onClick={() => router.push('/youtube-courses')}
+    className="px-3 sm:px-5 py-2 sm:py-3 rounded-xl font-medium transition-all duration-300 flex items-center gap-2 backdrop-blur-sm text-sm sm:text-base bg-gradient-to-r from-gray-700 to-gray-900 text-white shadow-lg hover:shadow-xl transform hover:scale-105"
+  >
+    <Apple className="w-4 h-4 sm:w-5 sm:h-5" />
+    iOS
+  </button>
+</div>
           </div>
         </div>
       </div>
