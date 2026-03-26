@@ -44,7 +44,7 @@ interface Enrollment {
     lastName: string
     email: string
     avatar?: string
-  }
+  } | null  // 🔥 FIX 1: Allow user to be null
   status: 'pending' | 'approved' | 'rejected'
   paymentMethod?: string
   transactionId?: string
@@ -208,20 +208,26 @@ function CourseEnrollmentsContent() {
     })
   }
 
+  // 🔥 FIX 2: Fixed filter function with null check
   const filterEnrollments = () => {
     let filtered = [...enrollments]
     
     // Apply search filter
     if (searchQuery) {
       const query = searchQuery.toLowerCase()
-      filtered = filtered.filter(enrollment =>
-        enrollment.user.firstName.toLowerCase().includes(query) ||
-        enrollment.user.lastName.toLowerCase().includes(query) ||
-        enrollment.user.email.toLowerCase().includes(query) ||
-        enrollment.user.username.toLowerCase().includes(query) ||
-        enrollment.paymentMethod?.toLowerCase().includes(query) ||
-        enrollment.transactionId?.toLowerCase().includes(query)
-      )
+      filtered = filtered.filter(enrollment => {
+        // Skip if user is null
+        if (!enrollment.user) return false
+        
+        return (
+          enrollment.user.firstName?.toLowerCase().includes(query) ||
+          enrollment.user.lastName?.toLowerCase().includes(query) ||
+          enrollment.user.email?.toLowerCase().includes(query) ||
+          enrollment.user.username?.toLowerCase().includes(query) ||
+          enrollment.paymentMethod?.toLowerCase().includes(query) ||
+          enrollment.transactionId?.toLowerCase().includes(query)
+        )
+      })
     }
     
     // Apply status filter
@@ -606,206 +612,217 @@ function CourseEnrollmentsContent() {
               </div>
             ) : (
               <div className="space-y-4">
-                {filteredEnrollments.map((enrollment) => (
-                  <div key={enrollment._id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
-                    <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-                      {/* User Info */}
-                      <div className="flex items-start gap-4">
-                        <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0">
-                          {enrollment.user.avatar ? (
-                            <img
-                              src={enrollment.user.avatar}
-                              alt={enrollment.user.username}
-                              className="w-full h-full rounded-full object-cover"
-                            />
-                          ) : (
-                            <User className="w-6 h-6 text-gray-600" />
-                          )}
-                        </div>
-                        <div className="flex-1">
-                          <h3 className="font-semibold text-lg">
-                            {enrollment.user.firstName} {enrollment.user.lastName}
-                          </h3>
-                          <div className="flex items-center gap-2 mt-1">
-                            <Mail className="w-4 h-4 text-gray-500" />
-                            <a 
-                              href={`mailto:${enrollment.user.email}`}
-                              className="text-sm text-gray-600 hover:text-blue-600"
-                            >
-                              {enrollment.user.email}
-                            </a>
-                          </div>
-                          <div className="flex items-center gap-2 mt-1">
-                            <User className="w-4 h-4 text-gray-500" />
-                            <span className="text-xs text-gray-500">@{enrollment.user.username}</span>
-                          </div>
-                          
-                          {/* Payment Info */}
-                          {(enrollment.paymentMethod || enrollment.transactionId) && (
-                            <div className="mt-3 space-y-1">
-                              {enrollment.paymentMethod && (
-                                <p className="text-sm">
-                                  <span className="font-medium">Payment Method:</span>{' '}
-                                  <Badge variant="outline" className="ml-2">
-                                    {enrollment.paymentMethod}
-                                  </Badge>
-                                </p>
-                              )}
-                              {enrollment.transactionId && (
-                                <p className="text-sm">
-                                  <span className="font-medium">Transaction ID:</span>{' '}
-                                  <code className="bg-gray-100 px-2 py-1 rounded text-xs ml-2">
-                                    {enrollment.transactionId}
-                                  </code>
-                                </p>
-                              )}
-                            </div>
-                          )}
-                          
-                          {/* Notes */}
-                          {enrollment.notes && (
-                            <div className="mt-3">
-                              <p className="text-sm font-medium mb-1">Admin Notes:</p>
-                              <p className="text-sm text-gray-600 bg-gray-50 p-2 rounded">
-                                {enrollment.notes}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      
-                      {/* Status & Actions */}
-                      <div className="flex flex-col gap-3 min-w-[250px]">
-                        <div className="flex items-center justify-between">
-                          {getStatusBadge(enrollment.status)}
-                          <div className="text-sm text-gray-600 flex items-center">
-                            <Calendar className="w-3 h-3 mr-1" />
-                            {formatDate(enrollment.createdAt)}
-                          </div>
-                        </div>
-                        
-                        {enrollment.approvedBy && enrollment.approvedAt && (
-                          <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded">
-                            <div className="font-medium">
-                              {enrollment.status === 'approved' ? 'Approved' : 'Rejected'} by:
-                            </div>
-                            <div>{enrollment.approvedBy.firstName} {enrollment.approvedBy.lastName}</div>
-                            <div className="text-xs">
-                              on {formatDate(enrollment.approvedAt)}
-                            </div>
-                          </div>
-                        )}
-                        
-                        {enrollment.status === 'pending' && (
-                          <div className="space-y-2">
-                            <Button
-                              size="sm"
-                              variant="default"
-                              onClick={() => updateEnrollmentStatus(enrollment._id, 'approved')}
-                              disabled={updating === enrollment._id}
-                              className="w-full"
-                            >
-                              {updating === enrollment._id ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                              ) : (
-                                <>
-                                  <CheckCircle className="w-4 h-4 mr-2" />
-                                  Approve
-                                </>
-                              )}
-                            </Button>
-                            
-                            {!showRejectNotes[enrollment._id] ? (
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={() => setShowRejectNotes(prev => ({...prev, [enrollment._id]: true}))}
-                                disabled={updating === enrollment._id}
-                                className="w-full"
-                              >
-                                <XCircle className="w-4 h-4 mr-2" />
-                                Reject
-                              </Button>
-                            ) : (
-                              <div className="space-y-2">
-                                <Textarea
-                                  placeholder="Reason for rejection (optional)"
-                                  value={rejectNotes[enrollment._id] || ''}
-                                  onChange={(e) => setRejectNotes(prev => ({...prev, [enrollment._id]: e.target.value}))}
-                                  className="text-sm min-h-[60px]"
+                {/* 🔥 FIX 3 & 4: Filter out null users and use user variable */}
+                {filteredEnrollments
+                  .filter((enrollment) => enrollment.user) // Filter out enrollments with null user
+                  .map((enrollment) => {
+                    const user = enrollment.user! // Safe to use ! because we filtered nulls above
+                    
+                    return (
+                      <div key={enrollment._id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                          {/* User Info */}
+                          <div className="flex items-start gap-4">
+                            <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0">
+                              {user.avatar ? (
+                                <img
+                                  src={user.avatar}
+                                  alt={user.username}
+                                  className="w-full h-full rounded-full object-cover"
                                 />
-                                <div className="flex gap-2">
-                                  <Button
-                                    size="sm"
-                                    variant="destructive"
-                                    onClick={() => updateEnrollmentStatus(enrollment._id, 'rejected', rejectNotes[enrollment._id])}
-                                    disabled={updating === enrollment._id}
-                                    className="flex-1"
-                                  >
-                                    {updating === enrollment._id ? (
-                                      <Loader2 className="w-4 h-4 animate-spin" />
-                                    ) : (
-                                      'Confirm Reject'
-                                    )}
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => {
-                                      setShowRejectNotes(prev => ({...prev, [enrollment._id]: false}))
-                                      setRejectNotes(prev => ({...prev, [enrollment._id]: ''}))
-                                    }}
-                                    disabled={updating === enrollment._id}
-                                    className="flex-1"
-                                  >
-                                    Cancel
-                                  </Button>
+                              ) : (
+                                <User className="w-6 h-6 text-gray-600" />
+                              )}
+                            </div>
+                            <div className="flex-1">
+                              <h3 className="font-semibold text-lg">
+                                {user.firstName} {user.lastName}
+                              </h3>
+                              <div className="flex items-center gap-2 mt-1">
+                                <Mail className="w-4 h-4 text-gray-500" />
+                                <a 
+                                  href={`mailto:${user.email}`}
+                                  className="text-sm text-gray-600 hover:text-blue-600"
+                                >
+                                  {user.email}
+                                </a>
+                              </div>
+                              <div className="flex items-center gap-2 mt-1">
+                                <User className="w-4 h-4 text-gray-500" />
+                                <span className="text-xs text-gray-500">@{user.username}</span>
+                              </div>
+                              
+                              {/* Payment Info */}
+                              {(enrollment.paymentMethod || enrollment.transactionId) && (
+                                <div className="mt-3 space-y-1">
+                                  {enrollment.paymentMethod && (
+                                    <p className="text-sm">
+                                      <span className="font-medium">Payment Method:</span>{' '}
+                                      <Badge variant="outline" className="ml-2">
+                                        {enrollment.paymentMethod}
+                                      </Badge>
+                                    </p>
+                                  )}
+                                  {enrollment.transactionId && (
+                                    <p className="text-sm">
+                                      <span className="font-medium">Transaction ID:</span>{' '}
+                                      <code className="bg-gray-100 px-2 py-1 rounded text-xs ml-2">
+                                        {enrollment.transactionId}
+                                      </code>
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+                              
+                              {/* Notes */}
+                              {enrollment.notes && (
+                                <div className="mt-3">
+                                  <p className="text-sm font-medium mb-1">Admin Notes:</p>
+                                  <p className="text-sm text-gray-600 bg-gray-50 p-2 rounded">
+                                    {enrollment.notes}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Status & Actions */}
+                          <div className="flex flex-col gap-3 min-w-[250px]">
+                            <div className="flex items-center justify-between">
+                              {getStatusBadge(enrollment.status)}
+                              <div className="text-sm text-gray-600 flex items-center">
+                                <Calendar className="w-3 h-3 mr-1" />
+                                {formatDate(enrollment.createdAt)}
+                              </div>
+                            </div>
+                            
+                            {enrollment.approvedBy && enrollment.approvedAt && (
+                              <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded">
+                                <div className="font-medium">
+                                  {enrollment.status === 'approved' ? 'Approved' : 'Rejected'} by:
+                                </div>
+                                <div>{enrollment.approvedBy.firstName} {enrollment.approvedBy.lastName}</div>
+                                <div className="text-xs">
+                                  on {formatDate(enrollment.approvedAt)}
                                 </div>
                               </div>
                             )}
+                            
+                            {enrollment.status === 'pending' && (
+                              <div className="space-y-2">
+                                <Button
+                                  size="sm"
+                                  variant="default"
+                                  onClick={() => updateEnrollmentStatus(enrollment._id, 'approved')}
+                                  disabled={updating === enrollment._id}
+                                  className="w-full"
+                                >
+                                  {updating === enrollment._id ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <>
+                                      <CheckCircle className="w-4 h-4 mr-2" />
+                                      Approve
+                                    </>
+                                  )}
+                                </Button>
+                                
+                                {!showRejectNotes[enrollment._id] ? (
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    onClick={() => setShowRejectNotes(prev => ({...prev, [enrollment._id]: true}))}
+                                    disabled={updating === enrollment._id}
+                                    className="w-full"
+                                  >
+                                    <XCircle className="w-4 h-4 mr-2" />
+                                    Reject
+                                  </Button>
+                                ) : (
+                                  <div className="space-y-2">
+                                    <Textarea
+                                      placeholder="Reason for rejection (optional)"
+                                      value={rejectNotes[enrollment._id] || ''}
+                                      onChange={(e) => setRejectNotes(prev => ({...prev, [enrollment._id]: e.target.value}))}
+                                      className="text-sm min-h-[60px]"
+                                    />
+                                    <div className="flex gap-2">
+                                      <Button
+                                        size="sm"
+                                        variant="destructive"
+                                        onClick={() => updateEnrollmentStatus(enrollment._id, 'rejected', rejectNotes[enrollment._id])}
+                                        disabled={updating === enrollment._id}
+                                        className="flex-1"
+                                      >
+                                        {updating === enrollment._id ? (
+                                          <Loader2 className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                          'Confirm Reject'
+                                        )}
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => {
+                                          setShowRejectNotes(prev => ({...prev, [enrollment._id]: false}))
+                                          setRejectNotes(prev => ({...prev, [enrollment._id]: ''}))
+                                        }}
+                                        disabled={updating === enrollment._id}
+                                        className="flex-1"
+                                      >
+                                        Cancel
+                                      </Button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        
+                        {/* 🔥 FIX 5: Payment Proof download with safe user access */}
+                        {enrollment.paymentProof && (
+                          <div className="mt-4 pt-4 border-t border-gray-200">
+                            <div className="flex items-center justify-between mb-2">
+                              <h4 className="text-sm font-medium">Payment Proof</h4>
+                              <Badge variant="outline" className="text-xs">
+                                {enrollment.paymentProof.split('.').pop()?.toUpperCase() || 'File'}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => window.open(enrollment.paymentProof, '_blank')}
+                              >
+                                <Eye className="w-4 h-4 mr-2" />
+                                View Proof
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  const link = document.createElement('a')
+                                  link.href = enrollment.paymentProof!
+                                  // 🔥 Fixed: Safe download filename with user access check
+                                  const downloadFilename = user.username 
+                                    ? `payment-proof-${user.username}-${enrollment._id}.jpg`
+                                    : `payment-proof-${enrollment._id}.jpg`
+                                  link.download = downloadFilename
+                                  document.body.appendChild(link)
+                                  link.click()
+                                  document.body.removeChild(link)
+                                }}
+                              >
+                                <Download className="w-4 h-4 mr-2" />
+                                Download
+                              </Button>
+                            </div>
                           </div>
                         )}
                       </div>
-                    </div>
-                    
-                    {/* Payment Proof */}
-                    {enrollment.paymentProof && (
-                      <div className="mt-4 pt-4 border-t border-gray-200">
-                        <div className="flex items-center justify-between mb-2">
-                          <h4 className="text-sm font-medium">Payment Proof</h4>
-                          <Badge variant="outline" className="text-xs">
-                            {enrollment.paymentProof.split('.').pop()?.toUpperCase() || 'File'}
-                          </Badge>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => window.open(enrollment.paymentProof, '_blank')}
-                          >
-                            <Eye className="w-4 h-4 mr-2" />
-                            View Proof
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              const link = document.createElement('a')
-                              link.href = enrollment.paymentProof!
-                              link.download = `payment-proof-${enrollment.user.username}-${enrollment._id}.jpg`
-                              document.body.appendChild(link)
-                              link.click()
-                              document.body.removeChild(link)
-                            }}
-                          >
-                            <Download className="w-4 h-4 mr-2" />
-                            Download
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                    )
+                  })}
               </div>
             )}
           </CardContent>
