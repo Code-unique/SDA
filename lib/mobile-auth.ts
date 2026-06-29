@@ -17,12 +17,19 @@ export async function authenticateMobileRequest(request: NextRequest): Promise<M
     const apiKey = request.headers.get('x-api-key')
     const userId = request.headers.get('x-user-id')
     
+    console.log('🔐 Auth attempt:', { 
+      hasApiKey: !!apiKey, 
+      hasUserId: !!userId,
+      apiKeyMatches: apiKey === process.env.MOBILE_API_KEY 
+    })
+    
     // If mobile API key is present, use mobile auth
     if (apiKey && process.env.MOBILE_API_KEY === apiKey && userId) {
       await connectToDatabase()
       
       const user = await User.findById(userId)
       if (!user) {
+        console.log('❌ User not found by ID:', userId)
         return { 
           success: false, 
           error: 'User not found', 
@@ -30,6 +37,7 @@ export async function authenticateMobileRequest(request: NextRequest): Promise<M
         }
       }
       
+      console.log('✅ Mobile auth success:', user.username)
       return { 
         success: true, 
         user 
@@ -43,6 +51,7 @@ export async function authenticateMobileRequest(request: NextRequest): Promise<M
       const user = await User.findOne({ clerkId: clerkUser.id })
       
       if (!user) {
+        console.log('❌ Clerk user not found in DB:', clerkUser.id)
         return { 
           success: false, 
           error: 'User not found', 
@@ -50,12 +59,14 @@ export async function authenticateMobileRequest(request: NextRequest): Promise<M
         }
       }
       
+      console.log('✅ Clerk auth success:', user.username)
       return { 
         success: true, 
         user 
       }
     }
     
+    console.log('❌ No authentication found')
     return { 
       success: false, 
       error: 'Unauthorized', 

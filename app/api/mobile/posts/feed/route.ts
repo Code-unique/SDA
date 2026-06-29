@@ -24,7 +24,21 @@ export async function GET(request: NextRequest) {
       return mobileError('User not found', 404)
     }
 
+    // If user has no following, return empty feed
     const feedUserIds = [...(user.following || []), user._id]
+    
+    if (feedUserIds.length === 0) {
+      return mobileResponse({
+        posts: [],
+        pagination: {
+          page,
+          limit,
+          total: 0,
+          pages: 0,
+          hasMore: false
+        }
+      })
+    }
 
     const [posts, total] = await Promise.all([
       Post.find({ 

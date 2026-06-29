@@ -2,84 +2,74 @@
 import { NextRequest } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import User from '@/lib/models/User'
-import { mobileResponse, mobileError } from '@/lib/mobile-auth'
+import { authenticateMobileRequest, mobileResponse, mobileError } from '@/lib/mobile-auth'
+import { currentUser } from '@clerk/nextjs/server'
 import "@/lib/loadmodels"
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
+    const { clerkId, email, username, firstName, lastName, avatar } = body
     
-    if (!body || !body.clerkId) {
+    console.log('📝 Sync user request:', { clerkId, email, username })
+    
+    if (!clerkId) {
       return mobileError('clerkId is required', 400)
     }
     
     await connectToDatabase()
     
-    let user = await User.findOne({ clerkId: body.clerkId })
+    // Try to find existing user
+    let user = await User.findOne({ clerkId })
     
-    if (!user) {
-      // Create new user
-      user = await User.create({
-        clerkId: body.clerkId,
-        email: body.email || '',
-        username: body.username || `user_${body.clerkId.slice(0, 8)}`,
-        firstName: body.firstName || 'User',
-        lastName: body.lastName || 'Name',
-        avatar: body.avatar || '',
-        banner: body.banner || '',
-        bio: body.bio || '',
-        location: body.location || '',
-        website: body.website || '',
-        role: 'user',
-        interests: body.interests || [],
-        skills: body.skills || [],
-        isVerified: false,
-        followers: [],
-        following: [],
-        onboardingCompleted: false,
-        notificationPreferences: {
-          likes: true,
-          comments: true,
-          follows: true,
-          courses: true,
-          achievements: true,
-          messages: true,
-          announcements: true,
-          marketing: false,
-        },
-        lastNotificationReadAt: new Date(),
+    if (user) {
+      console.log('✅ User already exists:', user.username)
+      return mobileResponse({
+        ...user.toObject(),
+        _id: user._id.toString()
       })
-    } else {
-      // Update existing user with new data
-      const updates: any = {}
-      if (body.email) updates.email = body.email
-      if (body.username) updates.username = body.username
-      if (body.firstName) updates.firstName = body.firstName
-      if (body.lastName) updates.lastName = body.lastName
-      if (body.avatar) updates.avatar = body.avatar
-      if (body.banner) updates.banner = body.banner
-      
-      if (Object.keys(updates).length > 0) {
-        user = await User.findByIdAndUpdate(
-          user._id,
-          { $set: updates },
-          { new: true }
-        )
-      }
     }
     
-    if (!user) {
-      return mobileError('Failed to sync user', 500)
-    }
+    // Create new user
+    user = await User.create({
+      clerkId,
+      email: email || '',
+      username: username || `user_${clerkId.slice(0, 8)}`,
+      firstName: firstName || 'User',
+      lastName: lastName || 'Name',
+      avatar: avatar || '',
+      banner: '',
+      bio: '',
+      location: '',
+      website: '',
+      role: 'user',
+      interests: [],
+      skills: [],
+      isVerified: false,
+      followers: [],
+      following: [],
+      onboardingCompleted: false,
+      notificationPreferences: {
+        likes: true,
+        comments: true,
+        follows: true,
+        courses: true,
+        achievements: true,
+        messages: true,
+        announcements: true,
+        marketing: false,
+      },
+      lastNotificationReadAt: new Date(),
+    })
+    
+    console.log('✅ New user created:', user.username)
     
     return mobileResponse({
       ...user.toObject(),
-      _id: user._id.toString(),
-      followers: user.followers?.map((f: any) => f.toString()) || [],
-      following: user.following?.map((f: any) => f.toString()) || []
+      _id: user._id.toString()
     })
   } catch (error: any) {
     console.error('Sync error:', error)
-    return mobileError('Failed to sync user: ' + error.message, 500)
+    return mobileError(error.message || 'Failed to sync user', 500)
   }
 }
