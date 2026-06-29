@@ -13,18 +13,31 @@ export interface MobileAuthResult {
 
 export async function authenticateMobileRequest(request: NextRequest): Promise<MobileAuthResult> {
   try {
-    // Check for mobile API key
+    // Get headers
     const apiKey = request.headers.get('x-api-key')
     const userId = request.headers.get('x-user-id')
     
     console.log('🔐 Auth attempt:', { 
       hasApiKey: !!apiKey, 
       hasUserId: !!userId,
-      apiKeyMatches: apiKey === process.env.MOBILE_API_KEY 
+      apiKeyValue: apiKey,
+      expectedKey: process.env.MOBILE_API_KEY,
+      keysMatch: apiKey === process.env.MOBILE_API_KEY
     })
     
-    // If mobile API key is present, use mobile auth
-    if (apiKey && process.env.MOBILE_API_KEY === apiKey && userId) {
+    // First check: Mobile API key authentication
+    if (apiKey && process.env.MOBILE_API_KEY && apiKey === process.env.MOBILE_API_KEY) {
+      console.log('✅ API key matched!')
+      
+      if (!userId) {
+        console.log('❌ No user ID provided')
+        return { 
+          success: false, 
+          error: 'User ID required', 
+          status: 400 
+        }
+      }
+      
       await connectToDatabase()
       
       const user = await User.findById(userId)
@@ -44,9 +57,10 @@ export async function authenticateMobileRequest(request: NextRequest): Promise<M
       }
     }
     
-    // Fallback to Clerk (web)
+    // Fallback: Clerk authentication (for web)
     const clerkUser = await currentUser()
     if (clerkUser) {
+      console.log('🔐 Clerk user found:', clerkUser.id)
       await connectToDatabase()
       const user = await User.findOne({ clerkId: clerkUser.id })
       
@@ -54,7 +68,7 @@ export async function authenticateMobileRequest(request: NextRequest): Promise<M
         console.log('❌ Clerk user not found in DB:', clerkUser.id)
         return { 
           success: false, 
-          error: 'User not found', 
+          error: 'User not found in system', 
           status: 404 
         }
       }
