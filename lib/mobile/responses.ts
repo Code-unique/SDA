@@ -1,4 +1,4 @@
-// lib/mobile/responses.ts
+// lib/mobile/responses.ts - COMPLETE FIX
 import { NextResponse } from 'next/server'
 import { Types } from 'mongoose'
 
@@ -105,46 +105,83 @@ export function mobileValidationError(errors: Record<string, string[]>): NextRes
 }
 
 // ============================================================
-// SERIALIZERS
+// SERIALIZERS - FIXED TO AVOID INFINITE RECURSION
 // ============================================================
 
 /**
- * Serialize a MongoDB document to JSON
+ * Check if object is a Mongoose document with circular references
  */
-export function serializeDoc<T extends { _id: Types.ObjectId, toObject?: () => any }>(doc: T): any {
-  if (!doc) return null
-  const obj = doc.toObject ? doc.toObject() : { ...doc }
-  return serializeObject(obj)
+function isMongooseDocument(obj: any): boolean {
+  return obj && typeof obj === 'object' && 
+    (obj._doc !== undefined || obj.$__ !== undefined || obj.toObject !== undefined)
 }
 
 /**
- * Serialize an object, converting ObjectIds and Dates
+ * Safely convert Mongoose document to plain object
  */
-export function serializeObject(obj: any): any {
+function toPlainObject(obj: any): any {
   if (!obj) return obj
-  if (Array.isArray(obj)) {
-    return obj.map(item => serializeObject(item))
-  }
-  if (obj && typeof obj === 'object') {
-    const result: any = {}
-    for (const [key, value] of Object.entries(obj)) {
-      if (key === '_id' && value instanceof Types.ObjectId) {
-        result[key] = value.toString()
-      } else if (value instanceof Types.ObjectId) {
-        result[key] = value.toString()
-      } else if (value instanceof Date) {
-        result[key] = value.toISOString()
-      } else if (Array.isArray(value)) {
-        result[key] = serializeObject(value)
-      } else if (value && typeof value === 'object') {
-        result[key] = serializeObject(value)
-      } else {
-        result[key] = value
-      }
+  if (typeof obj !== 'object') return obj
+  if (obj instanceof Date) return obj
+  if (obj instanceof Types.ObjectId) return obj.toString()
+  
+  // Handle Mongoose document
+  if (isMongooseDocument(obj)) {
+    try {
+      return obj.toObject ? obj.toObject() : { ...obj }
+    } catch {
+      return { ...obj }
     }
-    return result
   }
+  
   return obj
+}
+
+/**
+ * Serialize an object, converting ObjectIds and Dates - WITH CIRCULAR REFERENCE PROTECTION
+ */
+export function serializeObject(obj: any, seen = new WeakSet()): any {
+  if (!obj) return obj
+  if (typeof obj !== 'object') return obj
+  
+  // Handle Date
+  if (obj instanceof Date) {
+    return obj.toISOString()
+  }
+  
+  // Handle ObjectId
+  if (obj instanceof Types.ObjectId) {
+    return obj.toString()
+  }
+  
+  // Handle Mongoose document - convert to plain object first
+  const plainObj = toPlainObject(obj)
+  if (plainObj !== obj) {
+    return serializeObject(plainObj, seen)
+  }
+  
+  // Handle arrays
+  if (Array.isArray(obj)) {
+    return obj.map(item => serializeObject(item, seen))
+  }
+  
+  // Handle circular references
+  if (seen.has(obj)) {
+    return '[Circular]'
+  }
+  seen.add(obj)
+  
+  // Handle plain objects
+  const result: any = {}
+  for (const [key, value] of Object.entries(obj)) {
+    // Skip Mongoose internal fields
+    if (key.startsWith('$') || key === '__v' || key === '_doc') {
+      continue
+    }
+    result[key] = serializeObject(value, seen)
+  }
+  
+  return result
 }
 
 /**
@@ -153,7 +190,11 @@ export function serializeObject(obj: any): any {
 export function serializeUser(user: any) {
   if (!user) return null
   
-  const obj = serializeObject(user)
+  // First convert to plain object if it's a Mongoose document
+  const plainUser = toPlainObject(user)
+  
+  // Then serialize
+  const obj = serializeObject(plainUser)
   
   return {
     ...obj,
@@ -168,7 +209,8 @@ export function serializeUser(user: any) {
 export function serializePost(post: any) {
   if (!post) return null
   
-  const obj = serializeObject(post)
+  const plainPost = toPlainObject(post)
+  const obj = serializeObject(plainPost)
   
   return {
     ...obj,
@@ -184,7 +226,8 @@ export function serializePost(post: any) {
 export function serializeCourse(course: any) {
   if (!course) return null
   
-  const obj = serializeObject(course)
+  const plainCourse = toPlainObject(course)
+  const obj = serializeObject(plainCourse)
   
   let totalLessons = 0
   let totalDuration = 0
@@ -223,7 +266,8 @@ export function serializeCourse(course: any) {
 export function serializeComment(comment: any, currentUserId?: string) {
   if (!comment) return null
   
-  const obj = serializeObject(comment)
+  const plainComment = toPlainObject(comment)
+  const obj = serializeObject(plainComment)
   
   return {
     ...obj,

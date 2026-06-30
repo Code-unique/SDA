@@ -1,4 +1,4 @@
-// app/api/mobile/auth/route.ts
+// app/api/mobile/auth/route.ts - COMPLETE FIX
 import { NextRequest } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { mobileSuccess, mobileError, serializeUser } from '@/lib/mobile/responses'
@@ -8,7 +8,6 @@ import { moderateRateLimit } from '@/lib/mobile/rate-limit'
 import "@/lib/loadmodels"
 
 export async function POST(request: NextRequest) {
-  // Apply strict rate limiting
   const rateLimitResponse = await moderateRateLimit(request)
   if (rateLimitResponse) return rateLimitResponse
 
@@ -32,7 +31,6 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  // Apply moderate rate limiting
   const rateLimitResponse = await moderateRateLimit(request)
   if (rateLimitResponse) return rateLimitResponse
 

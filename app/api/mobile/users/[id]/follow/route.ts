@@ -1,20 +1,20 @@
-// app/api/mobile/users/[id]/follow/route.ts
+// app/api/mobile/users/[id]/follow/route.ts - COMPLETE FIX
 import { NextRequest } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import User from '@/lib/models/User'
-import { requireUser, resolveUser } from '@/lib/mobile/auth'
+import { requireUser } from '@/lib/mobile/auth'
 import { mobileSuccess, mobileError, serializeUser } from '@/lib/mobile/responses'
 import { isValidObjectId } from '@/lib/mobile/validation'
+import { moderateRateLimit } from '@/lib/mobile/rate-limit'
 import "@/lib/loadmodels"
 
-/**
- * POST /api/mobile/users/:id/follow
- * Follow or unfollow a user - WITH TRANSACTION
- */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const rateLimitResponse = await moderateRateLimit(request)
+  if (rateLimitResponse) return rateLimitResponse
+
   const authResult = await requireUser(request)
 
   if (!authResult.success) {
@@ -49,46 +49,22 @@ export async function POST(
       (f: any) => f.toString() === targetUser._id.toString()
     ) || false
 
-    // Use transaction for consistency
-    const session = await User.startSession()
-    session.startTransaction()
-
-    try {
-      if (isFollowing) {
-        // Unfollow
-        await User.findByIdAndUpdate(
-          authResult.user._id,
-          { $pull: { following: targetUser._id } },
-          { session }
-        )
-        await User.findByIdAndUpdate(
-          targetUser._id,
-          { $pull: { followers: authResult.user._id } },
-          { session }
-        )
-      } else {
-        // Follow
-        await User.findByIdAndUpdate(
-          authResult.user._id,
-          { $addToSet: { following: targetUser._id } },
-          { session }
-        )
-        await User.findByIdAndUpdate(
-          targetUser._id,
-          { $addToSet: { followers: authResult.user._id } },
-          { session }
-        )
-      }
-
-      await session.commitTransaction()
-    } catch (error) {
-      await session.abortTransaction()
-      throw error
-    } finally {
-      session.endSession()
+    if (isFollowing) {
+      await User.findByIdAndUpdate(authResult.user._id, {
+        $pull: { following: targetUser._id }
+      })
+      await User.findByIdAndUpdate(targetUser._id, {
+        $pull: { followers: authResult.user._id }
+      })
+    } else {
+      await User.findByIdAndUpdate(authResult.user._id, {
+        $addToSet: { following: targetUser._id }
+      })
+      await User.findByIdAndUpdate(targetUser._id, {
+        $addToSet: { followers: authResult.user._id }
+      })
     }
 
-    // Get updated user data
     const updatedUser = await User.findById(authResult.user._id)
 
     return mobileSuccess({
@@ -103,10 +79,6 @@ export async function POST(
   }
 }
 
-/**
- * GET /api/mobile/users/:id/follow
- * Check if current user is following target user
- */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
