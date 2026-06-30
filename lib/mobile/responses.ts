@@ -1,4 +1,4 @@
-// lib/mobile/responses.ts - COMPLETE FIX
+// lib/mobile/responses.ts - COMPLETE
 import { NextResponse } from 'next/server'
 import { Types } from 'mongoose'
 
@@ -105,7 +105,7 @@ export function mobileValidationError(errors: Record<string, string[]>): NextRes
 }
 
 // ============================================================
-// SERIALIZERS - FIXED TO AVOID INFINITE RECURSION
+// SERIALIZERS
 // ============================================================
 
 /**
@@ -125,7 +125,6 @@ function toPlainObject(obj: any): any {
   if (obj instanceof Date) return obj
   if (obj instanceof Types.ObjectId) return obj.toString()
   
-  // Handle Mongoose document
   if (isMongooseDocument(obj)) {
     try {
       return obj.toObject ? obj.toObject() : { ...obj }
@@ -138,43 +137,36 @@ function toPlainObject(obj: any): any {
 }
 
 /**
- * Serialize an object, converting ObjectIds and Dates - WITH CIRCULAR REFERENCE PROTECTION
+ * Serialize an object, converting ObjectIds and Dates
  */
 export function serializeObject(obj: any, seen = new WeakSet()): any {
   if (!obj) return obj
   if (typeof obj !== 'object') return obj
   
-  // Handle Date
   if (obj instanceof Date) {
     return obj.toISOString()
   }
   
-  // Handle ObjectId
   if (obj instanceof Types.ObjectId) {
     return obj.toString()
   }
   
-  // Handle Mongoose document - convert to plain object first
   const plainObj = toPlainObject(obj)
   if (plainObj !== obj) {
     return serializeObject(plainObj, seen)
   }
   
-  // Handle arrays
   if (Array.isArray(obj)) {
     return obj.map(item => serializeObject(item, seen))
   }
   
-  // Handle circular references
   if (seen.has(obj)) {
     return '[Circular]'
   }
   seen.add(obj)
   
-  // Handle plain objects
   const result: any = {}
   for (const [key, value] of Object.entries(obj)) {
-    // Skip Mongoose internal fields
     if (key.startsWith('$') || key === '__v' || key === '_doc') {
       continue
     }
@@ -190,10 +182,7 @@ export function serializeObject(obj: any, seen = new WeakSet()): any {
 export function serializeUser(user: any) {
   if (!user) return null
   
-  // First convert to plain object if it's a Mongoose document
   const plainUser = toPlainObject(user)
-  
-  // Then serialize
   const obj = serializeObject(plainUser)
   
   return {

@@ -1,4 +1,4 @@
-// lib/mobile/auth.ts
+// lib/mobile/auth.ts - COMPLETE
 import { auth } from '@clerk/nextjs/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import User from '@/lib/models/User'
@@ -25,7 +25,7 @@ export interface AuthResult {
   success: true
   user: AuthenticatedUser
   clerkId: string
-  isMobile: true
+  isMobile: boolean
 }
 
 export interface AuthError {
@@ -77,6 +77,36 @@ export async function requireUser(request: NextRequest): Promise<AuthResponse> {
       error: 'Authentication service error',
       status: 500,
     }
+  }
+}
+
+/**
+ * Authenticate mobile request without requiring user
+ * Returns user if authenticated, otherwise null
+ */
+export async function authenticateMobileRequest(request: NextRequest) {
+  try {
+    const { userId } = await auth()
+
+    if (!userId) {
+      return { success: false, user: null }
+    }
+
+    await connectToDatabase()
+
+    const dbUser = await User.findOne({ clerkId: userId })
+
+    if (!dbUser) {
+      return { success: false, user: null }
+    }
+
+    return {
+      success: true,
+      user: dbUser,
+    }
+  } catch (error) {
+    console.error('Authentication error:', error)
+    return { success: false, user: null }
   }
 }
 
@@ -153,5 +183,5 @@ export async function resolveUser(identifier: string) {
     return User.findById(identifier)
   }
   
-  return User.findOne({ username: identifier })
+  return User.findOne({ username: identifier})
 }
