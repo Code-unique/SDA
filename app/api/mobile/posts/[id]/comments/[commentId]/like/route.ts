@@ -1,24 +1,30 @@
 // app/api/mobile/posts/[id]/comments/[commentId]/like/route.ts
 import { NextRequest } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
-import User from '@/lib/models/User'
 import Post from '@/lib/models/Post'
-import { authenticateMobileRequest, mobileResponse, mobileError } from '@/lib/mobile-auth'
+import { requireUser } from '@/lib/mobile/auth'
+import { mobileSuccess, mobileError } from '@/lib/mobile/responses'
+import { isValidObjectId } from '@/lib/mobile/validation'
 import "@/lib/loadmodels"
 
+/**
+ * POST /api/mobile/posts/:id/comments/:commentId/like
+ * Like or unlike a comment
+ */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; commentId: string }> }
 ) {
-  try {
-    const auth = await authenticateMobileRequest(request)
-    if (!auth.success) {
-      return mobileError(auth.error || 'Unauthorized', auth.status || 401)
-    }
+  const authResult = await requireUser(request)
 
+  if (!authResult.success) {
+    return mobileError(authResult.error, authResult.status)
+  }
+
+  try {
     const { id: postId, commentId } = await params
-    
-    if (!postId || postId.length !== 24 || !commentId || commentId.length !== 24) {
+
+    if (!postId || !isValidObjectId(postId) || !commentId || !isValidObjectId(commentId)) {
       return mobileError('Valid IDs required', 400)
     }
 
@@ -34,23 +40,23 @@ export async function POST(
       return mobileError('Comment not found', 404)
     }
 
-    const userIdStr = auth.user._id.toString()
-    const isLiked = comment.likes.some((likeId: any) => likeId.toString() === userIdStr)
+    const userIdStr = authResult.user._id.toString()
+    const isLiked = comment.likes?.some((likeId: any) => likeId.toString() === userIdStr)
 
     if (isLiked) {
       comment.likes = comment.likes.filter((likeId: any) => likeId.toString() !== userIdStr)
     } else {
-      comment.likes.push(auth.user._id)
+      comment.likes.push(authResult.user._id)
     }
 
     await post.save()
 
-    return mobileResponse({
+    return mobileSuccess({
       liked: !isLiked,
       likesCount: comment.likes.length
     })
   } catch (error: any) {
-    console.error('Mobile comment like error:', error)
+    console.error('Comment like error:', error)
     return mobileError(error.message || 'Failed to toggle comment like', 500)
   }
 }

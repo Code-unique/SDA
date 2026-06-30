@@ -2,7 +2,10 @@
 import { NextRequest } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import Post from '@/lib/models/Post'
-import { authenticateMobileRequest, mobileResponse, mobileError } from '@/lib/mobile-auth'
+import { requireUser } from '@/lib/mobile/auth'
+import { mobileSuccess, mobileError } from '@/lib/mobile/responses'
+import { isValidObjectId } from '@/lib/mobile/validation'
+import { canEditPost } from '@/lib/mobile/permissions'
 import "@/lib/loadmodels"
 
 export async function GET(
@@ -11,8 +14,8 @@ export async function GET(
 ) {
   try {
     const { id } = await params
-    
-    if (!id || id.length !== 24) {
+
+    if (!id || !isValidObjectId(id)) {
       return mobileError('Valid post ID is required', 400)
     }
 
@@ -31,33 +34,72 @@ export async function GET(
     }
 
     // Increment view count
-    await Post.findByIdAndUpdate(id, { $inc: { views: 1 } })
+    Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec()
+
+    const authResult = await requireUser(request)
+    const currentUserId = authResult.success ? authResult.user._id.toString() : null
+
+    // Handle author safely
+    const author = post.author as any
 
     const postData = {
-      ...post,
       _id: post._id.toString(),
-      author: post.author ? {
-        ...post.author,
-        _id: (post.author as any)._id.toString()
+      author: author ? {
+        _id: author._id.toString(),
+        username: author.username || '',
+        firstName: author.firstName || '',
+        lastName: author.lastName || '',
+        avatar: author.avatar || '',
+        isVerified: author.isVerified || false,
+        isPro: author.isPro || false,
+        followersCount: author.followers?.length || 0,
+        followingCount: author.following?.length || 0,
+        bio: author.bio || '',
+        banner: author.banner || '',
       } : null,
-      likesCount: (post.likes as any[])?.length || 0,
-      commentsCount: (post.comments as any[])?.length || 0,
-      savesCount: (post.saves as any[])?.length || 0,
+      media: post.media || [],
+      caption: post.caption || '',
+      hashtags: post.hashtags || [],
+      likesCount: post.likes?.length || 0,
+      commentsCount: post.comments?.length || 0,
+      savesCount: post.saves?.length || 0,
+      createdAt: post.createdAt?.toISOString() || new Date().toISOString(),
+      updatedAt: post.updatedAt?.toISOString() || new Date().toISOString(),
+      containsVideo: post.containsVideo || false,
+      views: post.views || 0,
+      shares: post.shares || 0,
+      isEdited: post.isEdited || false,
+      isPublic: post.isPublic !== undefined ? post.isPublic : true,
+      isFeatured: post.isFeatured || false,
+      isSponsored: post.isSponsored || false,
+      engagement: post.engagement || 0,
       comments: (post.comments || []).map((c: any) => ({
-        ...c,
         _id: c._id.toString(),
         user: c.user ? {
-          ...c.user,
-          _id: c.user._id.toString()
+          _id: c.user._id.toString(),
+          username: c.user.username,
+          firstName: c.user.firstName,
+          lastName: c.user.lastName,
+          avatar: c.user.avatar,
+          isVerified: c.user.isVerified || false,
+          isPro: c.user.isPro || false,
         } : null,
+        text: c.text,
         likesCount: c.likes?.length || 0,
-        repliesCount: c.replies?.length || 0
-      }))
+        repliesCount: c.replies?.length || 0,
+        createdAt: c.createdAt?.toISOString() || new Date().toISOString(),
+        isEdited: c.isEdited || false,
+        isLiked: currentUserId ? c.likes?.some((l: any) => l.toString() === currentUserId) : false,
+        canEdit: currentUserId ? c.user?._id.toString() === currentUserId : false,
+      })),
+      isLiked: currentUserId ? post.likes?.some((l: any) => l.toString() === currentUserId) : false,
+      isSaved: currentUserId ? post.saves?.some((s: any) => s.toString() === currentUserId) : false,
+      canEdit: currentUserId ? author?._id.toString() === currentUserId : false,
     }
 
-    return mobileResponse(postData)
+    return mobileSuccess(postData)
   } catch (error: any) {
-    console.error('Mobile get post error:', error)
+    console.error('Get post error:', error)
     return mobileError(error.message || 'Failed to fetch post', 500)
   }
 }
@@ -66,15 +108,16 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const auth = await authenticateMobileRequest(request)
-    if (!auth.success) {
-      return mobileError(auth.error || 'Unauthorized', auth.status || 401)
-    }
+  const authResult = await requireUser(request)
 
+  if (!authResult.success) {
+    return mobileError(authResult.error, authResult.status)
+  }
+
+  try {
     const { id } = await params
-    
-    if (!id || id.length !== 24) {
+
+    if (!id || !isValidObjectId(id)) {
       return mobileError('Valid post ID is required', 400)
     }
 
@@ -85,7 +128,7 @@ export async function PATCH(
       return mobileError('Post not found', 404)
     }
 
-    if (post.author.toString() !== auth.user._id.toString()) {
+    if (!canEditPost(authResult.user._id, post)) {
       return mobileError('Not authorized to edit this post', 403)
     }
 
@@ -118,24 +161,34 @@ export async function PATCH(
     await post.save()
     await post.populate('author', 'username firstName lastName avatar isVerified isPro')
 
-    const postData = {
-      ...post.toObject(),
+    const author = post.author as any
+
+    return mobileSuccess({
       _id: post._id.toString(),
-      author: post.author ? {
-        ...(post.author as any).toObject(),
-        _id: (post.author as any)._id.toString()
+      author: author ? {
+        _id: author._id.toString(),
+        username: author.username,
+        firstName: author.firstName,
+        lastName: author.lastName,
+        avatar: author.avatar,
+        isVerified: author.isVerified || false,
+        isPro: author.isPro || false,
       } : null,
+      media: post.media || [],
+      caption: post.caption || '',
+      hashtags: post.hashtags || [],
       likesCount: post.likes?.length || 0,
       commentsCount: post.comments?.length || 0,
-      savesCount: post.saves?.length || 0
-    }
-
-    return mobileResponse({
-      ...postData,
-      message: 'Post updated successfully'
-    })
+      savesCount: post.saves?.length || 0,
+      createdAt: post.createdAt?.toISOString() || new Date().toISOString(),
+      updatedAt: post.updatedAt?.toISOString() || new Date().toISOString(),
+      containsVideo: post.containsVideo || false,
+      views: post.views || 0,
+      shares: post.shares || 0,
+      isEdited: post.isEdited || false,
+    }, 'Post updated successfully')
   } catch (error: any) {
-    console.error('Mobile update post error:', error)
+    console.error('Update post error:', error)
     return mobileError(error.message || 'Failed to update post', 500)
   }
 }
@@ -144,15 +197,16 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const auth = await authenticateMobileRequest(request)
-    if (!auth.success) {
-      return mobileError(auth.error || 'Unauthorized', auth.status || 401)
-    }
+  const authResult = await requireUser(request)
 
+  if (!authResult.success) {
+    return mobileError(authResult.error, authResult.status)
+  }
+
+  try {
     const { id } = await params
-    
-    if (!id || id.length !== 24) {
+
+    if (!id || !isValidObjectId(id)) {
       return mobileError('Valid post ID is required', 400)
     }
 
@@ -163,15 +217,15 @@ export async function DELETE(
       return mobileError('Post not found', 404)
     }
 
-    if (post.author.toString() !== auth.user._id.toString()) {
+    if (!canEditPost(authResult.user._id, post) && authResult.user.role !== 'admin') {
       return mobileError('Not authorized to delete this post', 403)
     }
 
     await Post.findByIdAndDelete(id)
 
-    return mobileResponse({ message: 'Post deleted successfully' })
+    return mobileSuccess({ deleted: true }, 'Post deleted successfully')
   } catch (error: any) {
-    console.error('Mobile delete post error:', error)
+    console.error('Delete post error:', error)
     return mobileError(error.message || 'Failed to delete post', 500)
   }
 }

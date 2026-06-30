@@ -1,24 +1,28 @@
 // app/api/mobile/posts/[id]/comments/[commentId]/route.ts
 import { NextRequest } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
-import User from '@/lib/models/User'
 import Post from '@/lib/models/Post'
-import { authenticateMobileRequest, mobileResponse, mobileError } from '@/lib/mobile-auth'
+import { requireUser } from '@/lib/mobile/auth'
+import { mobileSuccess, mobileError } from '@/lib/mobile/responses'
+import { isValidObjectId, commentSchema } from '@/lib/mobile/validation'
+import { canEditComment, canDeleteComment } from '@/lib/mobile/permissions'
+import { ZodError } from 'zod'
 import "@/lib/loadmodels"
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; commentId: string }> }
 ) {
-  try {
-    const auth = await authenticateMobileRequest(request)
-    if (!auth.success) {
-      return mobileError(auth.error || 'Unauthorized', auth.status || 401)
-    }
+  const authResult = await requireUser(request)
 
+  if (!authResult.success) {
+    return mobileError(authResult.error, authResult.status)
+  }
+
+  try {
     const { id: postId, commentId } = await params
-    
-    if (!postId || postId.length !== 24 || !commentId || commentId.length !== 24) {
+
+    if (!postId || !isValidObjectId(postId) || !commentId || !isValidObjectId(commentId)) {
       return mobileError('Valid IDs required', 400)
     }
 
@@ -34,19 +38,18 @@ export async function PATCH(
       return mobileError('Comment not found', 404)
     }
 
-    if (comment.user.toString() !== auth.user._id.toString()) {
+    if (!canEditComment(authResult.user._id, comment)) {
       return mobileError('Not authorized to edit this comment', 403)
     }
 
     const body = await request.json()
     const { text } = body
 
-    if (!text || typeof text !== 'string' || text.trim().length === 0) {
-      return mobileError('Comment text is required', 400)
-    }
-
-    if (text.length > 1000) {
-      return mobileError('Comment too long (max 1000 characters)', 400)
+    // Validate comment using Zod
+    const commentValidation = commentSchema.safeParse(text)
+    if (!commentValidation.success) {
+      const errorMessage = commentValidation.error.issues?.[0]?.message || 'Invalid comment'
+      return mobileError(errorMessage, 400)
     }
 
     comment.text = text.trim()
@@ -55,12 +58,14 @@ export async function PATCH(
 
     await post.save()
 
-    return mobileResponse({
-      success: true,
-      message: 'Comment updated successfully'
-    })
+    return mobileSuccess({
+      _id: comment._id.toString(),
+      text: comment.text,
+      isEdited: comment.isEdited,
+      updatedAt: comment.updatedAt.toISOString(),
+    }, 'Comment updated successfully')
   } catch (error: any) {
-    console.error('Mobile edit comment error:', error)
+    console.error('Edit comment error:', error)
     return mobileError(error.message || 'Failed to edit comment', 500)
   }
 }
@@ -69,15 +74,16 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; commentId: string }> }
 ) {
-  try {
-    const auth = await authenticateMobileRequest(request)
-    if (!auth.success) {
-      return mobileError(auth.error || 'Unauthorized', auth.status || 401)
-    }
+  const authResult = await requireUser(request)
 
+  if (!authResult.success) {
+    return mobileError(authResult.error, authResult.status)
+  }
+
+  try {
     const { id: postId, commentId } = await params
-    
-    if (!postId || postId.length !== 24 || !commentId || commentId.length !== 24) {
+
+    if (!postId || !isValidObjectId(postId) || !commentId || !isValidObjectId(commentId)) {
       return mobileError('Valid IDs required', 400)
     }
 
@@ -93,10 +99,12 @@ export async function DELETE(
       return mobileError('Comment not found', 404)
     }
 
-    const isCommentOwner = comment.user.toString() === auth.user._id.toString()
-    const isPostOwner = post.author.toString() === auth.user._id.toString()
-    
-    if (!isCommentOwner && !isPostOwner) {
+    if (!canDeleteComment(
+      authResult.user._id,
+      comment,
+      post.author,
+      authResult.user.role
+    )) {
       return mobileError('Not authorized to delete this comment', 403)
     }
 
@@ -115,7 +123,7 @@ export async function DELETE(
     }
 
     if (comment.parentComment) {
-      const parentComment = post.comments.find((c: any) => 
+      const parentComment = post.comments.find((c: any) =>
         c._id.toString() === comment.parentComment?.toString()
       )
       if (parentComment) {
@@ -123,17 +131,17 @@ export async function DELETE(
           (replyId: any) => replyId.toString() !== commentId
         )
       }
-      
+
       const allReplyIds = findAllReplies(commentId)
       const allCommentIds = [commentId, ...allReplyIds]
-      
+
       post.comments = post.comments.filter(
         (c: any) => !allCommentIds.includes(c._id.toString())
       )
     } else {
       const allReplyIds = findAllReplies(commentId)
       const allCommentIds = [commentId, ...allReplyIds]
-      
+
       post.comments = post.comments.filter(
         (c: any) => !allCommentIds.includes(c._id.toString())
       )
@@ -141,12 +149,9 @@ export async function DELETE(
 
     await post.save()
 
-    return mobileResponse({
-      success: true,
-      message: 'Comment deleted successfully'
-    })
+    return mobileSuccess({ deleted: true }, 'Comment deleted successfully')
   } catch (error: any) {
-    console.error('Mobile delete comment error:', error)
+    console.error('Delete comment error:', error)
     return mobileError(error.message || 'Failed to delete comment', 500)
   }
 }

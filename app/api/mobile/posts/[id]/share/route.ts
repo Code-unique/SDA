@@ -2,9 +2,15 @@
 import { NextRequest } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import Post from '@/lib/models/Post'
-import { authenticateMobileRequest, mobileResponse, mobileError } from '@/lib/mobile-auth'
+import { requireUser } from '@/lib/mobile/auth'
+import { mobileSuccess, mobileError } from '@/lib/mobile/responses'
+import { isValidObjectId } from '@/lib/mobile/validation'
 import "@/lib/loadmodels"
 
+/**
+ * POST /api/mobile/posts/:id/share
+ * Share a post (increment share count)
+ */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -12,7 +18,7 @@ export async function POST(
   try {
     const { id } = await params
 
-    if (!id || id.length !== 24) {
+    if (!id || !isValidObjectId(id)) {
       return mobileError('Valid post ID is required', 400)
     }
 
@@ -25,13 +31,13 @@ export async function POST(
 
     await Post.findByIdAndUpdate(id, { $inc: { shares: 1 } })
 
-    return mobileResponse({
+    return mobileSuccess({
       shared: true,
       postId: id,
       sharesCount: (post.shares || 0) + 1
     })
   } catch (error: any) {
-    console.error('Mobile share error:', error)
+    console.error('Share error:', error)
     return mobileError(error.message || 'Failed to record share', 500)
   }
 }

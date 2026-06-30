@@ -2,79 +2,99 @@
 import { NextRequest } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import User from '@/lib/models/User'
-import { authenticateMobileRequest, mobileResponse, mobileError } from '@/lib/mobile-auth'
+import { requireUser } from '@/lib/mobile/auth'
+import { mobileSuccess, mobileError, mobileValidationError, serializeUser } from '@/lib/mobile/responses'
+import { usernameSchema, bioSchema } from '@/lib/mobile/validation'
+import { ZodError } from 'zod'
 import "@/lib/loadmodels"
 
 export async function GET(request: NextRequest) {
-  try {
-    const auth = await authenticateMobileRequest(request)
-    if (!auth.success) {
-      return mobileError(auth.error || 'Unauthorized', auth.status || 401)
-    }
-    
-    // Refresh user data
-    const user = await User.findById(auth.user._id)
-      .select('username firstName lastName avatar banner bio location website role interests skills isVerified followers following createdAt')
-      .populate('followers', 'username firstName lastName avatar')
-      .populate('following', 'username firstName lastName avatar')
-    
-    if (!user) {
-      return mobileError('User not found', 404)
-    }
-    
-    return mobileResponse({
-      ...user.toObject(),
-      _id: user._id.toString(),
-      followers: user.followers?.map((f: any) => ({
-        ...f.toObject(),
-        _id: f._id.toString()
-      })) || [],
-      following: user.following?.map((f: any) => ({
-        ...f.toObject(),
-        _id: f._id.toString()
-      })) || []
-    })
-  } catch (error: any) {
-    console.error('Mobile user error:', error)
-    return mobileError('Failed to fetch user: ' + error.message, 500)
+  const authResult = await requireUser(request)
+
+  if (!authResult.success) {
+    return mobileError(authResult.error, authResult.status)
   }
+
+  const user = await User.findById(authResult.user._id)
+    .select('username firstName lastName avatar banner bio location website role interests skills isVerified followers following createdAt onboardingCompleted')
+    .populate('followers', 'username firstName lastName avatar')
+    .populate('following', 'username firstName lastName avatar')
+
+  if (!user) {
+    return mobileError('User not found', 404)
+  }
+
+  return mobileSuccess(serializeUser(user))
 }
 
 export async function PATCH(request: NextRequest) {
+  const authResult = await requireUser(request)
+
+  if (!authResult.success) {
+    return mobileError(authResult.error, authResult.status)
+  }
+
   try {
-    const auth = await authenticateMobileRequest(request)
-    if (!auth.success) {
-      return mobileError(auth.error || 'Unauthorized', auth.status || 401)
-    }
-    
     const body = await request.json()
-    const allowedFields = ['username', 'firstName', 'lastName', 'avatar', 'bio', 'location', 'website', 'interests', 'skills']
+
+    const allowedFields = [
+      'username', 'firstName', 'lastName', 'avatar', 'banner',
+      'bio', 'location', 'website', 'interests', 'skills',
+      'onboardingCompleted'
+    ]
+
     const updateData: any = {}
-    
+    const errors: Record<string, string[]> = {}
+
+    if (body.username !== undefined) {
+      const usernameValidation = usernameSchema.safeParse(body.username)
+      if (!usernameValidation.success) {
+        errors.username = usernameValidation.error.issues.map((e: any) => e.message)
+      } else {
+        const existing = await User.findOne({
+          username: body.username,
+          _id: { $ne: authResult.user._id }
+        })
+        if (existing) {
+          errors.username = ['Username is already taken']
+        } else {
+          updateData.username = body.username
+        }
+      }
+    }
+
+    if (body.bio !== undefined) {
+      const bioValidation = bioSchema.safeParse(body.bio)
+      if (!bioValidation.success) {
+        errors.bio = bioValidation.error.issues.map((e: any) => e.message)
+      } else {
+        updateData.bio = body.bio
+      }
+    }
+
+    if (Object.keys(errors).length > 0) {
+      return mobileValidationError(errors)
+    }
+
     for (const field of allowedFields) {
-      if (body[field] !== undefined) {
+      if (body[field] !== undefined && field !== 'username' && field !== 'bio') {
         updateData[field] = body[field]
       }
     }
-    
+
     const updated = await User.findByIdAndUpdate(
-      auth.user._id,
+      authResult.user._id,
       { $set: updateData },
       { new: true }
-    ).select('username firstName lastName avatar banner bio location website role interests skills isVerified followers following createdAt')
-    
+    ).select('username firstName lastName avatar banner bio location website role interests skills isVerified followers following createdAt onboardingCompleted')
+
     if (!updated) {
       return mobileError('User not found', 404)
     }
-    
-    return mobileResponse({
-      ...updated.toObject(),
-      _id: updated._id.toString(),
-      followers: updated.followers?.map((f: any) => f.toString()) || [],
-      following: updated.following?.map((f: any) => f.toString()) || []
-    })
+
+    return mobileSuccess(serializeUser(updated), 'Profile updated successfully')
   } catch (error: any) {
-    console.error('Mobile update error:', error)
-    return mobileError('Failed to update user: ' + error.message, 500)
+    console.error('Update user error:', error)
+    return mobileError(error.message || 'Failed to update user', 500)
   }
 }

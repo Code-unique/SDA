@@ -1,9 +1,11 @@
 // app/api/mobile/posts/[id]/comments/[commentId]/reply/route.ts
 import { NextRequest } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
-import User from '@/lib/models/User'
 import Post from '@/lib/models/Post'
-import { authenticateMobileRequest, mobileResponse, mobileError } from '@/lib/mobile-auth'
+import { requireUser } from '@/lib/mobile/auth'
+import { mobileSuccess, mobileError } from '@/lib/mobile/responses'
+import { isValidObjectId, replySchema } from '@/lib/mobile/validation'
+import { ZodError } from 'zod'
 import mongoose from 'mongoose'
 import "@/lib/loadmodels"
 
@@ -11,15 +13,16 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; commentId: string }> }
 ) {
-  try {
-    const auth = await authenticateMobileRequest(request)
-    if (!auth.success) {
-      return mobileError(auth.error || 'Unauthorized', auth.status || 401)
-    }
+  const authResult = await requireUser(request)
 
+  if (!authResult.success) {
+    return mobileError(authResult.error, authResult.status)
+  }
+
+  try {
     const { id: postId, commentId } = await params
-    
-    if (!postId || postId.length !== 24 || !commentId || commentId.length !== 24) {
+
+    if (!postId || !isValidObjectId(postId) || !commentId || !isValidObjectId(commentId)) {
       return mobileError('Valid IDs required', 400)
     }
 
@@ -38,17 +41,16 @@ export async function POST(
     const body = await request.json()
     const { text } = body
 
-    if (!text || typeof text !== 'string' || text.trim().length === 0) {
-      return mobileError('Reply text is required', 400)
-    }
-
-    if (text.length > 500) {
-      return mobileError('Reply too long (max 500 characters)', 400)
+    // Validate reply using Zod
+    const replyValidation = replySchema.safeParse(text)
+    if (!replyValidation.success) {
+      const errorMessage = replyValidation.error.issues?.[0]?.message || 'Invalid reply'
+      return mobileError(errorMessage, 400)
     }
 
     const reply = {
       _id: new mongoose.Types.ObjectId(),
-      user: auth.user._id,
+      user: authResult.user._id,
       text: text.trim(),
       likes: [],
       replies: [],
@@ -59,18 +61,30 @@ export async function POST(
     }
 
     post.comments.push(reply)
-
-    // Add to parent's replies array
     parentComment.replies.push(reply._id)
 
     await post.save()
 
-    return mobileResponse({
-      success: true,
-      message: 'Reply added successfully'
-    })
+    return mobileSuccess({
+      _id: reply._id.toString(),
+      user: {
+        _id: authResult.user._id.toString(),
+        username: authResult.user.username,
+        firstName: authResult.user.firstName,
+        lastName: authResult.user.lastName,
+        avatar: authResult.user.avatar,
+        isVerified: authResult.user.isVerified || false,
+        isPro: authResult.user.isPro || false,
+      },
+      text: reply.text,
+      likesCount: 0,
+      createdAt: reply.createdAt.toISOString(),
+      isEdited: false,
+      isLiked: false,
+      canEdit: true,
+    }, 'Reply added successfully')
   } catch (error: any) {
-    console.error('Mobile reply error:', error)
+    console.error('Reply error:', error)
     return mobileError(error.message || 'Failed to add reply', 500)
   }
 }

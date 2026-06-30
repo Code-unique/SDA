@@ -3,83 +3,77 @@ import { NextRequest } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import User from '@/lib/models/User'
 import Post from '@/lib/models/Post'
-import { authenticateMobileRequest, mobileResponse, mobileError } from '@/lib/mobile-auth'
+import { requireUser } from '@/lib/mobile/auth'
+import { mobileSuccess, mobileError, mobilePaginated } from '@/lib/mobile/responses'
+import { parsePagination } from '@/lib/mobile/validation'
 import "@/lib/loadmodels"
 
+/**
+ * GET /api/mobile/posts/feed
+ * Get feed posts from followed users
+ */
 export async function GET(request: NextRequest) {
+  const authResult = await requireUser(request)
+
+  if (!authResult.success) {
+    return mobileError(authResult.error, authResult.status)
+  }
+
   try {
-    const auth = await authenticateMobileRequest(request)
-    if (!auth.success) {
-      return mobileError(auth.error || 'Unauthorized', auth.status || 401)
-    }
+    const { searchParams } = new URL(request.url)
+    const { page, limit } = parsePagination(searchParams)
 
     await connectToDatabase()
 
-    const { searchParams } = new URL(request.url)
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
-    const limit = Math.max(1, Math.min(50, parseInt(searchParams.get('limit') || '10')))
-
-    const user = await User.findById(auth.user._id)
+    const user = await User.findById(authResult.user._id)
     if (!user) {
       return mobileError('User not found', 404)
     }
 
-    // If user has no following, return empty feed
     const feedUserIds = [...(user.following || []), user._id]
-    
-    if (feedUserIds.length === 0) {
-      return mobileResponse({
-        posts: [],
-        pagination: {
-          page,
-          limit,
-          total: 0,
-          pages: 0,
-          hasMore: false
-        }
-      })
-    }
 
     const [posts, total] = await Promise.all([
-      Post.find({ 
+      Post.find({
         author: { $in: feedUserIds },
-        isPublic: true 
+        isPublic: true
       })
-      .populate('author', 'username firstName lastName avatar isVerified isPro')
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit)
-      .lean(),
-      Post.countDocuments({ 
+        .populate('author', 'username firstName lastName avatar isVerified isPro')
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Post.countDocuments({
         author: { $in: feedUserIds },
-        isPublic: true 
+        isPublic: true
       })
     ])
 
     const transformedPosts = posts.map((post: any) => ({
-      ...post,
       _id: post._id.toString(),
       author: post.author ? {
-        ...post.author,
-        _id: post.author._id.toString()
+        _id: post.author._id.toString(),
+        username: post.author.username,
+        firstName: post.author.firstName,
+        lastName: post.author.lastName,
+        avatar: post.author.avatar,
+        isVerified: post.author.isVerified || false,
+        isPro: post.author.isPro || false,
       } : null,
+      media: post.media || [],
+      caption: post.caption || '',
+      hashtags: post.hashtags || [],
       likesCount: post.likes?.length || 0,
       commentsCount: post.comments?.length || 0,
-      savesCount: post.saves?.length || 0
+      savesCount: post.saves?.length || 0,
+      createdAt: post.createdAt?.toISOString() || new Date().toISOString(),
+      containsVideo: post.containsVideo || false,
+      views: post.views || 0,
+      shares: post.shares || 0,
     }))
 
-    return mobileResponse({
-      posts: transformedPosts,
-      pagination: {
-        page,
-        limit,
-        total,
-        pages: Math.ceil(total / limit),
-        hasMore: page < Math.ceil(total / limit)
-      }
-    })
+    return mobilePaginated(transformedPosts, { page, limit, total })
   } catch (error: any) {
-    console.error('Mobile feed error:', error)
+    console.error('Feed error:', error)
     return mobileError(error.message || 'Failed to fetch feed', 500)
   }
 }

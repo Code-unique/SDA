@@ -1,4 +1,4 @@
-// middleware.ts - FIXED VERSION
+// middleware.ts - COMPLETE FIXED VERSION
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
 
@@ -23,94 +23,172 @@ const isPublicRoute = createRouteMatcher([
   '/api/webhooks(.*)',
   '/api/placeholder(.*)',
   '/api/users/sync',
+  '/api/mobile/health(.*)', // Health check is public
 ])
+
+/**
+ * Security headers for all responses
+ */
+const securityHeaders = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'X-XSS-Protection': '1; mode=block',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
+}
+
+/**
+ * CORS headers for mobile API
+ */
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, idempotency-key',
+  'Access-Control-Allow-Credentials': 'true',
+}
+
+/**
+ * Apply security headers to response
+ */
+function applySecurityHeaders(response: NextResponse): NextResponse {
+  Object.entries(securityHeaders).forEach(([key, value]) => {
+    response.headers.set(key, value)
+  })
+  return response
+}
+
+/**
+ * Apply CORS headers to response
+ */
+function applyCorsHeaders(response: NextResponse): NextResponse {
+  Object.entries(corsHeaders).forEach(([key, value]) => {
+    response.headers.set(key, value)
+  })
+  return response
+}
 
 export default clerkMiddleware(async (auth, req) => {
   const { userId } = await auth()
-  
+  const pathname = req.nextUrl.pathname
+
   // Add security headers to all responses
   const requestHeaders = new Headers(req.headers)
   requestHeaders.set('X-DNS-Prefetch-Control', 'on')
   requestHeaders.set('X-XSS-Protection', '1; mode=block')
   requestHeaders.set('X-Frame-Options', 'SAMEORIGIN')
   requestHeaders.set('X-Content-Type-Options', 'nosniff')
-  
-  // Handle API routes
-  if (req.nextUrl.pathname.startsWith('/api')) {
-    // Public API routes
+
+  // ============================================================
+  // HANDLE MOBILE API ROUTES
+  // ============================================================
+  if (pathname.startsWith('/api/mobile')) {
+    // Handle OPTIONS preflight
+    if (req.method === 'OPTIONS') {
+      const response = new NextResponse(null, { status: 204 })
+      applyCorsHeaders(response)
+      applySecurityHeaders(response)
+      return response
+    }
+
+    // For mobile routes, we use Clerk authentication via bearer token
+    // The routes themselves handle auth via requireUser()
+    const response = NextResponse.next({
+      request: {
+        headers: requestHeaders,
+      },
+    })
+
+    applyCorsHeaders(response)
+    applySecurityHeaders(response)
+    return response
+  }
+
+  // ============================================================
+  // HANDLE API ROUTES (non-mobile)
+  // ============================================================
+  if (pathname.startsWith('/api')) {
+    // Public API routes (no auth required)
     if (isPublicRoute(req)) {
-      return NextResponse.next({
+      const response = NextResponse.next({
         request: {
           headers: requestHeaders,
         },
       })
+      applySecurityHeaders(response)
+      return response
     }
-    
-    // Protected API routes require auth
+
+    // Protected API routes require Clerk auth
     if (isProtectedRoute(req) && !userId) {
       return new NextResponse(
-        JSON.stringify({ error: 'Unauthorized' }),
-        { 
+        JSON.stringify({ 
+          error: 'Unauthorized',
+          code: 'AUTH_REQUIRED',
+          message: 'Authentication required for this endpoint'
+        }),
+        {
           status: 401,
           headers: {
             'Content-Type': 'application/json',
             ...Object.fromEntries(requestHeaders),
-          }
+          },
         }
       )
     }
-    // middleware.ts - Add this to your existing file
 
-// Add CORS headers for mobile routes
-if (req.nextUrl.pathname.startsWith('/api/mobile')) {
-  const response = NextResponse.next()
-  
-  response.headers.set('Access-Control-Allow-Origin', '*')
-  response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
-  response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, x-user-id')
-  
-  if (req.method === 'OPTIONS') {
-    return new NextResponse(null, { 
-      status: 204, 
-      headers: response.headers 
-    })
-  }
-  
-  return response
-}
-    
     // Admin API routes - authorization checked in route handlers
-    if (req.nextUrl.pathname.startsWith('/api/admin')) {
-      return NextResponse.next({
+    if (pathname.startsWith('/api/admin')) {
+      const response = NextResponse.next({
         request: {
           headers: requestHeaders,
         },
       })
+      applySecurityHeaders(response)
+      return response
     }
+
+    // Default API response
+    const response = NextResponse.next({
+      request: {
+        headers: requestHeaders,
+      },
+    })
+    applySecurityHeaders(response)
+    return response
   }
-  
-  // Handle protected pages
+
+  // ============================================================
+  // HANDLE PROTECTED PAGES
+  // ============================================================
   if (isProtectedRoute(req) && !userId) {
     const signInUrl = new URL('/sign-in', req.url)
     signInUrl.searchParams.set('redirect_url', req.url)
     return NextResponse.redirect(signInUrl)
   }
-  
-  // Handle public pages
+
+  // ============================================================
+  // HANDLE PUBLIC PAGES
+  // ============================================================
   if (isPublicRoute(req)) {
-    return NextResponse.next({
+    const response = NextResponse.next({
       request: {
         headers: requestHeaders,
       },
     })
+    applySecurityHeaders(response)
+    return response
   }
-  
-  // Default: allow access
-  return NextResponse.next({
+
+  // ============================================================
+  // DEFAULT: ALLOW ACCESS
+  // ============================================================
+  const response = NextResponse.next({
     request: {
       headers: requestHeaders,
     },
   })
+  applySecurityHeaders(response)
+  return response
 })
 
 export const config = {

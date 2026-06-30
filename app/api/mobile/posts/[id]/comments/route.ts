@@ -1,82 +1,13 @@
 // app/api/mobile/posts/[id]/comments/route.ts
 import { NextRequest } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
-import User from '@/lib/models/User'
 import Post from '@/lib/models/Post'
-import { authenticateMobileRequest, mobileResponse, mobileError } from '@/lib/mobile-auth'
+import { requireUser } from '@/lib/mobile/auth'
+import { mobileSuccess, mobileError, mobilePaginated, serializeComment } from '@/lib/mobile/responses'
+import { isValidObjectId, commentSchema, parsePagination } from '@/lib/mobile/validation'
+import { ZodError } from 'zod'
 import mongoose from 'mongoose'
 import "@/lib/loadmodels"
-
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const auth = await authenticateMobileRequest(request)
-    if (!auth.success) {
-      return mobileError(auth.error || 'Unauthorized', auth.status || 401)
-    }
-
-    const { id } = await params
-    
-    if (!id || id.length !== 24) {
-      return mobileError('Valid post ID is required', 400)
-    }
-
-    await connectToDatabase()
-
-    const post = await Post.findById(id).populate('author')
-    if (!post) {
-      return mobileError('Post not found', 404)
-    }
-
-    const body = await request.json()
-    const { text } = body
-
-    if (!text || typeof text !== 'string' || text.trim().length === 0) {
-      return mobileError('Comment text is required', 400)
-    }
-
-    if (text.length > 1000) {
-      return mobileError('Comment too long (max 1000 characters)', 400)
-    }
-
-    const comment = {
-      _id: new mongoose.Types.ObjectId(),
-      user: auth.user._id,
-      text: text.substring(0, 1000),
-      likes: [],
-      replies: [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      isEdited: false
-    }
-
-    post.comments.push(comment)
-    await post.save()
-
-    await post.populate('comments.user', 'username firstName lastName avatar isVerified isPro')
-
-    const comments = post.comments.map((c: any) => ({
-      ...c.toObject(),
-      _id: c._id.toString(),
-      user: c.user ? {
-        ...c.user.toObject(),
-        _id: c.user._id.toString()
-      } : null,
-      likesCount: c.likes?.length || 0,
-      repliesCount: c.replies?.length || 0
-    }))
-
-    return mobileResponse({
-      comments,
-      totalComments: comments.length
-    })
-  } catch (error: any) {
-    console.error('Mobile add comment error:', error)
-    return mobileError(error.message || 'Failed to add comment', 500)
-  }
-}
 
 export async function GET(
   request: NextRequest,
@@ -84,38 +15,124 @@ export async function GET(
 ) {
   try {
     const { id } = await params
-    
-    if (!id || id.length !== 24) {
+    const { searchParams } = new URL(request.url)
+    const { page, limit } = parsePagination(searchParams)
+
+    if (!id || !isValidObjectId(id)) {
       return mobileError('Valid post ID is required', 400)
     }
 
     await connectToDatabase()
 
     const post = await Post.findById(id)
-      .populate('comments.user', 'username firstName lastName avatar isVerified isPro')
       .select('comments')
+      .populate('comments.user', 'username firstName lastName avatar isVerified isPro')
+      .lean()
 
     if (!post) {
       return mobileError('Post not found', 404)
     }
 
-    const comments = post.comments.map((c: any) => ({
-      ...c.toObject(),
-      _id: c._id.toString(),
-      user: c.user ? {
-        ...c.user.toObject(),
-        _id: c.user._id.toString()
-      } : null,
-      likesCount: c.likes?.length || 0,
-      repliesCount: c.replies?.length || 0
-    }))
+    const authResult = await requireUser(request)
+    const currentUserId = authResult.success ? authResult.user._id.toString() : undefined
 
-    return mobileResponse({
-      comments,
-      totalComments: comments.length
+    const allComments = post.comments || []
+    const topLevelComments = allComments.filter((c: any) => !c.parentComment)
+
+    const paginatedComments = topLevelComments
+      .slice((page - 1) * limit, page * limit)
+      .map((c: any) => {
+        const replies = allComments
+          .filter((r: any) => r.parentComment && r.parentComment.toString() === c._id.toString())
+          .map((r: any) => serializeComment(r, currentUserId))
+          .slice(0, 3)
+
+        return {
+          ...serializeComment(c, currentUserId),
+          replies,
+        }
+      })
+
+    return mobilePaginated(paginatedComments, {
+      page,
+      limit,
+      total: topLevelComments.length
     })
   } catch (error: any) {
-    console.error('Mobile get comments error:', error)
+    console.error('Get comments error:', error)
     return mobileError(error.message || 'Failed to fetch comments', 500)
+  }
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const authResult = await requireUser(request)
+
+  if (!authResult.success) {
+    return mobileError(authResult.error, authResult.status)
+  }
+
+  try {
+    const { id } = await params
+
+    if (!id || !isValidObjectId(id)) {
+      return mobileError('Valid post ID is required', 400)
+    }
+
+    await connectToDatabase()
+
+    const body = await request.json()
+    const { text } = body
+
+    // Validate comment using Zod
+    const commentValidation = commentSchema.safeParse(text)
+    if (!commentValidation.success) {
+      const errorMessage = commentValidation.error.issues?.[0]?.message || 'Invalid comment'
+      return mobileError(errorMessage, 400)
+    }
+
+    const session = await Post.startSession()
+    session.startTransaction()
+
+    try {
+      const post = await Post.findById(id).session(session)
+      if (!post) {
+        await session.abortTransaction()
+        return mobileError('Post not found', 404)
+      }
+
+      const comment = {
+        _id: new mongoose.Types.ObjectId(),
+        user: authResult.user._id,
+        text: text.substring(0, 1000),
+        likes: [],
+        replies: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        isEdited: false
+      }
+
+      post.comments.push(comment)
+      await post.save({ session })
+      await session.commitTransaction()
+
+      await post.populate('comments.user', 'username firstName lastName avatar isVerified isPro')
+
+      const newComment = post.comments.find((c: any) => c._id.toString() === comment._id.toString())
+
+      return mobileSuccess({
+        ...serializeComment(newComment, authResult.user._id.toString()),
+      }, 'Comment added successfully')
+    } catch (error) {
+      await session.abortTransaction()
+      throw error
+    } finally {
+      session.endSession()
+    }
+  } catch (error: any) {
+    console.error('Add comment error:', error)
+    return mobileError(error.message || 'Failed to add comment', 500)
   }
 }
